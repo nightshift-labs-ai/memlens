@@ -4,14 +4,20 @@ The ELF holds the virtual memory of the kernel image and of loaded modules, at t
 (KASLR-adjusted) addresses, with a full symbol table. Disassemblers open it with no custom loader.
 """
 import bisect
+import io
 import logging
+import os
 import struct
+import sys
 from typing import Iterator, List, Tuple
 
 from volatility3.framework import exceptions, interfaces, renderers
 from volatility3.framework.configuration import requirements
 from volatility3.framework.renderers import format_hints
 from volatility3.plugins.linux import lsmod
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+import patchscan  # noqa: E402  (lives in the plugin's root folder)
 
 vollog = logging.getLogger(__name__)
 
@@ -194,9 +200,24 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
                     vollog.info("symbols of %s are partly unreadable", name)
                 yield (0, ("module", name, format_hints.Hex(base), symbols if written else 0))
 
+        for target in self._hook_targets(elf):
+            copied = self._add_range(elf, layer, target & ~(PAGE - 1), (target & ~(PAGE - 1)) + 2 * PAGE, ".hook.%x" % target, SHF_ALLOC | SHF_EXEC)
+            if copied:
+                elf.add_symbol("%s%x" % (patchscan.TARGET_PREFIX, target), target, 0, STT_FUNC)
+                yield (0, ("hook target", "memlens_target", format_hints.Hex(target), copied))
+
         with self.open("kernel.elf") as handle:
             elf.write(handle)
             yield (0, ("written", handle.preferred_filename, format_hints.Hex(0), len(elf.symbols)))
+
+    @staticmethod
+    def _hook_targets(elf) -> List[int]:
+        """Addresses that patched entries lead to, in memory the image of the kernel does not cover."""
+        draft = io.BytesIO()
+        elf.write(draft)
+        image = patchscan.Image(draft.getvalue())
+        wanted = {target for _, _, _, _, target in patchscan.scan_functions(image) + patchscan.scan_syscalls(image) if target}
+        return sorted(target for target in wanted if not image.segment(target))
 
     def run(self):
         return renderers.TreeGrid(

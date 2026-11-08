@@ -12,6 +12,11 @@ kw.attach_action_to_menu = lambda m, a, f: calls.append(("menu", m, a)) or True
 kw.unregister_action = lambda a: calls.append(("unreg", a)) or True
 kw.msg = lambda s: calls.append(("msg", s)); kw.info = kw.warning = lambda s: calls.append(("ui", s))
 kw.show_wait_box = kw.replace_wait_box = lambda s: None; kw.hide_wait_box = lambda: None; kw.user_cancelled = lambda: False
+class chooser:
+    CHCOL_EA = 1 << 24; NOTHING_CHANGED = 0
+    def __init__(self, title, cols): self.title = title
+    def Show(self): calls.append(("show", self.title))
+kw.Choose = chooser; kw.jumpto = lambda ea: calls.append(("jump", ea))
 ti = types.ModuleType("ida_typeinf"); ti.get_idati = lambda: "til"
 class tinfo:
     size = 0
@@ -27,7 +32,9 @@ idc.parse_decls = parse
 idc.BADADDR = -1
 idc.get_name_ea_simple = lambda n: 0x1000 if n == "demo_var" else idc.BADADDR
 idc.SetType = lambda ea, d: calls.append(("settype", ea, d)) or True
-sys.modules.update(ida_kernwin=kw, ida_idaapi=api, ida_typeinf=ti, idc=idc)
+nalt = types.ModuleType("ida_nalt"); nalt.get_input_file_path = lambda: ""
+idc.set_cmt = lambda ea, c, r: calls.append(("cmt", ea, c))
+sys.modules.update(ida_kernwin=kw, ida_idaapi=api, ida_typeinf=ti, ida_nalt=nalt, idc=idc)
 import memlens_entry as m
 isf = {"base_types": {"unsigned int": {"size": 4, "signed": False, "kind": "int"}},
        "enums": {}, "symbols": {"demo_var": {"address": 1, "type": {"kind": "struct", "name": "demo"}}, "absent": {"address": 2, "type": {"kind": "struct", "name": "demo"}}, "fn": {"address": 3, "type": {"kind": "base", "name": "void"}}}, "user_types": {"demo": {"kind": "struct", "size": 8, "fields": {"a": {"offset": 4, "type": {"kind": "base", "name": "unsigned int"}}, "private": {"offset": 0, "type": {"kind": "base", "name": "unsigned int"}}}}, "shrunk": {"kind": "struct", "size": 4, "fields": {"a": {"offset": 0, "type": {"kind": "base", "name": "unsigned int"}}}}, "gone": {"kind": "struct", "size": 4, "fields": {"a": {"offset": 0, "type": {"kind": "base", "name": "unsigned int"}}}}}}
@@ -44,7 +51,7 @@ with tempfile.TemporaryDirectory() as t:
     assert "differing from the ISF: 1" in m.report(result)
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; m.apply_types(p)
     assert [c for c in calls if c[0] == "settype"] == [("settype", 0x1000, "struct demo demo_var;")], calls
-    assert sum(c[0] == "reg" for c in calls) == 2 and sum(c[0] == "menu" for c in calls) == 2
+    assert sum(c[0] == "reg" for c in calls) == 3 and sum(c[0] == "menu" for c in calls) == 3
     cmd = m.export_command("/bin/vol", "/x/m.lime", "/out", "/sym")
     assert cmd[-1] == "linux.kernel2elf.Kernel2Elf" and "/x/m.lime" in cmd and "/sym" in cmd
     decls = ["a;", "BADTOKEN;", "b;", "c;", "BADTOKEN2;"]
@@ -53,7 +60,11 @@ with tempfile.TemporaryDirectory() as t:
     assert sum("c;" in t.split() for t in seen) >= 1
     with tempfile.TemporaryDirectory() as f:
         assert os.path.isfile(os.path.join(m.symbols_folder(p, f), "linux", "x.json"))
-    code, err = m.run_cancellable([sys.executable, "-c", "import sys; sys.stderr.write('boom'); sys.exit(3)"])
-    assert code == 3 and err == b"boom", (code, err)
-    plugin.term(); assert sum(c[0] == "unreg" for c in calls) == 2
+    code, out, err = m.run_cancellable([sys.executable, "-c", "import sys; print('written\\tkernel-1.elf\\t0x0\\t5'); sys.stderr.write('boom'); sys.exit(3)"])
+    assert code == 3 and err == b"boom" and m.written_file(out) == "kernel-1.elf", (code, out, err)
+    assert m.written_file(b"") == "kernel.elf"
+    table = m.PatchList([(0x10, "fn", "what", "tgt", 0x20)])
+    assert table.OnGetSize() == 1 and table.OnGetLine(0) == ["0x10", "fn", "what", "tgt"]
+    assert table.OnSelectLine(0) == (0,) and ("jump", 0x10) in calls
+    plugin.term(); assert sum(c[0] == "unreg" for c in calls) == 3
 print("stub test OK (fake IDA modules)")

@@ -3,6 +3,7 @@
 Two actions under Edit > Plugins:
   * Export kernel from memory image: runs Volatility 3 and writes a symbolled ELF to open in IDA.
   * Apply kernel types from ISF: imports every struct, union and enum of that kernel.
+  * Show patched kernel functions: lists hooked entries and odd syscall slots, Enter jumps there.
 """
 import os
 import shutil
@@ -13,6 +14,7 @@ import time
 
 import ida_idaapi
 import ida_kernwin
+import ida_nalt
 import ida_typeinf
 import idc
 
@@ -21,6 +23,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import isf2c  # noqa: E402  (needs the plugin folder on sys.path)
+import patchscan  # noqa: E402
 
 
 def parse_batch(text):
@@ -95,18 +98,28 @@ def symbols_folder(isf_path, parent):
     return parent
 
 
+def written_file(stdout):
+    """The file Volatility really wrote: if kernel.elf exists it picks a new name."""
+    for line in stdout.decode("utf-8", "replace").splitlines():
+        cells = line.split("\t")
+        if len(cells) > 1 and cells[0].strip() == "written":
+            return cells[1].strip()
+    return "kernel.elf"
+
+
 def run_cancellable(command):
-    """Run without freezing IDA. Returns (exit code, stderr); exit code None means cancelled."""
-    with tempfile.TemporaryFile() as errors:
-        process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=errors)
+    """Run without freezing IDA. Returns (exit code, stdout, stderr); exit code None means cancelled."""
+    with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
+        process = subprocess.Popen(command, stdout=output, stderr=errors)
         while process.poll() is None:
             if ida_kernwin.user_cancelled():
                 process.kill()
                 process.wait()
-                return None, b""
+                return None, b"", b""
             time.sleep(0.2)
+        output.seek(0)
         errors.seek(0)
-        return process.returncode, errors.read()
+        return process.returncode, output.read(), errors.read()
 
 
 class ApplyTypes(ida_kernwin.action_handler_t):
@@ -140,7 +153,7 @@ class ExportKernel(ida_kernwin.action_handler_t):
             symbols = symbols_folder(isf, folder) if isf else None
             ida_kernwin.show_wait_box("MemLens: Volatility is scanning the image, this can take minutes")
             try:
-                code, stderr = run_cancellable(export_command(vol, image, output, symbols))
+                code, stdout, stderr = run_cancellable(export_command(vol, image, output, symbols))
             finally:
                 ida_kernwin.hide_wait_box()
         if code is None:
@@ -148,7 +161,53 @@ class ExportKernel(ida_kernwin.action_handler_t):
         if code:
             ida_kernwin.warning("Volatility failed:\n" + stderr[-1500:].decode("utf-8", "replace"))
             return 0
-        ida_kernwin.info("Wrote kernel.elf in %s. Open it in IDA, then use Apply kernel types." % output)
+        ida_kernwin.info("Wrote %s in %s. Open it in IDA, then use Apply kernel types." % (written_file(stdout), output))
+        return 1
+
+    def update(self, ctx):
+        return ida_kernwin.AST_ENABLE_ALWAYS
+
+
+class PatchList(ida_kernwin.Choose):
+    """Patched entries and odd syscall slots; Enter jumps to one."""
+
+    def __init__(self, findings):
+        columns = [["Address", 18 | ida_kernwin.Choose.CHCOL_EA], ["Where", 34], ["What", 34], ["Target", 40]]
+        ida_kernwin.Choose.__init__(self, "MemLens: patched kernel functions", columns)
+        self.findings = findings
+
+    def OnGetSize(self):
+        return len(self.findings)
+
+    def OnGetLine(self, n):
+        address, name, what, target, _ = self.findings[n]
+        return ["%#x" % address, name, what, target]
+
+    def OnSelectLine(self, n):
+        ida_kernwin.jumpto(self.findings[n][0])
+        return (ida_kernwin.Choose.NOTHING_CHANGED,)
+
+
+def scan_current_input():
+    """Findings for the ELF open in IDA, which is plain data: the database is only annotated."""
+    path = ida_nalt.get_input_file_path()
+    if not path or not os.path.isfile(path):
+        path = ida_kernwin.ask_file(False, "*.elf", "kernel.elf exported by MemLens")
+        if not path:
+            return None
+    with open(path, "rb") as handle:
+        return patchscan.scan(handle.read())
+
+
+class FindPatches(ida_kernwin.action_handler_t):
+    def activate(self, ctx):
+        findings = scan_current_input()
+        if findings is None:
+            return 0
+        for address, _, what, target, _ in findings:
+            idc.set_cmt(address, "MemLens: %s %s" % (what, target), 0)
+        ida_kernwin.msg("[MemLens] %d patched entries or odd syscall slots\n" % len(findings))
+        PatchList(findings).Show()
         return 1
 
     def update(self, ctx):
@@ -158,6 +217,7 @@ class ExportKernel(ida_kernwin.action_handler_t):
 ACTIONS = [
     ("memlens:export", "MemLens: Export kernel from memory image", ExportKernel),
     ("memlens:types", "MemLens: Apply kernel types from ISF", ApplyTypes),
+    ("memlens:patches", "MemLens: Show patched kernel functions", FindPatches),
 ]
 
 

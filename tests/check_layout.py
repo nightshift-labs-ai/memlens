@@ -18,8 +18,6 @@ def main(path):
         for fname, field in info["fields"].items():
             typ = field["type"]
             label = isf2c.ident(fname)
-            if label in isf2c.RESERVED:
-                label += "_"
             if typ.get("kind") == "bitfield" or gen.size_of(typ) == 0:
                 continue
             if fname not in gen.emitted.get(id(info), ()):
@@ -40,6 +38,13 @@ def main(path):
     print("members dropped:", len(gen.dropped), "of which with size > 0:", real)
     print("gcc exit", res.returncode)
     print(res.stderr[:3000])
-    return res.returncode
+    # IDA's parser knows C++ keywords, so the header must also be valid when read as C++.
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, "t.cpp")
+        open(src, "w").write(header)
+        cpp = subprocess.run(["g++", "-fsyntax-only", "-w", "-fmax-errors=25", src], capture_output=True, text=True)
+    print("g++ exit", cpp.returncode)
+    print(cpp.stderr[:3000])
+    return res.returncode or cpp.returncode
 
 sys.exit(main(sys.argv[1]))

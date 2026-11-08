@@ -9,24 +9,39 @@ import shutil
 import subprocess
 import tempfile
 
+import sys
+
 import ida_idaapi
 import ida_kernwin
 import idc
 
-import isf2c
-
 HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+
+import isf2c  # noqa: E402  (needs the plugin folder on sys.path)
 
 
 def apply_types(isf_path):
-    """Generate a header from the ISF and import it. Returns the parser's error count."""
-    generator = isf2c.Generator(isf2c.load_isf(isf_path))
+    """Import the ISF's types, then type the kernel globals. Returns (parser errors, stats)."""
+    isf = isf2c.load_isf(isf_path)
+    generator = isf2c.Generator(isf)
     with tempfile.TemporaryDirectory() as folder:
         header = os.path.join(folder, "kernel_types.h")
         with open(header, "w", encoding="utf-8") as handle:
             handle.write(generator.generate())
         errors = idc.parse_decls(header, idc.PT_FILE)
-    return errors, generator.stats
+    typed = failed = 0
+    for name, declaration in isf2c.global_decls(generator, isf):
+        address = idc.get_name_ea_simple(name)
+        if address == idc.BADADDR:
+            continue
+        if idc.SetType(address, declaration + ";"):
+            typed += 1
+        else:
+            failed += 1
+    stats = dict(generator.stats, globals_typed=typed, globals_failed=failed)
+    return errors, stats
 
 
 def export_command(vol, image, output, symbols=None):

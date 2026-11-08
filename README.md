@@ -6,6 +6,7 @@ A memory image holds the live kernel: its modules, its patched code, and anythin
 
 - **`kernel.elf`**: the kernel image and every loaded module, at their real KASLR-adjusted addresses, with a full symbol table (module symbols appear as `nf_tables.nft_do_chain`). It is an ordinary ELF, so IDA opens it with no custom loader.
 - **Every kernel type**: all structs, unions and enums from a Volatility 3 ISF, generated as one C header with exact layouts.
+- **Typed globals**: kernel data symbols get their real type, so `init_task` opens as a `struct task_struct`.
 
 ## Status: read this first
 
@@ -48,14 +49,14 @@ Memory images were captured from QEMU guests; addresses differ per boot because 
 
 Checked with binutils only, independently of this code (`tests/check_elf.sh`): canonical addresses in every segment, `linux_banner` reads back the true kernel version, and `__x64_sys_read`, `nf_hook_slow` and `nft_do_chain` disassemble to real function prologues.
 
-Types are checked by compiling the generated header with gcc and asserting every struct size and member offset against the ISF (`tests/check_layout.py`):
+Types are checked by compiling the generated header with gcc, asserting every struct size and member offset against the ISF, and compiling a declaration for every typed global (`tests/check_layout.py`):
 
-| Kernel | Assertions | Result |
-|---|---|---|
-| Debian 12, 6.1.0-54 | 59,662 | all pass |
-| Debian 13, 6.12.115 | 67,392 | all pass |
-| Ubuntu 24.04, 6.8.0-147 | 81,563 | all pass |
-| Ubuntu 26.04, 7.0.0-38 | 89,321 | all pass |
+| Kernel | Layout assertions | Typed globals | Result |
+|---|---|---|---|
+| Debian 12, 6.1.0-54 | 59,662 | 62,355 | all pass |
+| Debian 13, 6.12.115 | 67,392 | 79,334 | all pass |
+| Ubuntu 24.04, 6.8.0-147 | 81,563 | 86,381 | all pass |
+| Ubuntu 26.04, 7.0.0-38 | 89,321 | 123,369 | all pass |
 
 gcc accepting the header does not prove IDA's parser will; that is part of the untested layer.
 

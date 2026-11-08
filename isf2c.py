@@ -30,7 +30,7 @@ RESERVED = {
     "auto", "break", "case", "char", "const", "continue", "default", "do", "double", "else", "enum",
     "extern", "float", "for", "goto", "if", "inline", "int", "long", "register", "restrict", "return",
     "short", "signed", "sizeof", "static", "struct", "switch", "typedef", "union", "unsigned", "void",
-    "volatile", "while", "_Bool",
+    "volatile", "while", "_Bool", "__func__", "__FUNCTION__", "__PRETTY_FUNCTION__",
 }
 
 
@@ -116,6 +116,19 @@ class Generator:
                 return "void " + name if name.startswith("*") else "unsigned char " + name + "[0]"
             return "%s %s %s" % (self.user[typ["name"]].get("kind", kind), ident(typ["name"]), name)
         return "unsigned char " + name
+
+    def typed(self, typ):
+        """True when `typ` is concrete enough to be worth applying to a global."""
+        kind = typ.get("kind")
+        if kind == "base":
+            return self.base_c(typ["name"]) != "void"
+        if kind == "pointer":
+            return True
+        if kind in ("struct", "union"):
+            return typ["name"] in self.done
+        if kind == "array":
+            return typ.get("count", 0) > 0 and self.size_of(typ) > 0 and self.typed(typ["subtype"])
+        return kind == "enum"
 
     def deps(self, typ):
         """Types that must be complete before a member of type `typ`."""
@@ -262,6 +275,17 @@ class Generator:
             if name in self.done:
                 head.append("%s %s;" % (self.user[name].get("kind", "struct"), ident(name)))
         return "\n".join(head) + "\n\n" + "\n".join(self.body) + "\n#pragma pack(pop)\n"
+
+
+def global_decls(generator, isf):
+    """C declarations for typed kernel globals: (symbol name, "struct task_struct init_task")."""
+    decls = []
+    for name, symbol in sorted(isf.get("symbols", {}).items()):
+        typ = symbol.get("type")
+        if not typ or ident(name) != name or name in RESERVED or not generator.typed(typ):
+            continue
+        decls.append((name, generator.declarator(typ, name)))
+    return decls
 
 
 def main(argv=None):

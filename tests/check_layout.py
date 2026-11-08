@@ -26,9 +26,13 @@ def main(path):
                 continue
             checks.append("_Static_assert(__builtin_offsetof(%s,%s)==%d,\"off %s.%s\");" % (tag, label, field.get("offset", 0), name, fname))
             members += 1
+    isf = isf2c.load_isf(path)
+    decls = isf2c.global_decls(gen, isf)
+    print("typed globals:", len(decls))
+    scope = "void __check_globals(void) {\n" + "\n".join("extern %s;" % d for _, d in decls) + "\n}\n"
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "t.c")
-        open(src, "w").write(header + "\n" + "\n".join(checks) + "\n")
+        open(src, "w").write(header + "\n" + "\n".join(checks) + "\n" + scope)
         res = subprocess.run(["gcc", "-fsyntax-only", "-w", "-fmax-errors=25", src], capture_output=True, text=True)
     print(gen.stats, "size+offset asserts:", len(checks), "member offsets:", members, "header bytes:", len(header))
     real = sum(1 for n, i in gen.user.items() if i.get("kind") != "union" and i.get("size") for k, f in i.get("fields", {}).items()

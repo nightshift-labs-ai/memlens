@@ -16,10 +16,13 @@ idc = types.ModuleType("idc"); idc.PT_FILE = 1
 def parse(path, flags):
     calls.append(("parse", open(path).read(), flags)); return 0
 idc.parse_decls = parse
+idc.BADADDR = -1
+idc.get_name_ea_simple = lambda n: 0x1000 if n == "demo_var" else idc.BADADDR
+idc.SetType = lambda ea, d: calls.append(("settype", ea, d)) or True
 sys.modules.update(ida_kernwin=kw, ida_idaapi=api, idc=idc)
 import memlens_entry as m
 isf = {"base_types": {"unsigned int": {"size": 4, "signed": False, "kind": "int"}},
-       "enums": {}, "user_types": {"demo": {"kind": "struct", "size": 8, "fields": {"a": {"offset": 4, "type": {"kind": "base", "name": "unsigned int"}}}}}}
+       "enums": {}, "symbols": {"demo_var": {"address": 1, "type": {"kind": "struct", "name": "demo"}}, "absent": {"address": 2, "type": {"kind": "struct", "name": "demo"}}, "fn": {"address": 3, "type": {"kind": "base", "name": "void"}}}, "user_types": {"demo": {"kind": "struct", "size": 8, "fields": {"a": {"offset": 4, "type": {"kind": "base", "name": "unsigned int"}}}}}}
 with tempfile.TemporaryDirectory() as t:
     p = os.path.join(t, "x.json"); json.dump(isf, open(p, "w"))
     kw.ask_file = lambda *a: p
@@ -27,6 +30,7 @@ with tempfile.TemporaryDirectory() as t:
     assert m.ApplyTypes().activate(None) == 1
     parsed = [c for c in calls if c[0] == "parse"][0]
     assert parsed[2] == idc.PT_FILE and "struct demo" in parsed[1] and "__pad_0[4]" in parsed[1], parsed[1]
+    assert [c for c in calls if c[0] == "settype"] == [("settype", 0x1000, "struct demo demo_var;")], calls
     assert sum(c[0] == "reg" for c in calls) == 2 and sum(c[0] == "menu" for c in calls) == 2
     cmd = m.export_command("/bin/vol", "/x/m.lime", "/out", "/sym")
     assert cmd[-1] == "linux.kernel2elf.Kernel2Elf" and "/x/m.lime" in cmd and "/sym" in cmd

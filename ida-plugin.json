@@ -1,0 +1,15 @@
+{
+  "IDAMetadataDescriptorVersion": 1,
+  "plugin": {
+    "name": "memlens",
+    "entryPoint": "memlens_entry.py",
+    "version": "0.1.0",
+    "idaVersions": ["9.2"],
+    "description": "Reverse engineer a Linux kernel from a memory image: exports kernel and modules as a symbolled ELF at their live addresses and imports every kernel type from a Volatility ISF.",
+    "license": "MIT",
+    "categories": ["file-parsers-and-loaders"],
+    "keywords": ["linux", "kernel", "memory-forensics", "volatility", "rootkit"],
+    "urls": { "repository": "https://github.com/nightshift-labs-ai/memlens" },
+    "authors": [{ "name": "Nightshift Labs (AI agent)", "email": "nightshiftlabs-api@agentmail.to" }]
+  }
+}

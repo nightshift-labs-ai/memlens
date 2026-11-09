@@ -18,6 +18,7 @@ import ida_nalt
 import ida_typeinf
 import idc
 
+ISF_FILTER = "FILTER Volatility ISF|*.json;*.xz|All files|*\n"
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
@@ -124,7 +125,7 @@ def run_cancellable(command):
 
 class ApplyTypes(ida_kernwin.action_handler_t):
     def activate(self, ctx):
-        path = ida_kernwin.ask_file(False, "*.json;*.xz", "Volatility ISF for this kernel")
+        path = ida_kernwin.ask_file(False, None, ISF_FILTER + "Volatility ISF for this kernel")
         if not path:
             return 0
         ida_kernwin.show_wait_box("MemLens: reading ISF")
@@ -147,7 +148,7 @@ class ExportKernel(ida_kernwin.action_handler_t):
         vol = shutil.which("vol") or ida_kernwin.ask_file(False, "vol*", "Where is Volatility 3's 'vol' command?")
         if not vol:
             return 0
-        isf = ida_kernwin.ask_file(False, "*.json;*.xz", "ISF for this kernel (Cancel = use Volatility's own symbols)")
+        isf = ida_kernwin.ask_file(False, None, ISF_FILTER + "ISF for this kernel (Cancel = use Volatility's own symbols)")
         output = os.path.dirname(os.path.abspath(image))
         with tempfile.TemporaryDirectory() as folder:
             symbols = symbols_folder(isf, folder) if isf else None
@@ -161,7 +162,9 @@ class ExportKernel(ida_kernwin.action_handler_t):
         if code:
             ida_kernwin.warning("Volatility failed:\n" + stderr[-1500:].decode("utf-8", "replace"))
             return 0
-        ida_kernwin.info("Wrote %s in %s. Open it in IDA, then use Apply kernel types." % (written_file(stdout), output))
+        message = "Wrote %s in %s. Open it in IDA, then use Apply kernel types." % (written_file(stdout), output)
+        ida_kernwin.msg("[MemLens] %s\n" % message)  # info() can be silenced for good by its checkbox
+        ida_kernwin.info(message)
         return 1
 
     def update(self, ctx):
@@ -196,7 +199,12 @@ def scan_current_input():
         if not path:
             return None
     with open(path, "rb") as handle:
-        return patchscan.scan(handle.read())
+        blob = handle.read()
+    try:
+        return patchscan.scan(blob)
+    except ValueError as error:
+        ida_kernwin.warning("MemLens needs the kernel.elf it exported: %s" % error)
+        return None
 
 
 class FindPatches(ida_kernwin.action_handler_t):
@@ -205,7 +213,7 @@ class FindPatches(ida_kernwin.action_handler_t):
         if findings is None:
             return 0
         for address, _, what, target, _ in findings:
-            idc.set_cmt(address, "MemLens: %s %s" % (what, target), 0)
+            idc.set_cmt(address, "MemLens: %s %s" % (what, target), False)
         ida_kernwin.msg("[MemLens] %d patched entries or odd syscall slots\n" % len(findings))
         global _open_list  # a non-modal chooser must outlive this call
         _open_list = PatchList(findings)
@@ -215,6 +223,8 @@ class FindPatches(ida_kernwin.action_handler_t):
     def update(self, ctx):
         return ida_kernwin.AST_ENABLE_ALWAYS
 
+
+MENU_PATHS = ("Edit/Plugins/", "View/Open subviews/Strings")  # the second is the path IDA's own example uses
 
 ACTIONS = [
     ("memlens:export", "MemLens: Export kernel from memory image", ExportKernel),
@@ -233,7 +243,9 @@ class MemLens(ida_idaapi.plugin_t):
     def init(self):
         for action, label, handler in ACTIONS:
             ida_kernwin.register_action(ida_kernwin.action_desc_t(action, label, handler()))
-            ida_kernwin.attach_action_to_menu("Edit/Plugins/", action, ida_kernwin.SETMENU_APP)
+            attached = any(ida_kernwin.attach_action_to_menu(path, action, ida_kernwin.SETMENU_APP) for path in MENU_PATHS)
+            if not attached:
+                ida_kernwin.msg("[MemLens] could not add %r to a menu\n" % label)
         return ida_idaapi.PLUGIN_KEEP
 
     def run(self, arg):

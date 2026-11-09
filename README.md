@@ -35,7 +35,7 @@ No memory image or Volatility needed. Download `memlens-demo-debian13.zip` from 
 
 ## Usage
 
-In IDA, under **Edit > Plugins**:
+In IDA, with any database open (plugin menu entries need one), under **Edit > Plugins**:
 
 1. **MemLens: Export kernel from memory image**: choose the image. `kernel.elf` is written next to it. Volatility needs the ISF in its symbols path.
 2. Open `kernel.elf` in IDA.

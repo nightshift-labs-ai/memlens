@@ -39,6 +39,13 @@ RESERVED = {
     "__ptr64", "__seg", "__spoils", "__shifted", "__tuple", "__golang", "__swiftcall",
 }
 
+RESERVED |= {  # IDA's type keywords (docs: type-system-keywords)
+    "_BOOL1", "_BOOL2", "_BOOL4", "_BYTE", "_WORD", "_DWORD", "_QWORD", "_OWORD", "_TBYTE", "_UNKNOWN",
+    "__high", "__bitmask", "__invbf", "__bin", "__oct", "__hex", "__dec", "__sbin", "__soct", "__shex", "__udec",
+    "__float", "__char", "__segm", "__enum", "__off", "__offset", "__strlit", "__stroff", "__custom",
+    "__invsign", "__invbits", "__lzero", "__tabform",
+}
+
 
 def ident(name):
     clean = IDENT.sub("_", name)

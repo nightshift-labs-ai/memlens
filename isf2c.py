@@ -44,6 +44,8 @@ RESERVED |= {  # IDA's type keywords (docs: type-system-keywords)
     "__high", "__bitmask", "__invbf", "__bin", "__oct", "__hex", "__dec", "__sbin", "__soct", "__shex", "__udec",
     "__float", "__char", "__segm", "__enum", "__off", "__offset", "__strlit", "__stroff", "__custom",
     "__invsign", "__invbits", "__lzero", "__tabform",
+    # Older calling-model words; gcc accepts them as names, IDA's parser is unproven on them.
+    "near", "far", "huge", "interrupt", "cdecl", "pascal", "stdcall", "fastcall", "thiscall", "flat", "large", "small",
 }
 
 

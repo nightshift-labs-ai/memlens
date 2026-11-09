@@ -14,7 +14,7 @@ from typing import Iterator, List, Tuple
 from volatility3.framework import exceptions, interfaces, renderers
 from volatility3.framework.configuration import requirements
 from volatility3.framework.renderers import format_hints
-from volatility3.plugins.linux import lsmod
+from volatility3.framework.symbols.linux.utilities import modules as linux_utilities_modules
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 import patchscan  # noqa: E402  (lives in the plugin's root folder)
@@ -129,6 +129,9 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
     def get_requirements(cls):
         return [
             requirements.ModuleRequirement(name="kernel", description="Linux kernel", architectures=["Intel64"]),
+            requirements.VersionRequirement(
+                name="linux_utilities_modules", component=linux_utilities_modules.Modules, version=(3, 0, 0)
+            ),
             requirements.BooleanRequirement(name="no-modules", description="Kernel image only", default=False, optional=True),
         ]
 
@@ -192,7 +195,7 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
         yield (0, ("symbols", "kernel", format_hints.Hex(text_start), len(addresses)))
 
         if not self.config.get("no-modules"):
-            for module in lsmod.Lsmod.list_modules(self.context, self.config["kernel"]):
+            for module in linux_utilities_modules.Modules.list_modules(self.context, self.config["kernel"]):
                 try:
                     name, base = module.get_name(), module.get_module_base()
                     regions = self._module_regions(module)

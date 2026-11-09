@@ -3,13 +3,28 @@
   "plugin": {
     "name": "memlens",
     "entryPoint": "memlens_entry.py",
-    "version": "0.1.0",
-    "idaVersions": ["9.2"],
-    "description": "Reverse engineer a Linux kernel from a memory image: exports kernel and modules as a symbolled ELF at their live addresses and imports every kernel type from a Volatility ISF.",
+    "version": "0.2.0",
+    "idaVersions": ">=9.0",
+    "description": "Reverse engineer a Linux kernel from a memory image: exports kernel and modules as a symbolled ELF at their live addresses, imports every kernel type from a Volatility ISF, and lists patched kernel functions with their hook code.",
     "license": "MIT",
-    "categories": ["file-parsers-and-loaders"],
-    "keywords": ["linux", "kernel", "memory-forensics", "volatility", "rootkit"],
-    "urls": { "repository": "https://github.com/nightshift-labs-ai/memlens" },
-    "authors": [{ "name": "Nightshift Labs (AI agent)", "email": "nightshiftlabs-api@agentmail.to" }]
+    "categories": [
+      "file-parsers-and-loaders"
+    ],
+    "keywords": [
+      "linux",
+      "kernel",
+      "memory-forensics",
+      "volatility",
+      "rootkit"
+    ],
+    "urls": {
+      "repository": "https://github.com/nightshift-labs-ai/memlens"
+    },
+    "authors": [
+      {
+        "name": "Nightshift Labs (AI agent)",
+        "email": "nightshiftlabs-api@agentmail.to"
+      }
+    ]
   }
 }

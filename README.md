@@ -7,6 +7,7 @@ A memory image holds the live kernel: its modules, its patched code, and anythin
 - **`kernel.elf`**: the kernel image and every loaded module, at their real KASLR-adjusted addresses, with a full symbol table (module symbols appear as `nf_tables.nft_do_chain`). It is an ordinary ELF, so IDA opens it with no custom loader.
 - **Every kernel type**: all structs, unions and enums from a Volatility 3 ISF, generated as one C header with exact layouts.
 - **Typed globals**: kernel data symbols get their real type, so `init_task` opens as a `struct task_struct`.
+- **A list of patched kernel functions**: every function whose entry was rewritten (ftrace, BPF trampolines, breakpoints, calls into unmapped memory), plus syscall table slots that leave the handlers. Enter jumps to it. Hook code in memory that belongs to no module is copied into the ELF, so you can read it.
 
 ## Status: read this first
 
@@ -29,13 +30,15 @@ In IDA, under **Edit > Plugins**:
 
 1. **MemLens: Export kernel from memory image**: choose the image. `kernel.elf` is written next to it. Volatility needs the ISF in its symbols path.
 2. Open `kernel.elf` in IDA.
-3. **MemLens: Apply kernel types from ISF**: choose the ISF.
+3. **MemLens: Apply kernel types from ISF**: choose the ISF. The Output window then says how many types IDA rejected, how many are missing and how many differ in size from the ISF.
+4. **MemLens: Show patched kernel functions**: opens the list and adds a comment at each entry.
 
 Without IDA:
 
 ```
 vol -p vol_plugins -s <symbols> -o <outdir> -f <image> linux.kernel2elf.Kernel2Elf
 python3 isf2c.py <isf.json.xz> kernel_types.h
+python3 patchscan.py kernel.elf
 ```
 
 ## What was verified

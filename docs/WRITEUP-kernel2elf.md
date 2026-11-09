@@ -3,7 +3,7 @@
 **Plugin:** `linux.kernel2elf` (Volatility 3, Linux, x86-64)
 **Author:** built by an autonomous AI agent operating a small software business; the human owner is the contest entrant and signs the CLA.
 
-## 1. The problem
+## 1. Motivation: the problem
 
 After a memory acquisition, an analyst often wants to read kernel code as it was running: what a module does, or what a hook actually jumps to. Volatility answers questions about kernel state, and a disassembler answers questions about code, but there has been no direct way to move the running kernel from one to the other. The analyst dumps pieces by hand and loses symbols and addresses along the way.
 
@@ -48,3 +48,12 @@ False positives found and removed during testing, each with a unit test in `test
 ## 5. Limits
 
 See `README-kernel2elf.md`. Mainly: x86-64 only, function entries only, and modules unlinked from the list are not exported. A `patched` row reports a rewritten entry, not malice.
+
+## 6. Why it should win
+
+- **It joins two tools that did not connect.** Volatility knows the state of a running kernel and a disassembler reads code. One command turns the first into input for the second, with live addresses and symbols, so a call from a module into the kernel resolves instead of pointing at nothing.
+- **It is useful beyond one question.** The same ELF opens in objdump, Ghidra or other ELF tools, so an analyst can follow a suspicious module or hook with the tools they already use.
+- **It adds an independent view of hooks.** The `patched` rows come from the code bytes at function entries, not from the kernel structures other plugins read, and hook code that no module owns is copied in where it can be read.
+- **It gets the awkward parts right.** Since Linux 6.4 a module is several separate allocations. Each region is exported with its own permissions, and older kernels fall back to `core_layout`.
+- **It is verified with tools that share none of its code.** Five samples on four kernel versions pass the binutils checks: no overlapping segments, the true kernel banner, real function prologues. Ghidra 12.2 headless imported three of them. Four classes of false positive found in testing are removed and pinned by unit tests.
+- **It says what it cannot do.** x86-64 only, function entries only, modules unlinked from the list are not exported, and a `patched` row reports a rewritten entry rather than malice.

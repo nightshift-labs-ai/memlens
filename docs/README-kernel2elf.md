@@ -2,7 +2,7 @@
 
 Writes the Linux kernel found in a memory image as one ordinary ELF file, and lists the kernel functions whose entry was rewritten.
 
-The ELF holds the kernel image and every loaded module at their real KASLR-adjusted addresses, with a full symbol table. `objdump`, `gdb`, IDA, Ghidra and similar tools open it with no custom loader, so a memory image can be disassembled like any binary.
+The ELF holds the kernel image and every loaded module at their real KASLR-adjusted addresses, with a full symbol table. `objdump`, Ghidra and similar tools open it with no custom loader, so a memory image can be disassembled like any binary.
 
 ## Use
 
@@ -29,7 +29,6 @@ Then, for example:
 
 ```
 objdump -d --disassemble=nf_tables.nft_do_chain kernel.elf
-gdb kernel.elf -ex 'x/20i __x64_sys_read'
 ```
 
 ## What counts as patched

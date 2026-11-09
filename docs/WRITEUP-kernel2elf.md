@@ -10,7 +10,7 @@ After a memory acquisition, an analyst often wants to read kernel code as it was
 ## 2. What exists
 
 - `linux.module_extract` recreates one module as an ELF from a given address. This plugin writes the whole kernel and all listed modules together, at their live addresses, under one symbol table, so calls between the kernel and a module resolve.
-- `linux.tracing.ftrace`, `linux.check_syscall` and `linux.malware.modxview` read kernel structures to report hooks and hidden modules. The `patched` rows here use a different source: the code bytes at each function entry. The two views are complementary, because bytes in memory cannot disagree with what actually runs.
+- `linux.tracing.ftrace`, `linux.check_syscall` and `linux.malware.modxview` read kernel structures to report hooks and hidden modules. The `patched` rows here use a different source: the code bytes at each function entry. The two views are complementary.
 - Kallsyms importers for disassemblers name a kernel that is already loaded; they do not start from a memory image.
 
 A GitHub repository search (name and description, November 2026) found no tool that writes a whole kernel from a Volatility image as a symbolled ELF. That search is not exhaustive.
@@ -27,7 +27,7 @@ A GitHub repository search (name and description, November 2026) found no tool t
 
 ## 4. Validation
 
-Every sample is a QEMU guest captured by us; addresses differ per boot because of KASLR. `tools/make_dist_k2e.sh` regenerates all of this and stops on any failure.
+Every sample is a QEMU guest captured by us; addresses differ per boot because of KASLR. `make_dist_k2e.sh` (in the package) regenerates all of this and stops on any failure.
 
 | Sample | Modules | Symbols | Module symbols | `patched` rows |
 |---|---|---|---|---|

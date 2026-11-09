@@ -56,9 +56,9 @@ Memory images were captured from QEMU guests; addresses differ per boot because 
 
 | Kernel | Symbols in ELF | From modules | Loaded by Ghidra 12.2, disassembled at the right address |
 |---|---|---|---|
-| Debian 12, 6.1.0-54 | 151,384 | 38,458 | `linux_banner`, `nf_hook_slow` |
-| Debian 13, 6.12.115 | 236,521 | 52,357 | `linux_banner`, `__x64_sys_read`, `nf_hook_slow`, `nf_tables.nft_do_chain` |
-| Ubuntu 26.04, 7.0.0-38 | 316,618 | 62,402 | `linux_banner`, `nf_hook_slow`, `nf_tables.nft_do_chain` |
+| Debian 12, 6.1.0-54 | 151,384 | 30,700 | `linux_banner`, `nf_hook_slow` |
+| Debian 13, 6.12.115 | 236,521 | 42,391 | `linux_banner`, `__x64_sys_read`, `nf_hook_slow`, `nf_tables.nft_do_chain` |
+| Ubuntu 26.04, 7.0.0-38 | 316,618 | 37,167 | `linux_banner`, `nf_hook_slow`, `nf_tables.nft_do_chain` |
 
 Every symbol lands inside exported memory. Module text, read-only data and data become separate sections with the right permissions, and LOAD segments never overlap (`tests/check_elf.sh`).
 

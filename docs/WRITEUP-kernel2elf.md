@@ -31,11 +31,11 @@ Every sample is a QEMU guest captured by us; addresses differ per boot because o
 
 | Sample | Modules | Symbols | Module symbols | `patched` rows |
 |---|---|---|---|---|
-| Debian 12, 6.1.0-54 | 85 | 151,384 | 38,458 | none |
-| Debian 13, 6.12.115 | 82 | 236,521 | 52,357 | `bpf_lsm_file_open` |
-| Debian 13, 6.12.115, hooks set | 69 | 233,305 | 49,139 | `bpf_lsm_file_open`, `do_sys_openat2`, `vfs_getattr` |
-| Ubuntu 24.04, 6.8.0-147 | 61 | 267,563 | 43,624 | `__hid_bpf_tail_call` |
-| Ubuntu 26.04, 7.0.0-38 | 72 | 316,618 | 62,402 | none |
+| Debian 12, 6.1.0-54 | 85 | 151,384 | 30,700 | none |
+| Debian 13, 6.12.115 | 82 | 236,521 | 42,391 | `bpf_lsm_file_open` |
+| Debian 13, 6.12.115, hooks set | 69 | 233,305 | 39,173 | `bpf_lsm_file_open`, `do_sys_openat2`, `vfs_getattr` |
+| Ubuntu 24.04, 6.8.0-147 | 61 | 267,563 | 27,131 | `__hid_bpf_tail_call` |
+| Ubuntu 26.04, 7.0.0-38 | 72 | 316,618 | 37,167 | none |
 
 Checks with tools independent of this code (`tests/check_elf.sh`, binutils only): no LOAD segment overlaps, all addresses are canonical, `linux_banner` reads back the true kernel version, and `__x64_sys_read`, `nf_hook_slow` and `nft_do_chain` disassemble to real function prologues where those symbols are present.
 

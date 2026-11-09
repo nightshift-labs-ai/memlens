@@ -13,7 +13,7 @@ kw.unregister_action = lambda a: calls.append(("unreg", a)) or True
 kw.msg = lambda s: calls.append(("msg", s)); kw.info = kw.warning = lambda s: calls.append(("ui", s))
 kw.show_wait_box = kw.replace_wait_box = lambda s: None; kw.hide_wait_box = lambda: None; kw.user_cancelled = lambda: False
 class chooser:
-    CHCOL_EA = 1 << 24; NOTHING_CHANGED = 0
+    CHCOL_HEX = 1 << 24; NOTHING_CHANGED = 0
     def __init__(self, title, cols): self.title = title
     def Show(self): calls.append(("show", self.title))
 kw.Choose = chooser; kw.jumpto = lambda ea: calls.append(("jump", ea))
@@ -24,7 +24,7 @@ class tinfo:
         self.size = {"demo": 8, "shrunk": 2}.get(name, 0); return bool(self.size)
     def get_size(self): return self.size
 ti.tinfo_t = tinfo
-api = types.ModuleType("ida_idaapi"); api.plugin_t = object; api.PLUGIN_KEEP = 2
+api = types.ModuleType("ida_idaapi"); api.plugin_t = object; api.PLUGIN_KEEP = 2; api.PLUGIN_HIDE = 0x10
 idc = types.ModuleType("idc"); idc.PT_SIL = 1; idc.PT_PAK1 = 0x10
 def parse(text, flags):
     calls.append(("parse", text, flags)); return text.count("BADTOKEN")
@@ -64,7 +64,7 @@ with tempfile.TemporaryDirectory() as t:
     assert code == 3 and err == b"boom" and m.written_file(out) == "kernel-1.elf", (code, out, err)
     assert m.written_file(b"") == "kernel.elf"
     table = m.PatchList([(0x10, "fn", "what", "tgt", 0x20)])
-    assert table.OnGetSize() == 1 and table.OnGetLine(0) == ["0x10", "fn", "what", "tgt"]
+    assert table.OnGetSize() == 1 and table.OnGetLine(0) == ["10", "fn", "what", "tgt"]
     assert table.OnSelectLine(0) == (0,) and ("jump", 0x10) in calls
     plugin.term(); assert sum(c[0] == "unreg" for c in calls) == 3
 print("stub test OK (fake IDA modules)")

@@ -172,7 +172,7 @@ class PatchList(ida_kernwin.Choose):
     """Patched entries and odd syscall slots; Enter jumps to one."""
 
     def __init__(self, findings):
-        columns = [["Address", 18 | ida_kernwin.Choose.CHCOL_EA], ["Where", 34], ["What", 34], ["Target", 40]]
+        columns = [["Address", 18 | ida_kernwin.Choose.CHCOL_HEX], ["Where", 34], ["What", 34], ["Target", 40]]
         ida_kernwin.Choose.__init__(self, "MemLens: patched kernel functions", columns)
         self.findings = findings
 
@@ -181,7 +181,7 @@ class PatchList(ida_kernwin.Choose):
 
     def OnGetLine(self, n):
         address, name, what, target, _ = self.findings[n]
-        return ["%#x" % address, name, what, target]
+        return ["%X" % address, name, what, target]
 
     def OnSelectLine(self, n):
         ida_kernwin.jumpto(self.findings[n][0])
@@ -222,7 +222,7 @@ ACTIONS = [
 
 
 class MemLens(ida_idaapi.plugin_t):
-    flags = ida_idaapi.PLUGIN_KEEP
+    flags = ida_idaapi.PLUGIN_HIDE  # the actions are in the menu; no extra run() entry
     comment = "Linux kernel from a memory image, with symbols and types"
     help = "Export a kernel from a memory image and import its types"
     wanted_name = "MemLens"

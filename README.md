@@ -2,9 +2,9 @@
 
 Reverse engineer a Linux kernel **as it was running**, from a memory image, in IDA.
 
-A memory image holds the live kernel: its modules, its patched code, and anything a rootkit added. MemLens turns that image into something IDA understands:
+A memory image holds the live kernel: its modules and its patched code. MemLens turns that image into something IDA understands:
 
-- **`kernel.elf`**: the kernel image and every loaded module, at their real KASLR-adjusted addresses, with a full symbol table (module symbols appear as `nf_tables.nft_do_chain`). It is an ordinary ELF, so IDA opens it with no custom loader.
+- **`kernel.elf`**: the kernel image and every loaded module, at their real KASLR-adjusted addresses, with a full symbol table (module symbols are named `nf_tables.nft_do_chain`; a tool that does not allow `.` in names may show `_` instead). It is an ordinary ELF, so IDA opens it with no custom loader.
 - **Every kernel type**: all structs, unions and enums from a Volatility 3 ISF, generated as one C header with exact layouts.
 - **Typed globals**: kernel data symbols get their real type, so `init_task` opens as a `struct task_struct`.
 - **A list of patched kernel functions**: every function whose entry was rewritten (ftrace, BPF trampolines, breakpoints, calls into unmapped memory), plus syscall table slots that leave the handlers. Enter jumps to it. Hook code in memory that belongs to no module is copied into the ELF, so you can read it.

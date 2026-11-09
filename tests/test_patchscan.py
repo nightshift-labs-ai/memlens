@@ -49,4 +49,25 @@ assert found["jumped_fn"][2] == "jmp to no symbol".replace("no", "memory with no
 assert found["probed_fn"][2].startswith("int3")
 sys_rows = ps.scan_syscalls(image)
 assert [r[1] for r in sys_rows] == ["sys_call_table[1]"] and sys_rows[0][4] == 0xffffffffc0005000, sys_rows
+# Things seen on a clean Ubuntu 7.0 kernel that must not be reported.
+code = bytearray(b"\x90" * TEXT)
+put(0x000, call(BASE, BASE + 0x900))                                            # compile-time call __fentry__
+put(0x100, call(BASE + 0x100, BASE + 0xa00))                                    # ftrace's own trampoline
+put(0x200, call(BASE + 0x200, 0xffffffffc0001000))                              # a real hook still shows
+put(0xb00, b"\xc3")
+symbols = [("not_converted", BASE, 0x100), ("ftrace_call", BASE + 0x100, 0x100), ("hooked", BASE + 0x200, 0x100),
+           ("__fentry__", BASE + 0x900, 0x100), ("ftrace_stub", BASE + 0xa00, 0x100), ("__x64_sys_read", BASE + 0xb00, 0x100),
+           ("sys_call_table", BASE + TEXT, 0x18)]
+past_end = 0xffffffffc0006000
+image = ps.Image(elf(code, symbols, struct.pack("<QQQQ", BASE + 0xb00, 0xffffffffc0005000, BASE + 0xb00, past_end)))
+assert [row[1] for row in ps.scan_functions(image)] == ["hooked"]
+assert [row[1] for row in ps.scan_syscalls(image)] == ["sys_call_table[1]"]
+symbols[-1] = ("sys_call_table", BASE + TEXT, 0x40)
+image = ps.Image(elf(code, symbols, struct.pack("<QQQ", BASE + 0xb00, BASE + TEXT + 8, past_end)))  # data pointer ends it
+assert ps.scan_syscalls(image) == []
+code = bytearray(b"\x90" * TEXT)
+put(0x000, call(BASE, BASE + 0x900, 0xE9))                                      # kernel jumps to its own foo.constprop.0
+put(0x100, call(BASE + 0x100, 0xffffffffc0007000, 0xE9))                        # kernel jumps into a module
+symbols = [("foo", BASE, 0x100), ("bar", BASE + 0x100, 0x100), ("foo.constprop.0", BASE + 0x900, 0x100), ("evil.hook", 0xffffffffc0007000, 0x100)]
+assert [row[1] for row in ps.scan_functions(ps.Image(elf(code, symbols)))] == ["bar"]
 print("patchscan tests OK")

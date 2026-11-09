@@ -216,8 +216,13 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
                 elf.add_symbol("%s%x" % (patchscan.TARGET_PREFIX, target), target, 0, STT_FUNC)
                 yield (0, ("hook target", "memlens_target", format_hints.Hex(target), copied))
 
+        finished = io.BytesIO()
+        elf.write(finished)
+        for address, where, what, target, _ in patchscan.scan(finished.getvalue()):
+            yield (0, ("patched", "%s: %s %s" % (where, what, target), format_hints.Hex(address), 0))
+
         with self.open("kernel.elf") as handle:
-            elf.write(handle)
+            handle.write(finished.getvalue())
             yield (0, ("written", handle.preferred_filename, format_hints.Hex(0), len(elf.symbols)))
 
     @staticmethod

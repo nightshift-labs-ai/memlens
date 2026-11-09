@@ -14,7 +14,11 @@ FENTRY_NOP = b"\x0f\x1f\x44\x00\x00"
 STT_FUNC = 2
 # Trampolines that are jumps by design, and compiler padding symbols.
 SKIP_PREFIXES = ("__SCT__", "__SCK__", "__static_call", "__pfx_", "__cfi_", "__x86_indirect", "__x86_return")
-FTRACE_TARGETS = ("ftrace_caller", "ftrace_regs_caller", "ftrace_stub", "__fentry__", "return_to_handler")
+COMPILER_SUFFIXES = ("constprop", "isra", "part", "cold", "llvm", "lto_priv", "clone")  # foo.isra.0 is not module.symbol
+# A live hook goes through these. "call __fentry__" is what the compiler wrote, not a patch.
+FTRACE_TARGETS = ("ftrace_caller", "ftrace_regs_caller", "ftrace_stub", "return_to_handler")
+# ftrace's own trampolines call ftrace_stub by design.
+FTRACE_OWN = {"ftrace_caller", "ftrace_regs_caller", "ftrace_call", "ftrace_regs_call", "ftrace_graph_call", "ftrace_stub"}
 
 
 TARGET_PREFIX = "memlens_target_"  # labels the exporter gives to hook targets it copied in
@@ -81,7 +85,7 @@ def describe(image, address):
 def classify_entry(image, entry, name):
     """One finding (address, function, what, target label, target address), or None if unremarkable."""
     code = image.read(entry, 16)
-    if code is None or name.startswith(SKIP_PREFIXES):
+    if code is None or name.startswith(SKIP_PREFIXES) or name in FTRACE_OWN:
         return None
     start = 4 if code[:4] == ENDBR64 else 0
     op = code[start]
@@ -104,7 +108,7 @@ def classify_entry(image, entry, name):
         return (entry, name, "ftrace call at entry", label, target)
     if symbol is None or symbol.startswith(TARGET_PREFIX):
         return (entry, name, "%s to memory with no symbol" % verb, label, target)
-    if "." in symbol and "." not in name:
+    if "." in symbol and "." not in name and not symbol.split(".", 1)[1].startswith(COMPILER_SUFFIXES):
         return (entry, name, "%s from kernel into a module" % verb, label, target)
     return None
 
@@ -129,6 +133,8 @@ def scan_syscalls(image, count=512):
     if not table:
         return []
     findings = []
+    if table[1]:  # newer kernels have fewer slots than count; what follows the table is other data
+        count = min(count, table[1] // 8)
     for number in range(count):
         raw = image.read(table[0] + 8 * number, 8)
         if raw is None:
@@ -137,7 +143,8 @@ def scan_syscalls(image, count=512):
         symbol = image.symbol_at(target)
         if symbol and symbol.startswith(("__x64_sys_", "__ia32_sys_", "sys_ni_syscall", "__x64_compat_sys_")):
             continue
-        if target < 0xffff000000000000:
+        segment = image.segment(target)
+        if target < 0xffff000000000000 or (segment and not segment[3]):  # not a code pointer: end of the table
             break
         findings.append((table[0] + 8 * number, "sys_call_table[%d]" % number, "syscall entry outside the handlers", describe(image, target), target))
     return findings

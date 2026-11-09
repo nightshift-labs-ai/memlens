@@ -207,7 +207,9 @@ class FindPatches(ida_kernwin.action_handler_t):
         for address, _, what, target, _ in findings:
             idc.set_cmt(address, "MemLens: %s %s" % (what, target), 0)
         ida_kernwin.msg("[MemLens] %d patched entries or odd syscall slots\n" % len(findings))
-        PatchList(findings).Show()
+        global _open_list  # a non-modal chooser must outlive this call
+        _open_list = PatchList(findings)
+        _open_list.Show()
         return 1
 
     def update(self, ctx):

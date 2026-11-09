@@ -53,7 +53,16 @@ class Elf:
         return 0
 
     def write(self, out):
-        sections = sorted(self.sections, key=lambda item: item[1])
+        # Loaders expect PT_LOAD segments to be disjoint and ascending: a later region gives up
+        # whatever an earlier one already covers.
+        sections, covered = [], None
+        for name, start, flags, data in sorted(self.sections, key=lambda item: item[1]):
+            if covered is not None and start < covered:
+                data = data[covered - start:]
+                start = covered
+            if data:
+                sections.append((name, start, flags, data))
+                covered = start + len(data)
         self.sections = sections
         shnames, name_offsets = bytearray(b"\0"), {}
         for name in [s[0] for s in sections] + [".symtab", ".strtab", ".shstrtab"]:
@@ -185,10 +194,11 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
         if not self.config.get("no-modules"):
             for module in lsmod.Lsmod.list_modules(self.context, self.config["kernel"]):
                 try:
-                    name, base, size = module.get_name(), module.get_module_base(), module.get_core_size()
+                    name, base = module.get_name(), module.get_module_base()
+                    regions = self._module_regions(module)
                 except exceptions.InvalidAddressException:
                     continue
-                written = self._add_range(elf, layer, base, base + size, ".mod.%s" % name, SHF_ALLOC | SHF_EXEC)
+                written = sum(self._add_range(elf, layer, start, end, ".mod.%s.%s" % (name, label), flags) for label, start, end, flags in regions)
                 symbols = 0
                 try:
                     for symbol in module.get_symbols():
@@ -209,6 +219,34 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
         with self.open("kernel.elf") as handle:
             elf.write(handle)
             yield (0, ("written", handle.preferred_filename, format_hints.Hex(0), len(elf.symbols)))
+
+    @staticmethod
+    def _module_regions(module) -> List[Tuple[str, int, int, int]]:
+        """(label, start, end, ELF flags) of each part of a module that belongs to it.
+
+        Since 6.4 the parts are separate allocations, so one base and the summed core size
+        would run into whatever is mapped after the text and miss the module's own data.
+        """
+        text, read_only, writable = SHF_ALLOC | SHF_EXEC, SHF_ALLOC, SHF_ALLOC | SHF_WRITE
+        if module.has_member("mem"):
+            regions = []
+            for label, kind, flags in (("text", "MOD_TEXT", text), ("rodata", "MOD_RODATA", read_only),
+                                       ("ro_after_init", "MOD_RO_AFTER_INIT", read_only), ("data", "MOD_DATA", writable)):
+                try:
+                    start, size = int(module._get_mem_base(kind)), int(module._get_mem_size(kind))
+                except AttributeError:
+                    continue
+                if start and size:
+                    regions.append((label, start, start + size, flags))
+            return regions
+        base = int(module.get_module_base())
+        if module.has_member("core_layout"):  # one allocation, ordered text, rodata, ro_after_init, data
+            layout = module.core_layout
+            marks = [("text", 0, int(layout.text_size), text), ("rodata", int(layout.text_size), int(layout.ro_size), read_only),
+                     ("ro_after_init", int(layout.ro_size), int(layout.ro_after_init_size), read_only),
+                     ("data", int(layout.ro_after_init_size), int(layout.size), writable)]
+            return [(label, base + low, base + high, flags) for label, low, high, flags in marks if low < high]
+        return [("core", base, base + int(module.get_core_size()), text)]
 
     @staticmethod
     def _hook_targets(elf) -> List[int]:

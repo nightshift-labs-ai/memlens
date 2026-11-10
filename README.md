@@ -33,6 +33,53 @@ No memory image or Volatility needed. Download `memlens-demo-debian13.zip` from 
 2. **MemLens: Apply kernel types from ISF** and pick the `.json.xz` file.
 3. **MemLens: Show patched kernel functions**. The lab VM's script set an ftrace filter on `vfs_getattr` and a kprobe on `do_sys_openat2`; a third patched entry, `bpf_lsm_file_open`, was not set by the script (its cause was not investigated). All three should be listed as `call to memory with no symbol` (each entry calls a trampoline page that no module owns, copied in as `memlens_target_<address>`), exactly as in `expected-patched-functions.txt` from the zip, made with `python3 patchscan.py kernel.elf`. Enter jumps to the function.
 
+## What you get (real output from the demo, not IDA screenshots)
+
+We have no IDA, so there are no IDA screenshots. Below is real output for the demo `kernel.elf`, from the same code the plugin runs (`patchscan.py`, `isf2c.py`) and from binutils `objdump`.
+
+Patched functions, the same scan the IDA list runs (`python3 patchscan.py kernel.elf`):
+
+```
+0xffffffff8e4f9250  bpf_lsm_file_open  call to memory with no symbol  memlens_target_ffffffffc0004940
+0xffffffff8e642210  do_sys_openat2     call to memory with no symbol  memlens_target_ffffffffc0b2d000
+0xffffffff8e64e370  vfs_getattr        call to memory with no symbol  memlens_target_ffffffffc0b2b000
+```
+
+A hooked entry and the hook page it calls, which no module owns and which MemLens copied into the ELF (`objdump -d kernel.elf`, excerpts):
+
+```
+ffffffff8e64e370 <vfs_getattr>:
+ffffffff8e64e370:  endbr64
+ffffffff8e64e374:  call   ffffffffc0b2b000 <memlens_target_ffffffffc0b2b000>
+
+ffffffffc0b2b000 <memlens_target_ffffffffc0b2b000>:
+ffffffffc0b2b094:  call   ffffffff8e434a40 <function_trace_call>
+
+ffffffff8e642210 <do_sys_openat2>:
+ffffffff8e642210:  call   ffffffffc0b2d000 <memlens_target_ffffffffc0b2d000>
+
+ffffffffc0b2d000 <memlens_target_ffffffffc0b2d000>:
+ffffffffc0b2d0d9:  call   ffffffff8e294ed0 <kprobe_ftrace_handler>
+```
+
+So the `vfs_getattr` page is an ftrace trampoline and the `do_sys_openat2` page leads to the kprobe handler, readable at their live addresses.
+
+Types, an excerpt of the header the plugin imports (`python3 isf2c.py debian-6.12.115+deb13.1-amd64.json.xz kernel_types.h`), with explicit padding so every offset matches the ISF:
+
+```c
+struct kstat {
+  unsigned int result_mask;
+  unsigned short mode;
+  unsigned char __pad_6[2];
+  unsigned int nlink;
+  unsigned int blksize;
+  unsigned long long attributes;
+  ...
+};
+```
+
+Typed globals come from the same ISF, for example `struct task_struct init_task`, `struct net init_net` and `struct static_key nf_hooks_needed[11][5]` (79,316 of them for this kernel).
+
 ## Usage
 
 In IDA, with any database open (plugin menu entries need one), under **Edit > Plugins**:

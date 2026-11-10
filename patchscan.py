@@ -82,6 +82,40 @@ def describe(image, address):
     return image.symbol_at(address) or ("%#x (no symbol)" % address)
 
 
+HANDLER_KINDS = (("function_trace_call", "ftrace"), ("ftrace_ops_list_func", "ftrace"), ("ftrace_ops_assist_func", "ftrace"),
+                 ("kprobe_ftrace_handler", "kprobe via ftrace"), ("__bpf_prog_enter", "BPF trampoline"),
+                 ("__bpf_tramp_enter", "BPF trampoline"), ("arch_ftrace_ops_list_func", "ftrace"))
+
+
+def first_handler(image, page, span=0x200):
+    """The first named function a copied hook page calls (rel32 call landing exactly on a symbol start)."""
+    code = image.read(page, span)
+    if code is None:
+        return None
+    for offset in range(len(code) - 4):
+        if code[offset] != 0xE8:
+            continue
+        dest = (page + offset + 5 + struct.unpack_from("<i", code, offset + 1)[0]) & 0xFFFFFFFFFFFFFFFF
+        index = bisect.bisect_left(image.addresses, dest)
+        if index < len(image.addresses) and image.addresses[index] == dest:
+            name = image.symbols[index][2]
+            if not name.startswith(TARGET_PREFIX):
+                return name
+    return None
+
+
+def hook_label(image, target):
+    """describe(), plus what the hook page calls when the exporter copied the page in."""
+    label = describe(image, target)
+    symbol = image.symbol_at(target)
+    if symbol and symbol.startswith(TARGET_PREFIX):
+        handler = first_handler(image, target)
+        if handler:
+            kind = next((k for prefix, k in HANDLER_KINDS if handler.startswith(prefix)), None)
+            label += " (calls %s%s)" % (handler, ", %s" % kind if kind else "")
+    return label
+
+
 def absolute_hook(code, start):
     """(how, target) for an absolute-address hook starting at code[start], or None.
 
@@ -113,7 +147,7 @@ def absolute_finding(image, entry, name, how, target):
         what = "%s from kernel into a module" % how
     else:
         what = "%s at entry" % how
-    return (entry, name, what, describe(image, target), target)
+    return (entry, name, what, hook_label(image, target), target)
 
 
 def classify_entry(image, entry, name):
@@ -147,7 +181,7 @@ def classify_entry(image, entry, name):
     if symbol and symbol.startswith(FTRACE_TARGETS):
         return (entry, name, "ftrace call at entry", label, target)
     if symbol is None or symbol.startswith(TARGET_PREFIX):
-        return (entry, name, "%s to memory with no symbol" % verb, label, target)
+        return (entry, name, "%s to memory with no symbol" % verb, hook_label(image, target), target)
     if "." in symbol and "." not in name and not symbol.split(".", 1)[1].startswith(COMPILER_SUFFIXES):
         return (entry, name, "%s from kernel into a module" % verb, label, target)
     return None

@@ -94,4 +94,14 @@ assert found["r11jmp"][4] == EVIL and found["pushret"][2] == "push+ret to memory
 assert found["movcall"][2].startswith("movabs+call reg")
 assert found["to_kernel"][2] == "movabs+jmp reg at entry" and found["to_kernel"][3] == "helper"
 assert found["to_module"][2] == "movabs+jmp reg from kernel into a module"
+# A copied hook page is labelled with the first named function it calls.
+code = bytearray(b"\x90" * TEXT)
+put(0x200, call(BASE + 0x200, BASE + 0xc00))                                    # entry calls the copied page
+put(0xc00 + 0x40, call(BASE + 0xc40, BASE + 0xd00))                             # page calls the handler
+put(0x300, call(BASE + 0x300, BASE + 0xe00))                                    # page that calls nothing named
+symbols = [("hooked", BASE + 0x200, 0x100), ("other", BASE + 0x300, 0x100), ("memlens_target_ffffffff81000c00", BASE + 0xc00, 0x100),
+           ("kprobe_ftrace_handler", BASE + 0xd00, 0x100), ("memlens_target_ffffffff81000e00", BASE + 0xe00, 0x100)]
+found = {row[1]: row for row in ps.scan_functions(ps.Image(elf(code, symbols)))}
+assert found["hooked"][3] == "memlens_target_ffffffff81000c00 (calls kprobe_ftrace_handler, kprobe via ftrace)", found
+assert found["other"][3] == "memlens_target_ffffffff81000e00", found
 print("patchscan tests OK")

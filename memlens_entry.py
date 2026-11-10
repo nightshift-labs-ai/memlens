@@ -5,6 +5,7 @@ Two actions under Edit > Plugins:
   * Apply kernel types from ISF: imports every struct, union and enum of that kernel.
   * Show patched kernel functions: lists hooked entries and odd syscall slots, Enter jumps there.
 """
+import traceback
 import os
 import shutil
 import subprocess
@@ -123,7 +124,23 @@ def run_cancellable(command):
         return process.returncode, output.read(), errors.read()
 
 
+
+ISSUES_URL = "https://github.com/nightshift-labs-ai/memlens/issues"
+
+
+def guarded(activate):
+    """Any unexpected error becomes one warning plus the traceback in the Output window."""
+    def wrapper(self, ctx):
+        try:
+            return activate(self, ctx)
+        except Exception:  # noqa: BLE001  (last line of defence inside IDA)
+            ida_kernwin.msg("[MemLens] unexpected error:\n%s\n" % traceback.format_exc())
+            ida_kernwin.warning("MemLens: unexpected error, details are in the Output window.\nPlease report it: %s" % ISSUES_URL)
+            return 0
+    return wrapper
+
 class ApplyTypes(ida_kernwin.action_handler_t):
+    @guarded
     def activate(self, ctx):
         path = ida_kernwin.ask_file(False, None, ISF_FILTER + "Volatility ISF for this kernel")
         if not path:
@@ -141,6 +158,7 @@ class ApplyTypes(ida_kernwin.action_handler_t):
 
 
 class ExportKernel(ida_kernwin.action_handler_t):
+    @guarded
     def activate(self, ctx):
         image = ida_kernwin.ask_file(False, "*", "Linux memory image")
         if not image:
@@ -208,6 +226,7 @@ def scan_current_input():
 
 
 class FindPatches(ida_kernwin.action_handler_t):
+    @guarded
     def activate(self, ctx):
         findings = scan_current_input()
         if findings is None:

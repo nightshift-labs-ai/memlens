@@ -164,7 +164,7 @@ class ExportKernel(ida_kernwin.action_handler_t):
             return 0
         message = "Wrote %s in %s. Open it in IDA, then use Apply kernel types." % (written_file(stdout), output)
         ida_kernwin.msg("[MemLens] %s\n" % message)  # info() can be silenced for good by its checkbox
-        ida_kernwin.info(message)
+        ida_kernwin.info(message.replace("%", "%%"))  # info() is printf-style in IDAPython (not wrapped like msg/warning)
         return 1
 
     def update(self, ctx):

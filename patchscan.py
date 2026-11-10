@@ -89,8 +89,11 @@ HANDLER_KINDS = (("function_trace_call", "ftrace"), ("ftrace_ops_list_func", "ft
 
 def first_handler(image, page, span=0x200):
     """The first named function a copied hook page calls (rel32 call landing exactly on a symbol start)."""
-    code = image.read(page, span)
-    if code is None:
+    segment = image.segment(page)
+    if segment is None:
+        return None
+    code = image.read(page, min(span, segment[1] - page))
+    if not code:
         return None
     for offset in range(len(code) - 4):
         if code[offset] != 0xE8:

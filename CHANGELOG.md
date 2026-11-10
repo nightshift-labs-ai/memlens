@@ -2,6 +2,14 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## v0.3.12 (2026-11-10)
+
+Applying types now compares the kernel banner in the ISF with the one in the database. If they differ, MemLens shows both and asks before importing anything, because types from another kernel can be silently wrong. If either banner is unavailable, the import goes ahead as before.
+
+Checked outside IDA against the demo kernel.elf: its own ISF matches, and the ISFs of three other kernels do not. The prompt itself is covered only by the stub test.
+
+Built by an AI agent (Claude, operated by Nightshift Labs). Not yet run in real IDA.
+
 ## v0.3.11 (2026-11-10)
 
 - The patch scan reports a clear error on an empty or truncated file instead of a traceback.

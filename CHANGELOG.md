@@ -2,6 +2,19 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## v0.3.13 (2026-11-10)
+
+Fixes from a review of the exporter:
+
+- Linker boundary labels such as __softirqentry_text_end are no longer typed as functions, so they do not take the place of the real function name at the same address.
+- The written row now counts the symbols actually in the ELF, and section, kernel and module rows print canonical addresses.
+- A module symbol whose name begins like a compiler suffix (evil.cold_path) now counts as a module, and compiler clones such as foo.isra.0 are also checked for jumps into modules.
+- patchscan says how many functions it scanned and warns when there were none, so an empty list cannot be mistaken for clean.
+- tests/check_elf.sh no longer needs gawk.
+- The write-up names the closest prior art (Volatility 2 linux_check_inline_kernel, crash, volshell, vmlinux-to-elf).
+
+Built by an AI agent (Claude, operated by Nightshift Labs). Not yet run in real IDA.
+
 ## v0.3.12 (2026-11-10)
 
 Applying types now compares the kernel banner in the ISF with the one in the database. If they differ, MemLens shows both and asks before importing anything, because types from another kernel can be silently wrong. If either banner is unavailable, the import goes ahead as before.

@@ -70,4 +70,28 @@ put(0x000, call(BASE, BASE + 0x900, 0xE9))                                      
 put(0x100, call(BASE + 0x100, 0xffffffffc0007000, 0xE9))                        # kernel jumps into a module
 symbols = [("foo", BASE, 0x100), ("bar", BASE + 0x100, 0x100), ("foo.constprop.0", BASE + 0x900, 0x100), ("evil.hook", 0xffffffffc0007000, 0x100)]
 assert [row[1] for row in ps.scan_functions(ps.Image(elf(code, symbols)))] == ["bar"]
+# Absolute-address inline hooks (not compiler output at an entry), at the entry, after endbr64, after the ftrace NOP.
+EVIL = 0xffffffffc0009000
+code = bytearray(b"\x90" * TEXT)
+put(0x000, b"\xff\x25\x00\x00\x00\x00" + struct.pack("<Q", EVIL))                     # jmp [rip+0]; dq target
+put(0x100, b"\xf3\x0f\x1e\xfa" + b"\x48\xb8" + struct.pack("<Q", EVIL) + b"\xff\xe0")   # endbr64; movabs rax; jmp rax
+put(0x200, b"\x49\xbb" + struct.pack("<Q", EVIL) + b"\x41\xff\xe3")                  # movabs r11; jmp r11
+put(0x300, NOP + b"\x68" + struct.pack("<i", EVIL - (1 << 64)) + b"\xc3")              # ftrace NOP; push imm32; ret
+put(0x400, b"\x48\xb8" + struct.pack("<Q", EVIL) + b"\xff\xd0")                       # movabs rax; call rax
+put(0x500, b"\x48\xb8" + struct.pack("<Q", 1234) + b"\x48\x89")                       # movabs rax, 1234; mov ...: clean
+put(0x600, b"\x68" + struct.pack("<i", 5) + b"\x58")                                  # push 5; pop rax: clean
+put(0x700, b"\x49\xbb" + struct.pack("<Q", BASE + 0x900) + b"\x41\xff\xe3")          # movabs r11 to a kernel symbol: still a patch
+put(0x800, b"\x48\xb8" + struct.pack("<Q", 0xffffffffc0007000) + b"\xff\xe0")         # into a module
+symbols = [("ripjmp", BASE, 0x100), ("movjmp", BASE + 0x100, 0x100), ("r11jmp", BASE + 0x200, 0x100), ("pushret", BASE + 0x300, 0x100),
+           ("movcall", BASE + 0x400, 0x100), ("plain_mov", BASE + 0x500, 0x100), ("plain_push", BASE + 0x600, 0x100),
+           ("to_kernel", BASE + 0x700, 0x100), ("to_module", BASE + 0x800, 0x100), ("helper", BASE + 0x900, 0x100),
+           ("evil.hook", 0xffffffffc0007000, 0x100)]
+found = {row[1]: row for row in ps.scan_functions(ps.Image(elf(code, symbols)))}
+assert set(found) == {"ripjmp", "movjmp", "r11jmp", "pushret", "movcall", "to_kernel", "to_module"}, found
+assert found["ripjmp"][2] == "jmp [rip+0] to memory with no symbol" and found["ripjmp"][4] == EVIL
+assert found["movjmp"][2] == "movabs+jmp reg to memory with no symbol" and found["movjmp"][4] == EVIL
+assert found["r11jmp"][4] == EVIL and found["pushret"][2] == "push+ret to memory with no symbol" and found["pushret"][4] == EVIL
+assert found["movcall"][2].startswith("movabs+call reg")
+assert found["to_kernel"][2] == "movabs+jmp reg at entry" and found["to_kernel"][3] == "helper"
+assert found["to_module"][2] == "movabs+jmp reg from kernel into a module"
 print("patchscan tests OK")

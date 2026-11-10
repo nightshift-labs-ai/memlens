@@ -82,11 +82,51 @@ def describe(image, address):
     return image.symbol_at(address) or ("%#x (no symbol)" % address)
 
 
+def absolute_hook(code, start):
+    """(how, target) for an absolute-address hook starting at code[start], or None.
+
+    The compiler never puts these at a function entry, so any of them there is a patch:
+    jmp [rip+0] followed by the 8-byte target; movabs <reg>, imm64 then jmp/call <reg>;
+    push imm32 then ret.
+    """
+    at = code[start:]
+    if at[:6] == b"\xff\x25\x00\x00\x00\x00" and len(at) >= 14:
+        return "jmp [rip+0]", struct.unpack_from("<Q", at, 6)[0]
+    if len(at) >= 13 and at[0] in (0x48, 0x49) and 0xB8 <= at[1] <= 0xBF:
+        reg = at[1] - 0xB8
+        tail = at[10:13] if at[0] == 0x49 else b"\x00" + at[10:12]
+        if at[0] == 0x49 and tail[0] != 0x41:
+            return None
+        if tail[1] == 0xFF and tail[2] in (0xE0 + reg, 0xD0 + reg):
+            return ("movabs+jmp reg" if tail[2] == 0xE0 + reg else "movabs+call reg"), struct.unpack_from("<Q", at, 2)[0]
+        return None
+    if len(at) >= 6 and at[0] == 0x68 and at[5] == 0xC3:
+        return "push+ret", struct.unpack_from("<i", at, 1)[0] & 0xFFFFFFFFFFFFFFFF
+    return None
+
+
+def absolute_finding(image, entry, name, how, target):
+    symbol = image.symbol_at(target)
+    if symbol is None or symbol.startswith(TARGET_PREFIX):
+        what = "%s to memory with no symbol" % how
+    elif "." in symbol and "." not in name and not symbol.split(".", 1)[1].startswith(COMPILER_SUFFIXES):
+        what = "%s from kernel into a module" % how
+    else:
+        what = "%s at entry" % how
+    return (entry, name, what, describe(image, target), target)
+
+
 def classify_entry(image, entry, name):
     """One finding (address, function, what, target label, target address), or None if unremarkable."""
-    code = image.read(entry, 16)
+    code = image.read(entry, 32) or image.read(entry, 16)
     if code is None or name.startswith(SKIP_PREFIXES) or name in FTRACE_OWN:
         return None
+    first = 4 if code[:4] == ENDBR64 else 0
+    # Absolute-address hooks: at the entry, after endbr64, or after the 5-byte ftrace NOP.
+    for start in (first, first + 5) if code[first:first + 5] == FENTRY_NOP else (first,):
+        hook = absolute_hook(code, start)
+        if hook:
+            return absolute_finding(image, entry, name, hook[0], hook[1])
     start = 4 if code[:4] == ENDBR64 else 0
     op = code[start]
     site = entry + start

@@ -16,6 +16,7 @@ ENDBR_FORMS = (ENDBR64, b"\x66\x0f\x1f\x00", b"\x0f\x1f\x40\xd6")
 FENTRY_NOP = b"\x0f\x1f\x44\x00\x00"
 STT_FUNC = 2
 EM_X86_64 = 62
+BAD_ELF = (ValueError, struct.error, IndexError)  # what a truncated or malformed file can raise
 # Only a kernel file from disk has these: its alternatives are unapplied, so entry bytes are not live code.
 ON_DISK_SECTIONS = {".altinstructions", ".altinstr_replacement", ".altinstr_aux", "__ksymtab"}
 # Trampolines that are jumps by design, and compiler padding symbols.
@@ -265,12 +266,12 @@ def scan(blob):
 def main(argv):
     with open(argv[1], "rb") as handle:
         blob = handle.read()
-    if on_disk_kernel(blob):
-        print("warning: this is a kernel file from disk, not a memory export; its unapplied alternatives show up as false rows", file=sys.stderr)
     try:
+        if on_disk_kernel(blob):
+            print("warning: this is a kernel file from disk, not a memory export; its unapplied alternatives show up as false rows", file=sys.stderr)
         findings = scan(blob)
-    except ValueError as error:
-        sys.exit("patchscan: %s" % error)
+    except BAD_ELF as error:
+        sys.exit("patchscan: not a usable 64-bit ELF: %s" % error)
     for address, name, kind, target, _ in findings:
         print("%#x\t%s\t%s\t%s" % (address, name, kind, target))
 

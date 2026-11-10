@@ -5,6 +5,7 @@ Two actions under Edit > Plugins:
   * Apply kernel types from ISF: imports every struct, union and enum of that kernel.
   * Show patched kernel functions: lists hooked entries and odd syscall slots, Enter jumps there.
 """
+import base64
 import traceback
 import os
 import shutil
@@ -13,6 +14,7 @@ import sys
 import tempfile
 import time
 
+import ida_bytes
 import ida_idaapi
 import ida_kernwin
 import ida_nalt
@@ -45,9 +47,36 @@ def check_sizes(expected):
     return missing, wrong
 
 
-def apply_types(isf_path):
-    """Import the ISF's types, type the globals, and check the result against the ISF."""
+def banner_mismatch(isf):
+    """(ISF banner, database banner) if the ISF was built for another kernel; None if they agree or cannot be compared."""
+    data = (isf.get("symbols", {}).get("linux_banner") or {}).get("constant_data")
+    address = idc.get_name_ea_simple("linux_banner")
+    if not data or address == idc.BADADDR:
+        return None
+    expected = base64.b64decode(data).split(b"\0")[0]
+    actual = ida_bytes.get_bytes(address, len(expected)) or b""
+    return None if actual == expected else (expected, actual)
+
+
+def confirm_other_kernel(expected, actual):
+    ida_kernwin.hide_wait_box()
+    text = "This ISF was built for a different kernel, so its types may be wrong here.\n\nISF: %s\nDatabase: %s\n\nImport anyway?" % (
+        expected.decode("ascii", "replace").strip(), actual.decode("ascii", "replace").strip())
+    answer = ida_kernwin.ask_yn(ida_kernwin.ASKBTN_NO, text.replace("%", "%%"))
+    ida_kernwin.show_wait_box("MemLens: importing types")
+    return answer == ida_kernwin.ASKBTN_YES
+
+
+def apply_types(isf_path, confirm=None):
+    """Import the ISF's types, type the globals, and check the result against the ISF.
+
+    confirm(expected, actual) decides whether to go on when the ISF's kernel banner differs from the database's;
+    returning False stops before anything is imported, and apply_types returns None.
+    """
     isf = isf2c.load_isf(isf_path)
+    mismatch = banner_mismatch(isf)
+    if mismatch and confirm and not confirm(*mismatch):
+        return None
     generator = isf2c.Generator(isf)
 
     def progress(done, total):
@@ -147,9 +176,11 @@ class ApplyTypes(ida_kernwin.action_handler_t):
             return 0
         ida_kernwin.show_wait_box("MemLens: reading ISF")
         try:
-            result = apply_types(path)
+            result = apply_types(path, confirm_other_kernel)
         finally:
             ida_kernwin.hide_wait_box()
+        if result is None:
+            return 0
         ida_kernwin.msg(report(result))
         return 1
 

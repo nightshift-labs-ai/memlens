@@ -3,7 +3,7 @@
   "plugin": {
     "name": "memlens",
     "entryPoint": "memlens_entry.py",
-    "version": "0.3.11",
+    "version": "0.3.12",
     "idaVersions": ">=9.0",
     "description": "Reverse engineer a Linux kernel from a memory image: exports kernel and modules as a symbolled ELF at their live addresses, imports every kernel type from a Volatility ISF, and lists patched kernel functions with their hook code.",
     "license": "MIT",

@@ -36,7 +36,9 @@ nalt = types.ModuleType("ida_nalt"); nalt.get_input_file_path = lambda: ""
 comments = {}
 idc.set_cmt = lambda ea, c, r: calls.append(("cmt", ea, c)) or comments.__setitem__(ea, c)
 idc.get_cmt = lambda ea, r: comments.get(ea)
-sys.modules.update(ida_kernwin=kw, ida_idaapi=api, ida_typeinf=ti, ida_nalt=nalt, idc=idc)
+dbytes = types.ModuleType("ida_bytes"); dbytes.get_bytes = lambda ea, size: b"Linux version 1.0"[:size]
+kw.ASKBTN_NO, kw.ASKBTN_YES = 0, 1
+sys.modules.update(ida_kernwin=kw, ida_idaapi=api, ida_typeinf=ti, ida_nalt=nalt, idc=idc, ida_bytes=dbytes)
 import memlens_entry as m
 isf = {"base_types": {"unsigned int": {"size": 4, "signed": False, "kind": "int"}},
        "enums": {}, "symbols": {"demo_var": {"address": 1, "type": {"kind": "struct", "name": "demo"}}, "absent": {"address": 2, "type": {"kind": "struct", "name": "demo"}}, "fn": {"address": 3, "type": {"kind": "base", "name": "void"}}}, "user_types": {"demo": {"kind": "struct", "size": 8, "fields": {"a": {"offset": 4, "type": {"kind": "base", "name": "unsigned int"}}, "private": {"offset": 0, "type": {"kind": "base", "name": "unsigned int"}}}}, "shrunk": {"kind": "struct", "size": 4, "fields": {"a": {"offset": 0, "type": {"kind": "base", "name": "unsigned int"}}}}, "gone": {"kind": "struct", "size": 4, "fields": {"a": {"offset": 0, "type": {"kind": "base", "name": "unsigned int"}}}}}}
@@ -68,6 +70,24 @@ with tempfile.TemporaryDirectory() as t:
     table = m.PatchList([(0x10, "fn", "what", "tgt", 0x20)])
     assert table.OnGetSize() == 1 and table.OnGetLine(0) == ["10", "fn", "what", "tgt"]
     assert table.OnSelectLine(0) == (0,) and ("jump", 0x10) in calls
+    import base64
+    def banner_isf(text):
+        data = dict(isf); data["symbols"] = dict(isf["symbols"], linux_banner={"address": 9, "constant_data": base64.b64encode(text + b"\0").decode()})
+        q = os.path.join(t, "banner.json"); json.dump(data, open(q, "w")); return q
+    idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000, "linux_banner": 0x3000}.get(n, idc.BADADDR)
+    asked = []
+    same = banner_isf(b"Linux version 1.0")
+    assert m.apply_types(same, lambda e, a: asked.append(e) or False) is not None and asked == []
+    other = banner_isf(b"Linux version 2.0")
+    calls[:] = [c for c in calls if c[0] in ("reg", "menu")]
+    assert m.apply_types(other, lambda e, a: asked.append((e, a)) or False) is None
+    assert asked == [(b"Linux version 2.0", b"Linux version 1.0")] and not [c for c in calls if c[0] == "parse"]
+    assert m.apply_types(other, lambda e, a: True) is not None
+    answers = []
+    kw.ask_yn = lambda d, text: answers.append(text) or kw.ASKBTN_NO
+    assert m.confirm_other_kernel(b"Linux 100% A", b"Linux B") is False and "100%%" in answers[0]
+    idc.get_name_ea_simple = lambda n: 0x1000 if n == "demo_var" else idc.BADADDR
+    assert m.banner_mismatch({"symbols": {"linux_banner": {"constant_data": "YQ=="}}}) is None  # no such symbol in the database
     comments[0x10] = "analyst note"
     m.add_comment(0x10, "MemLens: hook"); m.add_comment(0x10, "MemLens: hook"); m.add_comment(0x20, "MemLens: hook")
     assert comments == {0x10: "analyst note\nMemLens: hook", 0x20: "MemLens: hook"}, comments

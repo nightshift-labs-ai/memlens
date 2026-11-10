@@ -4,10 +4,10 @@ Reverse engineer a Linux kernel **as it was running**, from a memory image, in I
 
 A memory image holds the live kernel: its modules and its patched code. MemLens turns that image into something IDA understands:
 
-- **`kernel.elf`**: the kernel image and every loaded module, at their real KASLR-adjusted addresses, with a full symbol table (module symbols are named `nf_tables.nft_do_chain`; a tool that does not allow `.` in names may show `_` instead). It is an ordinary ELF, so IDA opens it with no custom loader.
+- **`kernel.elf`**: the kernel image and every loaded module, at their real KASLR-adjusted addresses, with a full symbol table (module symbols are named `nf_tables.nft_do_chain`; a tool that does not allow `.` in names may show `_` instead). It is an ordinary ELF: binutils and Ghidra 12.2 load it with no custom loader, and IDA's own ELF loader is meant to open it the same way (not yet tried in IDA).
 - **Every kernel type**: all structs, unions and enums from a Volatility 3 ISF, generated as one C header with exact layouts.
-- **Typed globals**: kernel data symbols get their real type, so `init_task` opens as a `struct task_struct`.
-- **A list of patched kernel functions**: every function whose entry was rewritten (ftrace, BPF trampolines, breakpoints, calls into unmapped memory), plus syscall table slots that leave the handlers. Enter jumps to it. Hook code in memory that belongs to no module is copied into the ELF, so you can read it.
+- **Typed globals**: kernel data symbols get their real type, so `init_task` becomes a `struct task_struct` (the declarations compile with gcc; applying them in IDA is part of the untested layer).
+- **A list of patched kernel functions**: named functions whose entry (or the instruction after `endbr64`) was rewritten to a 5-byte `call`/`jmp` (ftrace and BPF trampolines, ftrace-based kprobes, calls into unmapped memory or from the kernel into a module) or to an `int3` breakpoint, plus syscall table slots that leave the handlers. Other inline-hook encodings (`jmp [rip+0]`, `movabs` + `jmp reg`, `push`/`ret`) are not recognised yet, and functions without a symbol are not checked. Enter jumps to the function. Hook code in memory that belongs to no module is copied into the ELF, so you can read it.
 
 ## Status: read this first
 
@@ -25,13 +25,13 @@ pip install volatility3
 
 Or copy this folder into your IDA `plugins` directory. You also need an ISF symbol file for the kernel in the image; [dwarf2json](https://github.com/volatilityfoundation/dwarf2json) builds one from the kernel's debug package.
 
-## Try it in two minutes
+## Try it
 
-No memory image or Volatility needed. Download `memlens-demo-debian13.zip` from the [demo-data release](https://github.com/nightshift-labs-ai/memlens/releases/tag/demo-data) (22 MB). It holds a ready `kernel.elf` from a throwaway Debian 13 lab VM, the matching ISF, and the expected output.
+No memory image or Volatility needed. Download `memlens-demo-debian13.zip` from the [demo-data release](https://github.com/nightshift-labs-ai/memlens/releases/tag/demo-data) (22 MB). It holds a ready `kernel.elf` from a throwaway Debian 13 lab VM (67 MB, 233,305 symbols, 39,173 of them from modules; a different capture of the same kernel than the table below), the matching ISF, and the expected output. A whole kernel is a large database, so IDA's auto-analysis and the type import take a while; we have not timed them in IDA.
 
 1. Unzip it, then open `kernel.elf` in IDA.
 2. **MemLens: Apply kernel types from ISF** and pick the `.json.xz` file.
-3. **MemLens: Show patched kernel functions**. The lab VM has an ftrace hook on `vfs_getattr` and a kprobe on `do_sys_openat2`; both should be in the list, and Enter jumps to the function.
+3. **MemLens: Show patched kernel functions**. The lab VM's script set an ftrace filter on `vfs_getattr` and a kprobe on `do_sys_openat2`; a third patched entry, `bpf_lsm_file_open`, was not set by the script (its cause was not investigated). All three should be listed as `call to memory with no symbol` (each entry calls a trampoline page that no module owns, copied in as `memlens_target_<address>`), exactly as in `expected-patched-functions.txt` from the zip, made with `python3 patchscan.py kernel.elf`. Enter jumps to the function.
 
 ## Usage
 
@@ -60,7 +60,7 @@ Memory images were captured from QEMU guests; addresses differ per boot because 
 | Debian 13, 6.12.115 | 236,521 | 42,391 | `linux_banner`, `__x64_sys_read`, `nf_hook_slow`, `nf_tables.nft_do_chain` |
 | Ubuntu 26.04, 7.0.0-38 | 316,618 | 37,167 | `linux_banner`, `nf_hook_slow`, `nf_tables.nft_do_chain` |
 
-Every symbol lands inside exported memory. Module text, read-only data and data become separate sections with the right permissions, and LOAD segments never overlap (`tests/check_elf.sh`).
+Symbols whose address is not in exported memory are left out by design, so every symbol in the ELF points into a section. Module text, read-only data and data become separate sections with the right permissions, and LOAD segments never overlap (`tests/check_elf.sh`).
 
 Checked with binutils only, independently of this code (`tests/check_elf.sh`): canonical addresses in every segment, `linux_banner` reads back the true kernel version, and `__x64_sys_read`, `nf_hook_slow` and `nft_do_chain` disassemble to real function prologues.
 
@@ -68,10 +68,12 @@ Types are checked by compiling the generated header with gcc, asserting every st
 
 | Kernel | Layout assertions | Typed globals | Result |
 |---|---|---|---|
-| Debian 12, 6.1.0-54 | 59,662 | 62,355 | all pass |
-| Debian 13, 6.12.115 | 67,392 | 79,334 | all pass |
-| Ubuntu 24.04, 6.8.0-147 | 81,563 | 86,381 | all pass |
-| Ubuntu 26.04, 7.0.0-38 | 89,321 | 123,369 | all pass |
+| Debian 12, 6.1.0-54 | 59,662 | 62,340 | all pass |
+| Debian 13, 6.12.115 | 67,392 | 79,316 | all pass |
+| Ubuntu 24.04, 6.8.0-147 | 81,563 | 86,362 | all pass |
+| Ubuntu 26.04, 7.0.0-38 | 89,321 | 123,349 | all pass |
+
+Typed-global counts are from the current code. The gcc run was made on an earlier build that also declared 15 to 20 globals named like C++ keywords (`new`, `class`, ...), which are now skipped.
 
 Ghidra's C parser was run over the same header (`tests/ghidra/MemLensCheck.java`), after replacing `__int128` with a 16-byte struct, which Ghidra's parser does not know:
 
@@ -81,7 +83,7 @@ Ghidra's C parser was run over the same header (`tests/ghidra/MemLensCheck.java`
 | Debian 13, 6.12.115 | 11,451 | 0 | 0 |
 | Ubuntu 26.04, 7.0.0-38 | 14,930 | 0 | 0 |
 
-Neither gcc nor Ghidra accepting the header proves IDA's parser will; that is part of the untested layer. If IDA rejects a declaration, MemLens bisects its batches, keeps the rest, and reports the rejected ones in the Output window.
+Neither gcc nor Ghidra accepting the header proves IDA's parser will; that is part of the untested layer. If IDA rejects a declaration, MemLens is written to bisect its batches, keep the rest, and report the rejected ones in the Output window; that relies on IDA ignoring a redeclaration when a batch is parsed again, which we have not been able to observe in IDA.
 
 ## Limits
 

@@ -1,5 +1,7 @@
 # linux.kernel2elf: a memory image as a disassemblable kernel
 
+*This is the write-up for the Volatility side of MemLens as a standalone Volatility 3 plugin, prepared for the Volatility Foundation's 2026 plugin contest (not yet submitted: we are waiting for the organiser's answer on AI-built entries). The IDA side (`memlens_entry.py`, `isf2c.py`, `patchscan.py`) is described in the main README.*
+
 **Plugin:** `linux.kernel2elf` (Volatility 3, Linux, x86-64)
 **Author:** built by an autonomous AI agent operating a small software business; the human owner is the contest entrant and signs the CLA.
 
@@ -27,7 +29,7 @@ A GitHub repository search (name and description, November 2026) found no tool t
 
 ## 4. Validation
 
-Every sample is a QEMU guest captured by us; addresses differ per boot because of KASLR. `make_dist_k2e.sh` (in the package) regenerates all of this and stops on any failure.
+Every sample is a QEMU guest captured by us; addresses differ per boot because of KASLR. The script that regenerates all of this and stops on any failure ships with the Volatility contest package (`tools/make_dist_k2e.sh`); it is not in this repository.
 
 | Sample | Modules | Symbols | Module symbols | `patched` rows |
 |---|---|---|---|---|

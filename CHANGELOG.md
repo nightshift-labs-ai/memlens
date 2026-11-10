@@ -2,21 +2,42 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## v0.3.10 (2026-11-10)
+
+The patch list now sees hooks on functions the kernel sealed for IBT. On IBT kernels, a function that is never called indirectly has its endbr64 overwritten with a 4-byte NOP, and ftrace, kprobes and BPF trampolines patch the instruction after it. Those sites were skipped before; 12,060 function entries in the demo kernel have this form, including vfs_read and vfs_write. Both NOP encodings are handled, with unit tests.
+
+Also in this release:
+- The scan refuses non-x86-64 ELFs instead of decoding them as x86, and the IDA action refuses kernel files from disk, whose unapplied alternatives looked like hooks.
+- Comments the scan adds no longer replace an existing comment at that address.
+- A hook page near the end of a segment still gets its handler label.
+
+Checked on five captured Debian and Ubuntu kernels: the reported rows are the same as before, and the clean Ubuntu 7.0 capture still reports none.
+
+Built by an AI agent (Claude, operated by Nightshift Labs). Not yet run in real IDA.
+
 ## v0.3.9 (2026-11-10)
 
 The patch list now names the handler each copied hook page calls. On the demo kernel.elf: vfs_getattr -> function_trace_call (ftrace), do_sys_openat2 -> kprobe_ftrace_handler (kprobe via ftrace), bpf_lsm_file_open -> __bpf_tramp_enter (BPF trampoline). Only calls that land exactly on a named function start count. Unit test added.
+
+Built by an AI agent (Claude, operated by Nightshift Labs). Not yet run inside real IDA.
 
 ## v0.3.8 (2026-11-10)
 
 An unexpected error in any action now shows one warning, with the traceback in the Output window, instead of a traceback dialog.
 
+Built by an AI agent (Claude, operated by Nightshift Labs). Not yet run inside real IDA.
+
 ## v0.3.7 (2026-11-10)
 
 Patch scan now also finds absolute-address inline hooks at a function entry, after endbr64 and after the ftrace NOP: jmp [rip+0] followed by the address, movabs <reg> + jmp/call <reg>, and push imm32; ret. Each has a unit test on a hand-made ELF. No new rows on the demo kernel.elf or on two static kernels (Debian 13 6.12, Ubuntu 26.04 7.0). Also in this version: README accuracy pass and a 'What you get' section with real output from the demo.
 
+Built by an AI agent (Claude, operated by Nightshift Labs). Not yet run inside real IDA.
+
 ## v0.3.6 (2026-11-10)
 
 README accuracy pass after an independent review: it now says exactly which hook encodings the patch scan recognises (5-byte call/jmp and int3 at the entry or after endbr64; jmp [rip], movabs+jmp and push/ret are not recognised yet), marks IDA-side behaviour as not yet tried in IDA, gives the current typed-global counts, the demo capture's own numbers and its three expected rows, and explains where the kernel2elf write-up comes from. No code changes.
+
+Built by an AI agent (Claude, operated by Nightshift Labs). Not yet run inside real IDA.
 
 ## v0.3.5 (2026-11-10)
 
@@ -50,4 +71,4 @@ First public release. Linux memory image to symbolled ELF and C types for IDA, p
 
 Not yet run inside real IDA: see README, What was verified.
 
-All versions were built by an AI agent (Claude, operated by Nightshift Labs).
+Built by an AI agent (Claude, operated by Nightshift Labs).

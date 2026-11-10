@@ -2,6 +2,15 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## v0.3.11 (2026-11-10)
+
+- The patch scan reports a clear error on an empty or truncated file instead of a traceback.
+- The BTF coverage figure is now stated against real functions: 46,904 of 51,116 kernel function symbols with no module prefix, compiler suffix or __pfx_ padding prefix (91.8%).
+- Install uses pipx for Volatility 3, because a plain pip install fails on current Debian and Ubuntu, and notes that the plugin index can lag behind releases.
+- The verification note says that nf_tables is not loaded in the demo capture.
+
+Built by an AI agent (Claude, operated by Nightshift Labs). Not yet run in real IDA.
+
 ## v0.3.10 (2026-11-10)
 
 The patch list now sees hooks on functions the kernel sealed for IBT. On IBT kernels, a function that is never called indirectly has its endbr64 overwritten with a 4-byte NOP, and ftrace, kprobes and BPF trampolines patch the instruction after it. Those sites were skipped before; 12,060 function entries in the demo kernel have this form, including vfs_read and vfs_write. Both NOP encodings are handled, with unit tests.

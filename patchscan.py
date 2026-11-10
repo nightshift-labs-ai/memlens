@@ -88,6 +88,16 @@ class Image:
         return name if address - value < (length or 0x1000) else None
 
 
+def compiler_clone(name):
+    """foo.isra.0 or foo.cold: a compiler-made copy. evil.cold_path is a module symbol, so whole components only."""
+    return "." in name and name.split(".", 1)[1].split(".")[0] in COMPILER_SUFFIXES
+
+
+def into_module(name, symbol):
+    """True when a kernel function's target is a module symbol (module.symbol)."""
+    return "." in symbol and not compiler_clone(symbol) and ("." not in name or compiler_clone(name))
+
+
 def describe(image, address):
     return image.symbol_at(address) or ("%#x (no symbol)" % address)
 
@@ -156,7 +166,7 @@ def absolute_finding(image, entry, name, how, target):
     symbol = image.symbol_at(target)
     if symbol is None or symbol.startswith(TARGET_PREFIX):
         what = "%s to memory with no symbol" % how
-    elif "." in symbol and "." not in name and not symbol.split(".", 1)[1].startswith(COMPILER_SUFFIXES):
+    elif into_module(name, symbol):
         what = "%s from kernel into a module" % how
     else:
         what = "%s at entry" % how
@@ -195,7 +205,7 @@ def classify_entry(image, entry, name):
         return (entry, name, "ftrace call at entry", label, target)
     if symbol is None or symbol.startswith(TARGET_PREFIX):
         return (entry, name, "%s to memory with no symbol" % verb, hook_label(image, target), target)
-    if "." in symbol and "." not in name and not symbol.split(".", 1)[1].startswith(COMPILER_SUFFIXES):
+    if into_module(name, symbol):
         return (entry, name, "%s from kernel into a module" % verb, label, target)
     return None
 
@@ -269,6 +279,11 @@ def main(argv):
     try:
         if on_disk_kernel(blob):
             print("warning: this is a kernel file from disk, not a memory export; its unapplied alternatives show up as false rows", file=sys.stderr)
+        image = Image(blob)
+        functions = sum(1 for symbol in image.symbols if symbol[3] == STT_FUNC)
+        print("%d function symbols scanned" % functions, file=sys.stderr)
+        if not functions:
+            print("warning: no function symbols, so nothing was checked; an empty list here does not mean clean", file=sys.stderr)
         findings = scan(blob)
     except BAD_ELF as error:
         sys.exit("patchscan: not a usable 64-bit ELF: %s" % error)

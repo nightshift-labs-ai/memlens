@@ -23,7 +23,11 @@ vollog = logging.getLogger(__name__)
 
 PAGE = 0x1000
 SHF_WRITE, SHF_ALLOC, SHF_EXEC = 1, 2, 4
-STT_OBJECT, STT_FUNC = 1, 2
+STT_NOTYPE, STT_OBJECT, STT_FUNC = 0, 1, 2
+# Linker boundary labels share addresses with real functions; typed as functions they would displace those names.
+MARKER_NAMES = ("_text", "_stext", "_etext", "_sinittext", "_einittext")
+MARKER_SUFFIXES = ("_text_start", "_text_end")
+MARKER_PREFIXES = ("__start_", "__stop_")
 GLOBAL = 1
 
 
@@ -70,6 +74,7 @@ class Elf:
             shnames += name.encode() + b"\0"
 
         strtab, symtab = bytearray(b"\0"), bytearray(b"\0" * 24)
+        self.emitted = 0
         starts = [s[1] for s in sections]
         for name, addr, size, kind in sorted(self.symbols, key=lambda item: item[1]):
             index = bisect.bisect_right(starts, addr) - 1
@@ -78,6 +83,7 @@ class Elf:
             offset = len(strtab)
             strtab += name.encode("ascii", "replace") + b"\0"
             symtab += struct.pack("<IBBHQQ", offset, (GLOBAL << 4) | kind, 0, index + 1, addr, size)
+            self.emitted += 1
 
         count = len(sections)
         cursor = 64 + 56 * count
@@ -175,7 +181,7 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
         boundaries.append((data_start, address("_end"), ".data", SHF_ALLOC | SHF_WRITE))
         for start, end, name, flags in boundaries:
             if start < end:
-                yield (0, ("section", name, format_hints.Hex(start), self._add_range(elf, layer, start, end, name, flags)))
+                yield (0, ("section", name, format_hints.Hex(canonical(start)), self._add_range(elf, layer, start, end, name, flags)))
 
         text_start, text_end = boundaries[0][0], boundaries[0][1]
         addresses = []
@@ -190,9 +196,10 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
         for value, name in addresses:
             following = bisect.bisect_right(ordered, value)
             size = ordered[following] - value if following < len(ordered) else 0
-            kind = STT_FUNC if text_start <= value < text_end else STT_OBJECT
+            marker = name in MARKER_NAMES or name.endswith(MARKER_SUFFIXES) or name.startswith(MARKER_PREFIXES)
+            kind = STT_NOTYPE if marker else STT_FUNC if text_start <= value < text_end else STT_OBJECT
             elf.add_symbol(name, value, size, kind)
-        yield (0, ("symbols", "kernel", format_hints.Hex(text_start), len(addresses)))
+        yield (0, ("symbols", "kernel", format_hints.Hex(canonical(text_start)), len(addresses)))
 
         if not self.config.get("no-modules"):
             for module in linux_utilities_modules.Modules.list_modules(self.context, self.config["kernel"]):
@@ -211,7 +218,7 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
                             symbols += 1
                 except exceptions.InvalidAddressException:
                     vollog.info("symbols of %s are partly unreadable", name)
-                yield (0, ("module", name, format_hints.Hex(base), symbols if written else 0))
+                yield (0, ("module", name, format_hints.Hex(canonical(base)), symbols if written else 0))
 
         for target in self._hook_targets(elf):
             copied = self._add_range(elf, layer, target & ~(PAGE - 1), (target & ~(PAGE - 1)) + 2 * PAGE, ".hook.%x" % target, SHF_ALLOC | SHF_EXEC)
@@ -226,7 +233,7 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
 
         with self.open("kernel.elf") as handle:
             handle.write(finished.getvalue())
-            yield (0, ("written", handle.preferred_filename, format_hints.Hex(0), len(elf.symbols)))
+            yield (0, ("written", handle.preferred_filename, format_hints.Hex(0), elf.emitted))
 
     @staticmethod
     def _module_regions(module) -> List[Tuple[str, int, int, int]]:

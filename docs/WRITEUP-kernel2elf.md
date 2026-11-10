@@ -1,6 +1,6 @@
 # linux.kernel2elf: a memory image as a disassemblable kernel
 
-*This is the write-up for the Volatility side of MemLens as a standalone Volatility 3 plugin, prepared for the Volatility Foundation's 2026 plugin contest (not yet submitted: we are waiting for the organiser's answer on AI-built entries). The IDA side (`memlens_entry.py`, `isf2c.py`, `patchscan.py`) is described in the main README.*
+*A Volatility 3 plugin that writes a Linux kernel and its modules from a memory image as one ELF with symbols, and lists patched kernel functions.*
 
 **Plugin:** `linux.kernel2elf` (Volatility 3, Linux, x86-64)
 **Author:** built by an autonomous AI agent operating a small software business; the human owner is the contest entrant and signs the CLA.
@@ -12,8 +12,9 @@ After a memory acquisition, an analyst often wants to read kernel code as it was
 ## 2. What exists
 
 - `linux.module_extract` recreates one module as an ELF from a given address. This plugin writes the whole kernel and all listed modules together, at their live addresses, under one symbol table, so calls between the kernel and a module resolve.
-- `linux.tracing.ftrace`, `linux.check_syscall` and `linux.malware.modxview` read kernel structures to report hooks and hidden modules. The `patched` rows here use a different source: the code bytes at each function entry. The two views are complementary.
-- Kallsyms importers for disassemblers name a kernel that is already loaded; they do not start from a memory image.
+- `linux.tracing.ftrace`, `linux.check_syscall` and `linux.malware.modxview` read kernel structures to report hooks and hidden modules. The `patched` rows here use a different source: the code bytes at each function entry. The two views are complementary: on the shipped `trace.elf`, `linux.tracing.ftrace` prints `-` as the hooked symbol for `function_trace_call` and `call_direct_funcs`, while the `patched` rows name `vfs_getattr` and `bpf_lsm_file_open`.
+- Kallsyms importers for disassemblers name a kernel that is already loaded; they do not start from a memory image. `vmlinux-to-elf` builds a symbolled ELF from a kernel file, without modules or live state.
+- Volatility 2's `linux_check_inline_kernel` already decodes the first instructions of selected kernel functions and flags jumps, calls and push-ret to unknown targets. `crash` can disassemble a vmcore given a matching vmlinux, and volshell can disassemble an address. What this plugin adds is Volatility 3 support, every symbolled function instead of a fixed set of pointers, and the hook code copied into one file that a disassembler can follow.
 
 A GitHub repository search (name and description, November 2026) found no tool that writes a whole kernel from a Volatility image as a symbolled ELF. That search is not exhaustive.
 
@@ -39,7 +40,7 @@ Every sample is a QEMU guest captured by us; addresses differ per boot because o
 | Ubuntu 24.04, 6.8.0-147 | 61 | 267,563 | 27,131 | `__hid_bpf_tail_call` |
 | Ubuntu 26.04, 7.0.0-38 | 72 | 316,618 | 37,167 | none |
 
-Checks with tools independent of this code (`tests/check_elf.sh`, binutils only): no LOAD segment overlaps, all addresses are canonical, `linux_banner` reads back the true kernel version, and `__x64_sys_read`, `nf_hook_slow` and `nft_do_chain` disassemble to real function prologues where those symbols are present.
+Checks with tools independent of this code (`tests/check_elf.sh`, binutils and a short Python step): no LOAD segment overlaps, all addresses are canonical, `linux_banner` reads back the true kernel version, and `__x64_sys_read`, `nf_hook_slow` and `nft_do_chain` disassemble to real function prologues where those symbols are present.
 
 On Debian 12, Debian 13 and Ubuntu 26.04, the ELF was also imported into Ghidra 12.2 headless. It loaded, and the same functions disassembled correctly.
 
@@ -57,5 +58,5 @@ See `README-kernel2elf.md`. Mainly: x86-64 only, function entries only, and modu
 - **It is useful beyond one question.** The same ELF opens in objdump, Ghidra or other ELF tools, so an analyst can follow a suspicious module or hook with the tools they already use.
 - **It adds an independent view of hooks.** The `patched` rows come from the code bytes at function entries, not from the kernel structures other plugins read, and hook code that no module owns is copied in where it can be read.
 - **It gets the awkward parts right.** Since Linux 6.4 a module is several separate allocations. Each region is exported with its own permissions, and older kernels fall back to `core_layout`.
-- **It is verified with tools that share none of its code.** Five samples on four kernel versions pass the binutils checks: no overlapping segments, the true kernel banner, real function prologues. Ghidra 12.2 headless imported three of them. Four classes of false positive found in testing are removed and pinned by unit tests.
+- **It is verified with tools that share none of its code.** Five samples on four kernel versions pass the independent checks: no overlapping segments, the true kernel banner, real function prologues. Ghidra 12.2 headless imported three of them. Four classes of false positive found in testing are removed and pinned by unit tests.
 - **It says what it cannot do.** x86-64 only, function entries only, modules unlinked from the list are not exported, and a `patched` row reports a rewritten entry rather than malice.

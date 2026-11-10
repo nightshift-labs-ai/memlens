@@ -117,6 +117,15 @@ for poison in (b"\x66\x0f\x1f\x00", b"\x0f\x1f\x40\xd6"):
     found = {row[1]: row for row in ps.scan_functions(ps.Image(elf(code, symbols)))}
     assert set(found) == {"called", "probed", "absolute"}, found
     assert found["called"][4] == EVIL and found["probed"][2].startswith("int3") and found["absolute"][4] == EVIL
+# A module symbol whose name begins like a compiler suffix is still a module; real clones are not.
+code = bytearray(b"\x90" * TEXT)
+put(0x000, call(BASE, 0xffffffffc0007000, 0xE9))                                # jump to evil.cold_path
+put(0x100, call(BASE + 0x100, BASE + 0x900, 0xE9))                              # jump to its own foo.cold
+put(0x200, call(BASE + 0x200, 0xffffffffc0007100, 0xE9))                        # a compiler clone jumping into a module
+symbols2 = [("a_fn", BASE, 0x100), ("b_fn", BASE + 0x100, 0x100), ("c_fn.isra.0", BASE + 0x200, 0x100), ("foo.cold", BASE + 0x900, 0x100),
+            ("evil.cold_path", 0xffffffffc0007000, 0x100), ("evil.hook", 0xffffffffc0007100, 0x100)]
+found = {row[1]: row for row in ps.scan_functions(ps.Image(elf(code, symbols2)))}
+assert set(found) == {"a_fn", "c_fn.isra.0"}, found
 # Other architectures are refused, and a kernel file from disk is recognised.
 blob = elf(code, symbols)
 arm = blob[:18] + struct.pack("<H", 183) + blob[20:]

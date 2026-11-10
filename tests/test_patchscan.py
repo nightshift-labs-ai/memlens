@@ -104,4 +104,32 @@ symbols = [("hooked", BASE + 0x200, 0x100), ("other", BASE + 0x300, 0x100), ("me
 found = {row[1]: row for row in ps.scan_functions(ps.Image(elf(code, symbols)))}
 assert found["hooked"][3] == "memlens_target_ffffffff81000c00 (calls kprobe_ftrace_handler, kprobe via ftrace)", found
 assert found["other"][3] == "memlens_target_ffffffff81000e00", found
+# Sealed ENDBR: the kernel replaced endbr64 with a 4-byte NOP, and hooks still sit at +4 (both poison encodings).
+for poison in (b"\x66\x0f\x1f\x00", b"\x0f\x1f\x40\xd6"):
+    code = bytearray(b"\x90" * TEXT)
+    put(0x000, poison + NOP + b"\x55")                                              # sealed and idle: clean
+    put(0x100, poison + call(BASE + 0x104, EVIL))                                   # sealed, call to no symbol
+    put(0x200, poison + b"\xcc\x89\xe5")                                            # sealed, kprobe
+    put(0x300, poison + b"\x48\xb8" + struct.pack("<Q", EVIL) + b"\xff\xe0")         # sealed, movabs + jmp
+    put(0x400, poison + call(BASE + 0x404, BASE + 0x900))                           # sealed, call into the kernel: clean
+    symbols = [("idle", BASE, 0x100), ("called", BASE + 0x100, 0x100), ("probed", BASE + 0x200, 0x100), ("absolute", BASE + 0x300, 0x100),
+               ("plain", BASE + 0x400, 0x100), ("helper", BASE + 0x900, 0x100)]
+    found = {row[1]: row for row in ps.scan_functions(ps.Image(elf(code, symbols)))}
+    assert set(found) == {"called", "probed", "absolute"}, found
+    assert found["called"][4] == EVIL and found["probed"][2].startswith("int3") and found["absolute"][4] == EVIL
+# Other architectures are refused, and a kernel file from disk is recognised.
+blob = elf(code, symbols)
+arm = blob[:18] + struct.pack("<H", 183) + blob[20:]
+try:
+    ps.Image(arm)
+except ValueError as error:
+    assert "not x86-64" in str(error)
+else:
+    raise AssertionError("arm64 ELF accepted")
+assert not ps.on_disk_kernel(blob)
+name = b".altinstructions\0"
+shoff = struct.unpack_from("<Q", blob, 40)[0]
+header = bytearray(blob[shoff + 128:shoff + 192]); struct.pack_into("<Q", header, 24, len(blob)); struct.pack_into("<I", header, 0, 0)
+disk = bytearray(blob[:shoff + 128]) + header + name
+assert ps.on_disk_kernel(bytes(disk))
 print("patchscan tests OK")

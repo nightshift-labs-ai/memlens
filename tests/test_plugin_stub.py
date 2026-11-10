@@ -33,7 +33,9 @@ idc.BADADDR = -1
 idc.get_name_ea_simple = lambda n: 0x1000 if n == "demo_var" else idc.BADADDR
 idc.SetType = lambda ea, d: calls.append(("settype", ea, d)) or True
 nalt = types.ModuleType("ida_nalt"); nalt.get_input_file_path = lambda: ""
-idc.set_cmt = lambda ea, c, r: calls.append(("cmt", ea, c))
+comments = {}
+idc.set_cmt = lambda ea, c, r: calls.append(("cmt", ea, c)) or comments.__setitem__(ea, c)
+idc.get_cmt = lambda ea, r: comments.get(ea)
 sys.modules.update(ida_kernwin=kw, ida_idaapi=api, ida_typeinf=ti, ida_nalt=nalt, idc=idc)
 import memlens_entry as m
 isf = {"base_types": {"unsigned int": {"size": 4, "signed": False, "kind": "int"}},
@@ -66,5 +68,8 @@ with tempfile.TemporaryDirectory() as t:
     table = m.PatchList([(0x10, "fn", "what", "tgt", 0x20)])
     assert table.OnGetSize() == 1 and table.OnGetLine(0) == ["10", "fn", "what", "tgt"]
     assert table.OnSelectLine(0) == (0,) and ("jump", 0x10) in calls
+    comments[0x10] = "analyst note"
+    m.add_comment(0x10, "MemLens: hook"); m.add_comment(0x10, "MemLens: hook"); m.add_comment(0x20, "MemLens: hook")
+    assert comments == {0x10: "analyst note\nMemLens: hook", 0x20: "MemLens: hook"}, comments
     plugin.term(); assert sum(c[0] == "unreg" for c in calls) == 3
 print("stub test OK (fake IDA modules)")

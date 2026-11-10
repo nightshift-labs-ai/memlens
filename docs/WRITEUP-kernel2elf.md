@@ -29,7 +29,7 @@ A GitHub repository search (name and description, November 2026) found no tool t
 
 ## 4. Validation
 
-Every sample is a QEMU guest captured by us; addresses differ per boot because of KASLR. The script that regenerates all of this and stops on any failure ships with the Volatility contest package (`tools/make_dist_k2e.sh`); it is not in this repository.
+Every sample is a QEMU guest captured by us; addresses differ per boot because of KASLR. The table was produced by `make_dist_k2e.sh`, which stops on any failure. A copy sits at the root of the Volatility contest package to document the steps; it needs our own memory images, so a reader cannot rerun it.
 
 | Sample | Modules | Symbols | Module symbols | `patched` rows |
 |---|---|---|---|---|

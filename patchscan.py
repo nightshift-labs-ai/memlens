@@ -10,8 +10,14 @@ import struct
 import sys
 
 ENDBR64 = b"\xf3\x0f\x1e\xfa"
+# With IBT the kernel seals functions that are never called indirectly: it overwrites ENDBR with a
+# 4-byte NOP (gen_endbr_poison, older and newer encodings). ftrace, kprobes and BPF still patch at +4.
+ENDBR_FORMS = (ENDBR64, b"\x66\x0f\x1f\x00", b"\x0f\x1f\x40\xd6")
 FENTRY_NOP = b"\x0f\x1f\x44\x00\x00"
 STT_FUNC = 2
+EM_X86_64 = 62
+# Only a kernel file from disk has these: its alternatives are unapplied, so entry bytes are not live code.
+ON_DISK_SECTIONS = {".altinstructions", ".altinstr_replacement", ".altinstr_aux", "__ksymtab"}
 # Trampolines that are jumps by design, and compiler padding symbols.
 SKIP_PREFIXES = ("__SCT__", "__SCK__", "__static_call", "__pfx_", "__cfi_", "__x86_indirect", "__x86_return")
 COMPILER_SUFFIXES = ("constprop", "isra", "part", "cold", "llvm", "lto_priv", "clone")  # foo.isra.0 is not module.symbol
@@ -31,6 +37,9 @@ class Image:
         self.blob = blob
         if blob[:4] != b"\x7fELF" or blob[4] != 2:
             raise ValueError("not a 64-bit ELF")
+        machine = struct.unpack_from("<H", blob, 18)[0]
+        if machine != EM_X86_64:
+            raise ValueError("ELF machine %d is not x86-64, and these checks read x86-64 instructions" % machine)
         phoff, shoff = struct.unpack_from("<QQ", blob, 32)
         phnum, shnum = struct.unpack_from("<H", blob, 56)[0], struct.unpack_from("<H", blob, 60)[0]
         self.segments = []
@@ -158,13 +167,13 @@ def classify_entry(image, entry, name):
     code = image.read(entry, 32) or image.read(entry, 16)
     if code is None or name.startswith(SKIP_PREFIXES) or name in FTRACE_OWN:
         return None
-    first = 4 if code[:4] == ENDBR64 else 0
-    # Absolute-address hooks: at the entry, after endbr64, or after the 5-byte ftrace NOP.
+    first = 4 if code[:4] in ENDBR_FORMS else 0
+    # Absolute-address hooks: at the entry, after endbr64 or its sealed form, or after the 5-byte ftrace NOP.
     for start in (first, first + 5) if code[first:first + 5] == FENTRY_NOP else (first,):
         hook = absolute_hook(code, start)
         if hook:
             return absolute_finding(image, entry, name, hook[0], hook[1])
-    start = 4 if code[:4] == ENDBR64 else 0
+    start = first
     op = code[start]
     site = entry + start
     if code[start:start + 5] == FENTRY_NOP:
@@ -227,6 +236,27 @@ def scan_syscalls(image, count=512):
     return findings
 
 
+def section_names(blob):
+    """The ELF's section names; empty if its section table cannot be read."""
+    shoff = struct.unpack_from("<Q", blob, 40)[0]
+    shnum, shstrndx = struct.unpack_from("<HH", blob, 60)
+    if not shoff or shstrndx >= shnum or shoff + 64 * shnum > len(blob):
+        return set()
+    strings = struct.unpack_from("<Q", blob, shoff + 64 * shstrndx + 24)[0]
+    names = set()
+    for index in range(shnum):
+        start = strings + struct.unpack_from("<I", blob, shoff + 64 * index)[0]
+        end = blob.find(b"\0", start)
+        if end >= 0:
+            names.add(blob[start:end].decode("ascii", "replace"))
+    return names
+
+
+def on_disk_kernel(blob):
+    """True for a kernel file from disk, which a memory export never is."""
+    return bool(section_names(blob) & ON_DISK_SECTIONS)
+
+
 def scan(blob):
     image = Image(blob)
     return scan_functions(image) + scan_syscalls(image)
@@ -235,7 +265,13 @@ def scan(blob):
 def main(argv):
     with open(argv[1], "rb") as handle:
         blob = handle.read()
-    for address, name, kind, target, _ in scan(blob):
+    if on_disk_kernel(blob):
+        print("warning: this is a kernel file from disk, not a memory export; its unapplied alternatives show up as false rows", file=sys.stderr)
+    try:
+        findings = scan(blob)
+    except ValueError as error:
+        sys.exit("patchscan: %s" % error)
+    for address, name, kind, target, _ in findings:
         print("%#x\t%s\t%s\t%s" % (address, name, kind, target))
 
 

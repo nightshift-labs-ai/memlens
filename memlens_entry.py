@@ -219,10 +219,19 @@ def scan_current_input():
     with open(path, "rb") as handle:
         blob = handle.read()
     try:
+        if patchscan.on_disk_kernel(blob):
+            raise ValueError("this is a kernel file from disk, whose entry bytes are not what ran")
         return patchscan.scan(blob)
     except ValueError as error:
-        ida_kernwin.warning("MemLens needs the kernel.elf it exported: %s" % error)
+        ida_kernwin.warning("MemLens needs the kernel.elf it exported: %s" % str(error).replace("%", "%%"))
         return None
+
+
+def add_comment(address, text):
+    """Adds our line to the comment at address and keeps whatever is already there."""
+    old = idc.get_cmt(address, False) or ""
+    if text not in old:
+        idc.set_cmt(address, old + "\n" + text if old else text, False)
 
 
 class FindPatches(ida_kernwin.action_handler_t):
@@ -232,7 +241,7 @@ class FindPatches(ida_kernwin.action_handler_t):
         if findings is None:
             return 0
         for address, _, what, target, _ in findings:
-            idc.set_cmt(address, "MemLens: %s %s" % (what, target), False)
+            add_comment(address, "MemLens: %s %s" % (what, target))
         ida_kernwin.msg("[MemLens] %d patched entries or odd syscall slots\n" % len(findings))
         global _open_list  # a non-modal chooser must outlive this call
         _open_list = PatchList(findings)

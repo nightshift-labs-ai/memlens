@@ -28,7 +28,7 @@ A GitHub repository search (name and description, November 2026) found no tool t
 
 **Symbols.** Kernel symbols come from the ISF, module symbols from each module's own symbol table, as `module.symbol`. A symbol is written only if it lands in exported memory.
 
-**Per-CPU areas.** Each CPU's copy of the per-CPU variables is read through `__per_cpu_offset[cpu]` (for `nr_cpu_ids` CPUs, at most 256) and written as section `.percpu.cpu<N>`, with symbols `cpu<N>.<name>`. x86-64 kernels up to 6.x link the per-CPU section at address 0; Linux 7.0 links it at a kernel address, which moves with KASLR, and both layouts are handled. On every sample in the table, CPU 0's current task points to `init_task` and each CPU's `this_cpu_off` matches its own area. Variables per CPU: 6.1 379, 6.8 402, 6.12 388, 7.0 447. `--no-percpu` leaves the areas out.
+**Per-CPU areas.** Each CPU's copy of the per-CPU variables is read through `__per_cpu_offset[cpu]` (for `nr_cpu_ids` CPUs, at most 256) and written as section `.percpu.cpu<N>`, with symbols `cpu<N>.<name>`. x86-64 kernels up to 6.x link the per-CPU section at address 0; Linux 7.0 links it at a kernel address, which moves with KASLR, and both layouts are handled. On every sample in the table, CPU 0's current task points to `init_task` and each CPU's `this_cpu_off` holds that CPU's own per-CPU offset. Variables per CPU: 6.1 379, 6.8 402, 6.12 388, 7.0 447. `--no-percpu` leaves the areas out.
 
 **Patched entries.** The finished ELF is scanned for each function's first instruction. Hook code in memory no module owns is copied in as a `.hook` section and labelled, so the target of a BPF or ftrace trampoline can be read like the rest of the kernel.
 

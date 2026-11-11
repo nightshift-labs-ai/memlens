@@ -34,6 +34,8 @@ idc.SEGATTR_PERM = 5
 code_eas = set()
 idc.get_segm_attr = lambda ea, attr: 5 if ea in code_eas else 6  # 5 = read+exec, 6 = read+write
 idc.get_name_ea_simple = lambda n: 0x1000 if n == "demo_var" else idc.BADADDR
+idc.get_first_seg = lambda: idc.BADADDR  # no per-CPU sections unless a case adds them
+idc.get_next_seg = lambda ea: idc.BADADDR
 idc.SetType = lambda ea, d: calls.append(("settype", ea, d)) or True
 nalt = types.ModuleType("ida_nalt"); nalt.get_input_file_path = lambda: ""
 comments = {}
@@ -87,6 +89,17 @@ with tempfile.TemporaryDirectory() as t:
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
     assert (st["globals_typed"], st["percpu_typed"], st["globals_failed"], st["globals_not_in_database"]) == (1, 1, 0, 1), st
     assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;"), (0x3000, "struct demo demo_var;"), (0x3100, "struct demo demo_var;")], calls
+    # A CPU whose per-CPU area was not in the image has no section (the exporter keeps real CPU numbers): CPU 2 is still typed.
+    segs = {0x1000: ".data", 0x3000: ".percpu.cpu0", 0x3200: "_percpu_cpu2"}
+    idc.get_first_seg = lambda: min(segs)
+    idc.get_next_seg = lambda ea: min([s for s in segs if s > ea], default=idc.BADADDR)
+    idc.get_segm_name = lambda ea: segs.get(ea, "")
+    assert m.percpu_cpus() == [0, 2]
+    idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000, "cpu0.demo_var": 0x3000, "cpu2.demo_var": 0x3200}.get(n, idc.BADADDR)
+    calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
+    assert st["percpu_typed"] == 1, st
+    assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;"), (0x3000, "struct demo demo_var;"), (0x3200, "struct demo demo_var;")], calls
+    idc.get_first_seg = lambda: idc.BADADDR
     idc.get_name_ea_simple = lambda n: 0x1000 if n == "demo_var" else idc.BADADDR
     assert sum(c[0] == "reg" for c in calls) == 3 and sum(c[0] == "menu" for c in calls) == 3
     cmd = m.export_command("/bin/vol", "/x/m.lime", "/out", "/sym")

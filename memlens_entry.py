@@ -6,8 +6,10 @@ Three actions under Edit > Plugins:
   * Show patched kernel functions: lists hooked entries and odd syscall slots, Enter jumps there.
 """
 import base64
+import itertools
 import traceback
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -87,6 +89,7 @@ def apply_types(isf_path, confirm=None):
     missing, wrong = check_sizes(generator.expected_sizes())
     typed = failed = absent = percpu = code = 0
     decls = isf2c.global_decls(generator, isf)
+    cpus = percpu_cpus()
     for index, (name, declaration) in enumerate(decls):
         if index % 2000 == 0:
             ida_kernwin.replace_wait_box("MemLens: typing globals (%d of %d)" % (index, len(decls)))
@@ -95,7 +98,7 @@ def apply_types(isf_path, confirm=None):
         address = idc.get_name_ea_simple(name)
         # A per-CPU variable has one copy per CPU, named cpu<N>.<name> by the exporter. Kernels that link the
         # per-CPU section at a kernel address (Linux 7.0) also keep a plain symbol for the boot template.
-        copies = list(percpu_copies(name))
+        copies = list(percpu_copies(name, cpus))
         if address == idc.BADADDR and not copies:
             # Most of these have address 0 in the ISF, so the ELF has no symbol for them.
             absent += 1
@@ -132,19 +135,42 @@ def in_code(address):
     return bool((idc.get_segm_attr(address, idc.SEGATTR_PERM) or 0) & SEGPERM_EXEC)
 
 
-def percpu_copies(name):
-    """Addresses of cpu0.<name>, cpu1.<name>, ... up to the first CPU without one."""
-    cpu = 0
-    while True:
+PERCPU_SEGMENT = re.compile(r"percpu\.cpu(\d+)$")
+
+
+def percpu_cpus():
+    """CPU numbers that have a .percpu.cpu<N> section in this database, in order.
+
+    The exporter keeps real CPU numbers and leaves out a CPU whose per-CPU area is not in the memory image,
+    so the numbers can have gaps. Segment names are compared with '_' read as '.' in case IDA changed them.
+    """
+    cpus = set()
+    ea = idc.get_first_seg()
+    while ea is not None and ea != idc.BADADDR:
+        match = PERCPU_SEGMENT.search((idc.get_segm_name(ea) or "").replace("_", "."))
+        if match:
+            cpus.add(int(match.group(1)))
+        ea = idc.get_next_seg(ea)
+    return sorted(cpus)
+
+
+def percpu_copies(name, cpus=None):
+    """Addresses of cpu<N>.<name> for every CPU in cpus.
+
+    Without per-CPU sections (cpus empty or None) the old rule applies: cpu0, cpu1, ... up to the first CPU without one.
+    """
+    numbers = iter(cpus) if cpus else itertools.count()
+    for cpu in numbers:
         address = idc.get_name_ea_simple("cpu%d.%s" % (cpu, name))
         if address == idc.BADADDR:
             # In case IDA stored the '.' as '_': take cpu<N>_<name> only inside that CPU's .percpu.cpu<N> section.
             address = idc.get_name_ea_simple("cpu%d_%s" % (cpu, name))
             segment = (idc.get_segm_name(address) or "") if address != idc.BADADDR else ""
             if not segment.replace("_", ".").endswith("percpu.cpu%d" % cpu):
+                if cpus:
+                    continue  # this CPU's copy has no such symbol: try the next CPU
                 return
         yield address
-        cpu += 1
 
 
 def report(result):

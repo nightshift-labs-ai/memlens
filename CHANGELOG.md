@@ -2,6 +2,10 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## Unreleased
+
+- **Per-CPU typing no longer stops at a missing CPU.** The exporter keeps real CPU numbers and leaves out a CPU whose per-CPU area is not in the memory image, so a capture can have `.percpu.cpu0` and `.percpu.cpu2` without `.percpu.cpu1`; Apply kernel types used to stop at the first gap. It now takes the CPU numbers from the `.percpu.cpu<N>` sections in the database (the old cpu0, cpu1, ... probe is kept for databases without such sections). Found by a judge-style review; tested with fake IDA modules only.
+
 ## v0.3.23 (2026-11-11)
 
 - **The ELF entry point is kernel text again.** Since v0.3.20 it was the lowest section, which is now CPU 0's per-CPU data (`cpu0.fixed_percpu_data`); IDA would have queued data as code there. It is now the first executable section (`_text`), as before; `--no-percpu` output is unchanged.

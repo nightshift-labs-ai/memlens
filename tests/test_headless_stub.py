@@ -22,6 +22,10 @@ ti.tinfo_t = tinfo
 api = types.ModuleType("ida_idaapi"); api.plugin_t = object; api.PLUGIN_KEEP = 2; api.PLUGIN_HIDE = 0x10
 idc = types.ModuleType("idc"); idc.PT_SIL = 1; idc.PT_PAK1 = 0x10; idc.BADADDR = -1
 idc.SEGATTR_PERM = 5; idc.get_segm_attr = lambda ea, attr: 6
+segments = {0x1000: ".data", 0x2000: ".percpu.cpu0", 0x2100: ".percpu.cpu1"}  # start -> name, as the exporter writes them
+idc.get_first_seg = lambda: min(segments)
+idc.get_next_seg = lambda ea: min([s for s in segments if s > ea], default=idc.BADADDR)
+idc.get_segm_name = lambda ea: segments.get(ea, "")
 idc.parse_decls = lambda text, flags: 0
 names = {"demo_var": 0x1000, "cpu0.pcpu_var": 0x2000, "cpu1.pcpu_var": 0x2100, "linux_banner": 0x3000}
 idc.get_name_ea_simple = lambda n: names.get(n, idc.BADADDR)

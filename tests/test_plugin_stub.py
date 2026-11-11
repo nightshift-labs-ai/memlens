@@ -120,7 +120,9 @@ with tempfile.TemporaryDirectory() as t:
     assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;"), (0x3000, "struct demo demo_var;"), (0x3200, "struct demo demo_var;")], calls
     # The per-CPU copies come from one pass over the names (percpu_index): '.' beats '_' in either order, a '_'
     # copy outside its CPU's section and a zero-padded or unlisted CPU number are never taken.
-    segs = {0x1000: ".data", 0x3000: ".percpu.cpu0", 0x3100: ".percpu.cpu1", 0x3200: ".percpu.cpu2", 0x4000: ".data"}
+    # (the fake get_segm_name knows section starts only, so the '_' copy sits at the start of CPU 1's second piece)
+    segs = {0x1000: ".data", 0x3000: ".percpu.cpu0", 0x3100: ".percpu.cpu1", 0x3108: ".percpu.cpu1.1", 0x3200: ".percpu.cpu2", 0x4000: ".data"}
+    assert m.segment_cpu(segs[0x3108]) == 1
     for table in ({"cpu1_demo_var": 0x3108, "cpu1.demo_var": 0x3100}, {"cpu1.demo_var": 0x3100, "cpu1_demo_var": 0x3108}):
         set_names(dict(table, demo_var=0x1000, **{"cpu0_demo_var": 0x4000, "cpu02.demo_var": 0x3208, "cpu3.demo_var": 0x3300}))
         assert m.percpu_index(m.percpu_cpus()) == {"demo_var": {1: 0x3100}}, m.percpu_index(m.percpu_cpus())
@@ -129,6 +131,17 @@ with tempfile.TemporaryDirectory() as t:
     # A name list without the per-CPU copies (IDA can keep names out of it): the copies are looked up one by one.
     set_names({"demo_var": 0x1000, "cpu1.demo_var": 0x3100})
     autils.Names = lambda: [(0x1000, "demo_var")]
+    calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
+    assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;"), (0x3100, "struct demo demo_var;")], calls
+    autils.Names = lambda: [(ea, n) for n, ea in names.items()]
+    # Only one copy kept out of the name list (hide_name, SN_NOLIST): the listed CPU missing from the index is looked up.
+    set_names({"demo_var": 0x1000, "cpu0.demo_var": 0x3000, "cpu1.demo_var": 0x3100})
+    autils.Names = lambda: [(0x1000, "demo_var"), (0x3000, "cpu0.demo_var")]
+    calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
+    assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;"), (0x3000, "struct demo demo_var;"), (0x3100, "struct demo demo_var;")], calls
+    # A name list holding only a rejected cpu<N>_<name> (outside its section) still counts as "no copy listed".
+    set_names({"demo_var": 0x1000, "cpu0_demo_var": 0x4000, "cpu1.demo_var": 0x3100})
+    autils.Names = lambda: [(0x1000, "demo_var"), (0x4000, "cpu0_demo_var")]
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
     assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;"), (0x3100, "struct demo demo_var;")], calls
     autils.Names = lambda: [(ea, n) for n, ea in names.items()]
@@ -142,7 +155,7 @@ with tempfile.TemporaryDirectory() as t:
         table = {}
         for _ in range(rng.randint(0, 12)):
             cpu, var = rng.randint(0, 12), rng.choice(["a", "b", "a_b", "b.c"])
-            symbol = rng.choice(["cpu%d.%s", "cpu%d_%s", "cpu0%d.%s"]) % (cpu, var)
+            symbol = rng.choice(["cpu%d.%s", "cpu%d_%s", "cpu0%d.%s", "xcpu%d.%s", "mod.cpu%d_%s"]) % (cpu, var)
             table[symbol] = rng.choice([0x10000 * (cpu + 1) + 8 * rng.randint(0, 3), 0x1000, 0x10000 * rng.randint(1, 13)])
         set_names(table)
         index = m.percpu_index(cpus)

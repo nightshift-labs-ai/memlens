@@ -195,28 +195,45 @@ def percpu_index(cpus):
     return index
 
 
+def percpu_copy(name, cpu):
+    """Address of CPU cpu's copy of name looked up by name, or None.
+
+    cpu<N>.<name> as the exporter writes it; in case IDA stored the '.' as '_', cpu<N>_<name>, but only inside that
+    CPU's .percpu.cpu<N> section.
+    """
+    address = idc.get_name_ea_simple("cpu%d.%s" % (cpu, name))
+    if address != idc.BADADDR:
+        return address
+    address = idc.get_name_ea_simple("cpu%d_%s" % (cpu, name))
+    if address != idc.BADADDR and segment_cpu(idc.get_segm_name(address)) == cpu:
+        return address
+    return None
+
+
 def percpu_copies(name, cpus=None, index=None):
     """Addresses of cpu<N>.<name> for every CPU in cpus, in CPU order (from index when given, see percpu_index).
 
-    Without per-CPU sections (cpus empty or None) the old rule applies: cpu0, cpu1, ... up to the first CPU without one.
+    With an index, a name that has no copy in it is not a per-CPU variable; for one that has, a listed CPU missing
+    from it is still looked up by name (IDA can keep single names out of its name list). Without per-CPU sections
+    (cpus empty or None) the old rule applies: cpu0, cpu1, ... up to the first CPU without one.
     """
     if cpus and index is not None:
-        copies = index.get(name, {})
+        copies = index.get(name)
+        if not copies:
+            return
         for cpu in cpus:
-            if cpu in copies:
-                yield copies[cpu]
+            address = copies.get(cpu)
+            if address is None:
+                address = percpu_copy(name, cpu)
+            if address is not None:
+                yield address
         return
-    numbers = iter(cpus) if cpus else itertools.count()
-    for cpu in numbers:
-        address = idc.get_name_ea_simple("cpu%d.%s" % (cpu, name))
-        if address == idc.BADADDR:
-            # In case IDA stored the '.' as '_': take cpu<N>_<name> only inside that CPU's .percpu.cpu<N> section.
-            address = idc.get_name_ea_simple("cpu%d_%s" % (cpu, name))
-            segment = idc.get_segm_name(address) if address != idc.BADADDR else ""
-            if segment_cpu(segment) != cpu:
-                if cpus:
-                    continue  # this CPU's copy has no such symbol: try the next CPU
-                return
+    for cpu in (iter(cpus) if cpus else itertools.count()):
+        address = percpu_copy(name, cpu)
+        if address is None:
+            if cpus:
+                continue  # this CPU's copy has no such symbol: try the next CPU
+            return
         yield address
 
 

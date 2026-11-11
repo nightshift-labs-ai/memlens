@@ -23,7 +23,7 @@ Each output row has an Item, a Name, an Address and a Count:
 | `module` | A loaded module; Count is its symbols |
 | `hook target` | A page of hook code outside the kernel and modules, copied into the ELF; it gets a `memlens_target_<address>` symbol |
 | `patched` | A function entry that was rewritten, or a syscall table slot outside the handlers |
-| `written` | The output file name; Count is the symbols actually in the ELF |
+| `written` | The file name actually written (`kernel-1.elf` and so on when `kernel.elf` already exists in `<outdir>`); Count is the symbols actually in the ELF |
 
 Then, for example:
 

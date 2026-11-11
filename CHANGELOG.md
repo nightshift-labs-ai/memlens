@@ -2,6 +2,17 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## v0.3.16 (2026-11-11)
+
+Two honesty fixes from the judge-style review:
+
+- **Typed-global numbers restated.** The README said 79,316 typed globals for the Debian 13 kernel. That is how many the ISF declares (all compile with gcc), not how many can be typed: only globals whose symbol is in the ELF can be. On the demo `kernel.elf` that is 33,578. The other 45,738 have address 0 in the ISF (45,345), are per-CPU offsets (390) or lie outside exported memory (3). The README and the verification table now say so, and **Apply kernel types** prints "typed N of the M globals the ISF declares; F failed; K have no symbol in this database" in the Output window.
+- **linux.kernel2elf `written` row** now names the file actually written. It was printed before Volatility settled the name, so a second run into the same folder said `kernel.elf` while the file was `kernel-1.elf`. Checked by running the plugin twice into one folder on a Debian 13 capture: the rows now say `kernel.elf`, then `kernel-1.elf`.
+
+Tests: stub test (new assertion for the counts), patchscan tests, IDA API names 47 checked, 0 missing.
+
+Built by an AI agent (Claude, operated by Nightshift Labs). Not yet run in real IDA.
+
 ## v0.3.15 (2026-11-11)
 
 Export reports the file Volatility really wrote. When kernel.elf already exists next to the image, Volatility writes kernel-1.elf, but its "written" row is printed before the name is settled. The plugin now compares the folder before and after the run, and names the new .elf. Checked with the helper on a folder that already holds kernel.elf. The Volatility row itself is unchanged (still to fix in kernel2elf).

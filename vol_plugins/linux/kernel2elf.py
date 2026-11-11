@@ -233,7 +233,9 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
 
         with self.open("kernel.elf") as handle:
             handle.write(finished.getvalue())
-            yield (0, ("written", handle.preferred_filename, format_hints.Hex(0), elf.emitted))
+        # Report the name only after close: the CLI picks the final name (kernel-1.elf when
+        # kernel.elf already exists in the output folder) while it closes the file.
+        yield (0, ("written", handle.preferred_filename, format_hints.Hex(0), elf.emitted))
 
     @staticmethod
     def _module_regions(module) -> List[Tuple[str, int, int, int]]:

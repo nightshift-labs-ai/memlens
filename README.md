@@ -78,13 +78,13 @@ struct kstat {
 };
 ```
 
-Typed globals come from the same ISF, for example `struct task_struct init_task`, `struct net init_net` and `struct static_key nf_hooks_needed[11][5]` (79,316 of them for this kernel).
+Typed globals come from the same ISF, for example `struct task_struct init_task`, `struct net init_net` and `struct static_key nf_hooks_needed[11][5]`. The ISF declares 79,316 typed globals for this kernel, but only those with a symbol in the ELF can be typed: 33,578 in the demo `kernel.elf`. The other 45,738 have address 0 in the ISF (45,345), are per-CPU offsets (390) or lie outside exported memory (3). The Output window says how many were typed and how many have no symbol in your database.
 
 ## Usage
 
 In IDA, with any database open (plugin menu entries need one), under **Edit > Plugins**:
 
-1. **MemLens: Export kernel from memory image**: choose the image. `kernel.elf` is written next to it. Volatility needs the ISF in its symbols path.
+1. **MemLens: Export kernel from memory image**: choose the image. `kernel.elf` is written next to it (`kernel-1.elf` if one is already there; the message names the file). Volatility needs the ISF in its symbols path.
 2. Open `kernel.elf` in IDA.
 3. **MemLens: Apply kernel types from ISF**: choose the ISF. If its kernel banner differs from the one in the database, MemLens asks before importing anything. The Output window then says how many types IDA rejected, how many are missing and how many differ in size from the ISF.
 4. **MemLens: Show patched kernel functions**: opens the list and adds a comment at each entry.
@@ -113,14 +113,14 @@ Checked with binutils and a short Python step, independently of this code (`test
 
 Types are checked by compiling the generated header with gcc, asserting every struct size and member offset against the ISF, and compiling a declaration for every typed global (`tests/check_layout.py`):
 
-| Kernel | Layout assertions | Typed globals | Result |
+| Kernel | Layout assertions | Global declarations | Result |
 |---|---|---|---|
 | Debian 12, 6.1.0-54 | 59,662 | 62,340 | all pass |
 | Debian 13, 6.12.115 | 67,392 | 79,316 | all pass |
 | Ubuntu 24.04, 6.8.0-147 | 81,563 | 86,362 | all pass |
 | Ubuntu 26.04, 7.0.0-38 | 89,321 | 123,349 | all pass |
 
-Typed-global counts are from the current code. The gcc run was made on an earlier build that also declared 15 to 20 globals named like C++ keywords (`new`, `class`, ...), which are now skipped.
+Global declarations are every typed global in the ISF, compiled as `extern` declarations; fewer can be applied in IDA (Debian 13 demo: 33,578, see above). Counts are from the current code. The gcc run was made on an earlier build that also declared 15 to 20 globals named like C++ keywords (`new`, `class`, ...), which are now skipped.
 
 Ghidra's C parser was run over the same header (`tests/ghidra/MemLensCheck.java`), after replacing `__int128` with a 16-byte struct, which Ghidra's parser does not know:
 

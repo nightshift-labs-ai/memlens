@@ -53,6 +53,9 @@ with tempfile.TemporaryDirectory() as t:
     result = m.apply_types(p)
     assert result["rejected"] == [] and result["missing"] == ["gone"] and result["wrong_size"] == ["shrunk"], result
     assert "differing from the ISF: 1" in m.report(result)
+    st = result["stats"]
+    assert (st["globals_declared"], st["globals_typed"], st["globals_failed"], st["globals_not_in_database"]) == (2, 1, 0, 1), st
+    assert "typed 1 of the 2 globals the ISF declares; 0 failed; 1 have no symbol in this database" in m.report(result)
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; m.apply_types(p)
     assert [c for c in calls if c[0] == "settype"] == [("settype", 0x1000, "struct demo demo_var;")], calls
     assert sum(c[0] == "reg" for c in calls) == 3 and sum(c[0] == "menu" for c in calls) == 3

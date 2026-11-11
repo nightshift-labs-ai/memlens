@@ -21,7 +21,7 @@ MemLens was built by an AI agent (Claude, operated by Nightshift Labs).
 
 ```
 hcli plugin install memlens
-pipx install volatility3
+pipx install volatility3==2.28.2
 ```
 
 Or copy this folder into your IDA `plugins` directory. The plugin index can lag behind the [GitHub releases](https://github.com/nightshift-labs-ai/memlens/releases); if `hcli plugin status` shows an older version, copy the folder from the latest release. You also need an ISF symbol file for the kernel in the image; [dwarf2json](https://github.com/volatilityfoundation/dwarf2json) builds one from the kernel's debug package.
@@ -41,13 +41,26 @@ The demo `kernel.elf` comes from `trace.elf`, a 1 GB memory image of the same VM
 ```
 curl -LO https://github.com/nightshift-labs-ai/volatility-2026-samples/releases/download/samples/trace.elf.xz
 xz -dk trace.elf.xz
-python3 -m venv v && v/bin/pip install volatility3
+python3 -m venv v && v/bin/pip install volatility3==2.28.2
 mkdir -p symbols/linux out && cp debian-6.12.115+deb13.1-amd64.json.xz symbols/linux/
 v/bin/vol -q -p <memlens>/vol_plugins -s symbols -o out -f trace.elf linux.kernel2elf.Kernel2Elf
 python3 <memlens>/patchscan.py out/kernel.elf
 ```
 
-The export takes about 25 s on our machine. `out/kernel.elf` is byte-identical to the demo's (its SHA-256 is in `SHA256SUMS.txt`), and the Volatility output lists the same three `patched` rows. In IDA, **MemLens: Export kernel from memory image** does the same: choose `trace.elf`, then the ISF from the demo folder. It runs Volatility's `vol` command from your PATH, or asks where it is (`v/bin/vol` above). The ELF is written next to the image (`kernel-1.elf` if a `kernel.elf` is already there).
+On Windows the same steps in PowerShell would be the following (we have no Windows machine, so these lines are not tested; `7z` is 7-Zip):
+
+```
+curl.exe -LO https://github.com/nightshift-labs-ai/volatility-2026-samples/releases/download/samples/trace.elf.xz
+7z x trace.elf.xz
+py -m venv v; v\Scripts\pip install volatility3==2.28.2
+mkdir symbols\linux, out; copy debian-6.12.115+deb13.1-amd64.json.xz symbols\linux\
+v\Scripts\vol.exe -q -p <memlens>\vol_plugins -s symbols -o out -f trace.elf linux.kernel2elf.Kernel2Elf
+py <memlens>\patchscan.py out\kernel.elf
+```
+
+Volatility 2.28.2 is the version we tested; the exporter uses Volatility's Linux module API, which newer releases may change.
+
+The export takes about 25-50 s on our machine. `out/kernel.elf` is byte-identical to the demo's (its SHA-256 is in `SHA256SUMS.txt`), and the Volatility output lists the same three `patched` rows. In IDA, **MemLens: Export kernel from memory image** does the same: choose `trace.elf`, then the ISF from the demo folder. It runs Volatility's `vol` command from your PATH, or asks where it is (`v/bin/vol` above). The ELF is written next to the image (`kernel-1.elf` if a `kernel.elf` is already there).
 
 ## What you get (real output from the demo, not IDA screenshots)
 

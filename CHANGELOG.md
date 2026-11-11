@@ -2,6 +2,10 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## v0.3.22 (2026-11-11)
+
+- **Per-CPU typing no longer depends on how IDA stores `.` in names.** If the loader keeps `cpu0.runqueues` as `cpu0_runqueues`, **Apply kernel types** now finds that form too, but only when the symbol lies in that CPU's `.percpu.cpu<N>` section, so a real kernel symbol of the same name elsewhere is never retyped. Stub test cases for both. (We have not seen which form IDA uses: not yet run in real IDA.)
+
 ## v0.3.21 (2026-11-11)
 
 - **Headless runner for idalib** (IDA 9.0+): `python3 tools/memlens_headless.py kernel.elf <isf> [--no-analysis] [--any-kernel]` applies the types, comments the patched entries, prints the report and the patch list, and saves the database, using the plugin's own functions. Exit codes: 0 done, 1 IDA could not open the file (or it is not a MemLens ELF), 2 no idalib, 3 the ISF is for another kernel (nothing imported). New `tests/test_headless_stub.py` (fake `idapro` and `ida_*` modules). Not yet run with a real idalib.

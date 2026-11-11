@@ -63,6 +63,15 @@ with tempfile.TemporaryDirectory() as t:
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
     assert (st["globals_typed"], st["percpu_typed"], st["globals_not_in_database"]) == (1, 1, 0), st
     assert [c[1:] for c in calls if c[0] == "settype"] == [(0x2000, "struct demo absent;"), (0x2100, "struct demo absent;"), (0x1000, "struct demo demo_var;")], calls
+    # If IDA stored '.' as '_', cpu<N>_<name> is taken, but only inside that CPU's per-CPU section.
+    idc.get_segm_name = lambda ea: {0x2000: ".percpu.cpu0", 0x2100: "_percpu_cpu1", 0x4000: ".data"}.get(ea, "")
+    idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000, "cpu0_absent": 0x2000, "cpu1_absent": 0x2100}.get(n, idc.BADADDR)
+    calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
+    assert (st["globals_typed"], st["percpu_typed"], st["globals_not_in_database"]) == (1, 1, 0), st
+    idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000, "cpu0_absent": 0x4000}.get(n, idc.BADADDR)  # a real symbol elsewhere
+    calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
+    assert (st["percpu_typed"], st["globals_not_in_database"]) == (0, 1), st
+    assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;")], calls
     # Linux 7.0 style: a plain symbol for the boot template plus one copy per CPU; all of them are typed.
     idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000, "cpu0.demo_var": 0x3000, "cpu1.demo_var": 0x3100}.get(n, idc.BADADDR)
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]

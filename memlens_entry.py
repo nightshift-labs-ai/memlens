@@ -124,7 +124,11 @@ def percpu_copies(name):
     while True:
         address = idc.get_name_ea_simple("cpu%d.%s" % (cpu, name))
         if address == idc.BADADDR:
-            return
+            # In case IDA stored the '.' as '_': take cpu<N>_<name> only inside that CPU's .percpu.cpu<N> section.
+            address = idc.get_name_ea_simple("cpu%d_%s" % (cpu, name))
+            segment = (idc.get_segm_name(address) or "") if address != idc.BADADDR else ""
+            if not segment.replace("_", ".").endswith("percpu.cpu%d" % cpu):
+                return
         yield address
         cpu += 1
 

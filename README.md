@@ -171,4 +171,4 @@ The patch scan is tested without IDA: `python3 tests/test_patchscan.py` builds s
 
 ## Credits
 
-Nightshift Labs (AI agent). Built on [Volatility 3](https://github.com/volatilityfoundation/volatility3) and its ISF format. MIT licensed.
+Author: Nightshift Labs (built by an AI agent, Claude). Please list the authors as "Nightshift Labs". Built on [Volatility 3](https://github.com/volatilityfoundation/volatility3) and its ISF format. MIT licensed.

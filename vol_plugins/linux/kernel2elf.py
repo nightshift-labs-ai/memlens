@@ -29,6 +29,7 @@ MARKER_NAMES = ("_text", "_stext", "_etext", "_sinittext", "_einittext")
 MARKER_SUFFIXES = ("_text_start", "_text_end")
 MARKER_PREFIXES = ("__start_", "__stop_")
 GLOBAL = 1
+MAX_CPUS = 256
 
 
 def canonical(address: int) -> int:
@@ -139,6 +140,7 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
                 name="linux_utilities_modules", component=linux_utilities_modules.Modules, version=(3, 0, 0)
             ),
             requirements.BooleanRequirement(name="no-modules", description="Kernel image only", default=False, optional=True),
+            requirements.BooleanRequirement(name="no-percpu", description="Leave out the per-CPU areas", default=False, optional=True),
         ]
 
     def _runs(self, layer, start, end) -> List[Tuple[int, int]]:
@@ -200,6 +202,9 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
             kind = STT_NOTYPE if marker else STT_FUNC if text_start <= value < text_end else STT_OBJECT
             elf.add_symbol(name, value, size, kind)
         yield (0, ("symbols", "kernel", format_hints.Hex(canonical(text_start)), len(addresses)))
+
+        if not self.config.get("no-percpu"):
+            yield from self._percpu(kernel, layer, table, elf)
 
         if not self.config.get("no-modules"):
             for module in linux_utilities_modules.Modules.list_modules(self.context, self.config["kernel"]):
@@ -264,6 +269,45 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
                      ("data", int(layout.ro_after_init_size), int(layout.size), writable)]
             return [(label, base + low, base + high, flags) for label, low, high, flags in marks if low < high]
         return [("core", base, base + int(module.get_core_size()), text)]
+
+    def _percpu(self, kernel, layer, table, elf) -> Iterator:
+        """Each CPU's copy of the per-CPU variables, as section .percpu.cpu<N> with symbols cpu<N>.<name>."""
+        try:
+            start = kernel.get_symbol("__per_cpu_start").address
+            end = kernel.get_symbol("__per_cpu_end").address
+            count = int(kernel.object(object_type="unsigned int", offset=kernel.get_symbol("nr_cpu_ids").address))
+            offsets = kernel.object(
+                object_type="array",
+                offset=kernel.get_symbol("__per_cpu_offset").address,
+                subtype=kernel.get_type("long unsigned int"),
+                count=min(count, MAX_CPUS),
+            )
+            offsets = [int(offset) for offset in offsets]
+        except (exceptions.SymbolError, exceptions.InvalidAddressException):
+            vollog.info("no per-CPU layout in this kernel's symbols")
+            return
+        if count > MAX_CPUS:
+            vollog.warning("only the first %d of %d CPUs are exported", MAX_CPUS, count)
+        # x86-64 links .data..percpu at 0 (zero-based offsets, not moved by KASLR); otherwise the
+        # variables have ordinary kernel addresses and move with the kernel.
+        shift = 0 if start == 0 else kernel.offset
+        variables = []
+        for name in table.symbols:
+            try:
+                value = kernel.get_symbol(name).address
+            except exceptions.SymbolError:
+                continue
+            if start < value < end:  # address 0 is where the ISF puts symbols it has no address for
+                variables.append((value, name))
+        variables.sort()
+        values = [value for value, _ in variables] + [end]
+        for cpu, offset in enumerate(offsets):
+            base = canonical(start + shift + offset)
+            if not self._add_range(elf, layer, base, base + end - start, ".percpu.cpu%d" % cpu, SHF_ALLOC | SHF_WRITE):
+                continue
+            for index, (value, name) in enumerate(variables):
+                elf.add_symbol("cpu%d.%s" % (cpu, name), base + value - start, values[index + 1] - value, STT_OBJECT)
+            yield (0, ("percpu", "cpu%d" % cpu, format_hints.Hex(base), len(variables)))
 
     @staticmethod
     def _hook_targets(elf) -> List[int]:

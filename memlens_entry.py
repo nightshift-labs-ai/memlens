@@ -129,8 +129,20 @@ def symbols_folder(isf_path, parent):
     return parent
 
 
-def written_file(stdout):
-    """The file Volatility really wrote: if kernel.elf exists it picks a new name."""
+def elf_files(folder):
+    try:
+        return {name for name in os.listdir(folder) if name.endswith(".elf")}
+    except OSError:
+        return set()
+
+
+def written_file(stdout, folder=None, before=None):
+    """The file Volatility really wrote. If kernel.elf already exists Volatility picks a new name (kernel-1.elf)
+    only when it closes the file, after the plugin printed its row, so trust the folder over the row."""
+    if folder is not None and before is not None:
+        new = sorted(elf_files(folder) - before)
+        if len(new) == 1:
+            return new[0]
     for line in stdout.decode("utf-8", "replace").splitlines():
         cells = line.split("\t")
         if len(cells) > 1 and cells[0].strip() == "written":
@@ -203,6 +215,7 @@ class ExportKernel(ida_kernwin.action_handler_t):
             symbols = symbols_folder(isf, folder) if isf else None
             ida_kernwin.show_wait_box("MemLens: Volatility is scanning the image, this can take minutes")
             try:
+                before = elf_files(output)
                 code, stdout, stderr = run_cancellable(export_command(vol, image, output, symbols))
             finally:
                 ida_kernwin.hide_wait_box()
@@ -211,7 +224,7 @@ class ExportKernel(ida_kernwin.action_handler_t):
         if code:
             ida_kernwin.warning("Volatility failed:\n" + stderr[-1500:].decode("utf-8", "replace"))
             return 0
-        message = "Wrote %s in %s. Open it in IDA, then use Apply kernel types." % (written_file(stdout), output)
+        message = "Wrote %s in %s. Open it in IDA, then use Apply kernel types." % (written_file(stdout, output, before), output)
         ida_kernwin.msg("[MemLens] %s\n" % message)  # info() can be silenced for good by its checkbox
         ida_kernwin.info(message.replace("%", "%%"))  # info() is printf-style in IDAPython (not wrapped like msg/warning)
         return 1

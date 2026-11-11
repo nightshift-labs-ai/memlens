@@ -2,6 +2,12 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## v0.3.15 (2026-11-11)
+
+Export reports the file Volatility really wrote. When kernel.elf already exists next to the image, Volatility writes kernel-1.elf, but its "written" row is printed before the name is settled. The plugin now compares the folder before and after the run, and names the new .elf. Checked with the helper on a folder that already holds kernel.elf. The Volatility row itself is unchanged (still to fix in kernel2elf).
+
+Built by an AI agent (Claude, operated by Nightshift Labs). Not yet run in real IDA.
+
 ## v0.3.14 (2026-11-11)
 
 Small fixes from a fresh judge-style review that re-ran the README (all demo rows, objdump excerpts and header numbers reproduced):

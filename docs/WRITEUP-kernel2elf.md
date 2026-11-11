@@ -2,8 +2,10 @@
 
 *A Volatility 3 plugin that writes a Linux kernel and its modules from a memory image as one ELF with symbols, and lists patched kernel functions.*
 
+> In the MemLens repository: this is the write-up of the Volatility 3 plugin that MemLens runs for its export step, prepared for the Volatility plugin contest. For the IDA plugin, see the main README.
+
 **Plugin:** `linux.kernel2elf` (Volatility 3, Linux, x86-64)
-**Author:** built by an autonomous AI agent operating a small software business; the human owner is the contest entrant and signs the CLA.
+**Author:** built by an autonomous AI agent operating a small software business; if it is entered, the human owner is the entrant and signs the CLA.
 
 ## 1. Motivation: the problem
 
@@ -47,6 +49,8 @@ On Debian 12, Debian 13 and Ubuntu 26.04, the ELF was also imported into Ghidra 
 Hook test: on the "hooks set" sample our script placed an ftrace filter on `vfs_getattr` and a kprobe on `do_sys_openat2` (`tests/vm/scenario_ftrace_d13.sh`, standard tracing only, no custom module). Both are reported. `bpf_lsm_file_open` and `__hid_bpf_tail_call` were not set by us; they have the pattern of BPF attachments, which we did not confirm separately.
 
 False positives found and removed during testing, each with a unit test in `tests/test_patchscan.py`: ftrace's own trampolines, `call __fentry__` sites that were never converted, reads past the end of a shorter `sys_call_table`, and compiler suffixes such as `.constprop.0` mistaken for module symbols.
+
+Planted-slot test (`tests/test_demo_injection.py <kernel.elf>`): in a copy of the Debian 13 export, a data pointer in `sys_call_table[0]`, `vfs_read` in `[62]` and an unmapped address in `[217]` are all reported, and the function rows do not change. Every slot inside the table's symbol size is checked, so one odd slot cannot hide later ones; zero padding is skipped.
 
 ## 5. Limits
 

@@ -107,6 +107,11 @@ with tempfile.TemporaryDirectory() as t:
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
     assert st["percpu_typed"] == 1, st
     assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;"), (0x3000, "struct demo demo_var;"), (0x3180, "struct demo demo_var;"), (0x3200, "struct demo demo_var;")], calls
+    # A listed CPU without a copy of this variable is skipped; later CPUs are still typed.
+    segs = {0x1000: ".data", 0x3000: ".percpu.cpu0", 0x3100: ".percpu.cpu1", 0x3200: ".percpu.cpu2"}
+    idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000, "cpu0.demo_var": 0x3000, "cpu2.demo_var": 0x3200}.get(n, idc.BADADDR)
+    calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
+    assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;"), (0x3000, "struct demo demo_var;"), (0x3200, "struct demo demo_var;")], calls
     idc.get_first_seg = lambda: idc.BADADDR
     idc.get_name_ea_simple = lambda n: 0x1000 if n == "demo_var" else idc.BADADDR
     assert sum(c[0] == "reg" for c in calls) == 3 and sum(c[0] == "menu" for c in calls) == 3

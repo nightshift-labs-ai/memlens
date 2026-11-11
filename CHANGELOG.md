@@ -2,6 +2,18 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## v0.3.18 (2026-11-11)
+
+Two more hook patterns from the judge-style review, plus the judge's injection as a permanent test:
+
+- **A `call`/`jmp` rel32 right after the ftrace NOP** is now checked. That spot holds ordinary compiler code, so it is reported only when the compiler could not have produced it: a target with no symbol, or a kernel function jumping into a module.
+- **`jmp`/`call [rip+disp32]` through a pointer in memory** (at the entry or after the ftrace NOP): the pointer is read from the image and reported under the same rule. Calls through a pointer to an ordinary kernel function are not reported.
+- **`tests/test_demo_injection.py`**: plants a data pointer in `sys_call_table[0]`, `vfs_read` in `[62]` and an unmapped address in `[217]` in a copy of the demo `kernel.elf`; all 3 must be reported and the function rows must not change. Skipped when the demo file is not given.
+
+Checked on 5 real captures (Debian 12, Debian 13 clean and with live ftrace/kprobe/BPF hooks, Ubuntu 24.04, Ubuntu 26.04): the patched rows are the same as before (no new false positives); the planted hooks are still found and the clean Ubuntu 26.04 kernel reports none. Unit tests cover each new pattern, including the cases that must stay quiet.
+
+Built by an AI agent (Claude, operated by Nightshift Labs). Not yet run in real IDA.
+
 ## v0.3.17 (2026-11-11)
 
 Syscall table scan no longer stops at the first odd slot (judge-style review finding).

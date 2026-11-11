@@ -85,7 +85,7 @@ def apply_types(isf_path, confirm=None):
 
     rejected = isf2c.import_in_batches(generator.declarations(), parse_batch, progress=progress)
     missing, wrong = check_sizes(generator.expected_sizes())
-    typed = failed = absent = 0
+    typed = failed = absent = percpu = 0
     decls = isf2c.global_decls(generator, isf)
     for index, (name, declaration) in enumerate(decls):
         if index % 2000 == 0:
@@ -94,16 +94,35 @@ def apply_types(isf_path, confirm=None):
                 break
         address = idc.get_name_ea_simple(name)
         if address == idc.BADADDR:
-            # Most of these have address 0 in the ISF or are per-CPU offsets, so the ELF has no symbol for them.
-            absent += 1
+            # A per-CPU variable has one copy per CPU, named cpu<N>.<name> by the exporter.
+            copies = list(percpu_copies(name))
+            if not copies:
+                # Most of these have address 0 in the ISF, so the ELF has no symbol for them.
+                absent += 1
+                continue
+            if all(idc.SetType(copy, declaration + ";") for copy in copies):
+                percpu += 1
+            else:
+                failed += 1
             continue
         if idc.SetType(address, declaration + ";"):
             typed += 1
         else:
             failed += 1
     stats = dict(generator.stats, globals_declared=len(decls), globals_typed=typed, globals_failed=failed,
-                 globals_not_in_database=absent)
+                 globals_not_in_database=absent, percpu_typed=percpu)
     return {"stats": stats, "rejected": rejected, "missing": missing, "wrong_size": wrong}
+
+
+def percpu_copies(name):
+    """Addresses of cpu0.<name>, cpu1.<name>, ... up to the first CPU without one."""
+    cpu = 0
+    while True:
+        address = idc.get_name_ea_simple("cpu%d.%s" % (cpu, name))
+        if address == idc.BADADDR:
+            return
+        yield address
+        cpu += 1
 
 
 def report(result):
@@ -111,9 +130,10 @@ def report(result):
     stats = result["stats"]
     lines = ["[MemLens] imported: %s" % stats]
     if "globals_declared" in stats:
-        lines.append("[MemLens] typed %d of the %d globals the ISF declares; %d failed; %d have no symbol in this database "
-                     "(address 0 in the ISF, per-CPU, or outside exported memory)"
-                     % (stats["globals_typed"], stats["globals_declared"], stats["globals_failed"], stats["globals_not_in_database"]))
+        lines.append("[MemLens] typed %d of the %d globals the ISF declares, plus %d per-CPU variables in every CPU's copy; "
+                     "%d failed; %d have no symbol in this database (address 0 in the ISF, or outside exported memory)"
+                     % (stats["globals_typed"], stats["globals_declared"], stats.get("percpu_typed", 0),
+                        stats["globals_failed"], stats["globals_not_in_database"]))
     lines += ["[MemLens] rejected by IDA's parser: %d" % len(result["rejected"]),
               "[MemLens] types missing afterwards: %d" % len(result["missing"]),
               "[MemLens] types with a size differing from the ISF: %d" % len(result["wrong_size"])]

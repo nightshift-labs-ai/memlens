@@ -55,9 +55,15 @@ with tempfile.TemporaryDirectory() as t:
     assert "differing from the ISF: 1" in m.report(result)
     st = result["stats"]
     assert (st["globals_declared"], st["globals_typed"], st["globals_failed"], st["globals_not_in_database"]) == (2, 1, 0, 1), st
-    assert "typed 1 of the 2 globals the ISF declares; 0 failed; 1 have no symbol in this database" in m.report(result)
+    assert "typed 1 of the 2 globals the ISF declares, plus 0 per-CPU variables in every CPU's copy; 0 failed; 1 have no symbol in this database" in m.report(result)
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; m.apply_types(p)
     assert [c for c in calls if c[0] == "settype"] == [("settype", 0x1000, "struct demo demo_var;")], calls
+    # A per-CPU variable: no plain symbol, one copy per CPU named cpu<N>.<name> by the exporter.
+    idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000, "cpu0.absent": 0x2000, "cpu1.absent": 0x2100}.get(n, idc.BADADDR)
+    calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
+    assert (st["globals_typed"], st["percpu_typed"], st["globals_not_in_database"]) == (1, 1, 0), st
+    assert [c[1:] for c in calls if c[0] == "settype"] == [(0x2000, "struct demo absent;"), (0x2100, "struct demo absent;"), (0x1000, "struct demo demo_var;")], calls
+    idc.get_name_ea_simple = lambda n: 0x1000 if n == "demo_var" else idc.BADADDR
     assert sum(c[0] == "reg" for c in calls) == 3 and sum(c[0] == "menu" for c in calls) == 3
     cmd = m.export_command("/bin/vol", "/x/m.lime", "/out", "/sym")
     assert cmd[-1] == "linux.kernel2elf.Kernel2Elf" and "/x/m.lime" in cmd and "/sym" in cmd

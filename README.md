@@ -113,7 +113,7 @@ Typed globals come from the same ISF, for example `struct task_struct init_task`
 
 In IDA, with any database open (plugin menu entries need one), under **Edit > Plugins**:
 
-1. **MemLens: Export kernel from memory image**: choose the image. `kernel.elf` is written next to it (`kernel-1.elf` if one is already there; the message names the file). MemLens asks for the ISF and hands it to Volatility (Cancel uses Volatility's own symbols path).
+1. **MemLens: Export kernel from memory image**: choose the image. `kernel.elf` is written next to it (`kernel-1.elf` if one is already there; the message names the file). MemLens asks for the ISF and hands it to Volatility (Cancel uses Volatility's own symbols path, which has no Linux ISFs after a plain pip install; the error dialog then says so).
 2. Open `kernel.elf` in IDA.
 3. **MemLens: Apply kernel types from ISF**: choose the ISF. If its kernel banner differs from the one in the database, MemLens asks before importing anything. The Output window then says how many types IDA rejected, how many are missing and how many differ in size from the ISF.
 4. **MemLens: Show patched kernel functions**: opens the list and adds a comment at each entry.

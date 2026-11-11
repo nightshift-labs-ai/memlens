@@ -329,8 +329,11 @@ def scan(blob):
 def main(argv):
     if len(argv) != 2:
         sys.exit("usage: python3 patchscan.py kernel.elf   (the ELF that MemLens/kernel2elf exported)")
-    with open(argv[1], "rb") as handle:
-        blob = handle.read()
+    try:
+        with open(argv[1], "rb") as handle:
+            blob = handle.read()
+    except OSError as error:
+        sys.exit("patchscan: cannot read %s: %s" % (argv[1], error.strerror or error))
     try:
         if on_disk_kernel(blob):
             print("warning: this is a kernel file from disk, not a memory export; its unapplied alternatives show up as false rows", file=sys.stderr)

@@ -4,6 +4,7 @@ Taken from the GitHub release notes. Newest first.
 
 ## Unreleased
 
+- `patchscan.py` on a missing or unreadable file prints one line (`patchscan: cannot read ...`) instead of a traceback.
 - README: Volatility pinned to 2.28.2 (the version tested) in Install and Export it yourself; the same Export steps for Windows PowerShell (marked untested); export time stated as 25-50 s.
 - **A failed export explains itself.** Volatility prints its explanation of a missing symbol table on stdout, which the dialog used to drop (it showed only `Unable to validate the plugin requirements: [...symbol_table_name]`). The dialog now adds a plain hint (no ISF chosen: a fresh pip install of Volatility has no Linux symbol files, so choose the ISF built for this kernel; ISF chosen: it was probably built for another kernel) and the tail of both outputs; the full output goes to the Output window.
 - **A wrong or broken ISF file gives one clear message** instead of "unexpected error, please report it" and a traceback: picking `kernel.elf`, a text file, a truncated `.json.xz`, a missing file, or JSON that is not an ISF now says which file is not a readable Volatility ISF and why (plugin and `isf2c.py`). Found by a judge-style review.

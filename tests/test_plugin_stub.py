@@ -30,6 +30,9 @@ def parse(text, flags):
     calls.append(("parse", text, flags)); return text.count("BADTOKEN")
 idc.parse_decls = parse
 idc.BADADDR = -1
+idc.SEGATTR_PERM = 5
+code_eas = set()
+idc.get_segm_attr = lambda ea, attr: 5 if ea in code_eas else 6  # 5 = read+exec, 6 = read+write
 idc.get_name_ea_simple = lambda n: 0x1000 if n == "demo_var" else idc.BADADDR
 idc.SetType = lambda ea, d: calls.append(("settype", ea, d)) or True
 nalt = types.ModuleType("ida_nalt"); nalt.get_input_file_path = lambda: ""
@@ -72,6 +75,13 @@ with tempfile.TemporaryDirectory() as t:
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
     assert (st["percpu_typed"], st["globals_not_in_database"]) == (0, 1), st
     assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;")], calls
+    # A name the ISF declares as a variable but which is code here (schedule, strlen): never retyped.
+    idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000}.get(n, idc.BADADDR)
+    code_eas.add(0x1000)
+    calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; result = m.apply_types(p); st = result["stats"]
+    assert (st["globals_typed"], st["globals_skipped_code"]) == (0, 1) and not [c for c in calls if c[0] == "settype"], (st, calls)
+    assert "left 1 names alone" in m.report(result)
+    code_eas.clear()
     # Linux 7.0 style: a plain symbol for the boot template plus one copy per CPU; all of them are typed.
     idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000, "cpu0.demo_var": 0x3000, "cpu1.demo_var": 0x3100}.get(n, idc.BADADDR)
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]

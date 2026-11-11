@@ -2,6 +2,13 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## v0.3.23 (2026-11-11)
+
+- **The ELF entry point is kernel text again.** Since v0.3.20 it was the lowest section, which is now CPU 0's per-CPU data (`cpu0.fixed_percpu_data`); IDA would have queued data as code there. It is now the first executable section (`_text`), as before; `--no-percpu` output is unchanged.
+- **Apply kernel types never retypes code as data.** The ISF can declare a variable with the same name as a kernel function (on the demo kernel: 78 names, among them `schedule`, `strlen`, `capable`); those addresses lie in executable segments and are now left alone and counted in the Output window. Found by a judge-style review.
+- Demo data re-exported with v0.3.23 (only the ELF entry field differs from the v0.3.20 file); README: 33,500 globals typed on the demo (was 33,578, which included the 78 code names).
+- Headless runner: a kernel file from disk exits 0 with "patch list skipped" (the v0.3.21 notes said 1). Stray `sha.txt` (a build note) removed from the repository.
+
 ## v0.3.22 (2026-11-11)
 
 - **Per-CPU typing no longer depends on how IDA stores `.` in names.** If the loader keeps `cpu0.runqueues` as `cpu0_runqueues`, **Apply kernel types** now finds that form too, but only when the symbol lies in that CPU's `.percpu.cpu<N>` section, so a real kernel symbol of the same name elsewhere is never retyped. Stub test cases for both. (We have not seen which form IDA uses: not yet run in real IDA.)

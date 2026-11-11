@@ -1,6 +1,6 @@
 """MemLens: reverse engineer a Linux kernel from a memory image in IDA.
 
-Two actions under Edit > Plugins:
+Three actions under Edit > Plugins:
   * Export kernel from memory image: runs Volatility 3 and writes a symbolled ELF to open in IDA.
   * Apply kernel types from ISF: imports every struct, union and enum of that kernel.
   * Show patched kernel functions: lists hooked entries and odd syscall slots, Enter jumps there.
@@ -85,7 +85,7 @@ def apply_types(isf_path, confirm=None):
 
     rejected = isf2c.import_in_batches(generator.declarations(), parse_batch, progress=progress)
     missing, wrong = check_sizes(generator.expected_sizes())
-    typed = failed = absent = percpu = 0
+    typed = failed = absent = percpu = code = 0
     decls = isf2c.global_decls(generator, isf)
     for index, (name, declaration) in enumerate(decls):
         if index % 2000 == 0:
@@ -100,6 +100,12 @@ def apply_types(isf_path, confirm=None):
             # Most of these have address 0 in the ISF, so the ELF has no symbol for them.
             absent += 1
             continue
+        if address != idc.BADADDR and in_code(address):
+            # The ISF can name a variable like a kernel function (schedule, strlen): never retype code as data.
+            code += 1
+            address = idc.BADADDR
+            if not copies:
+                continue
         ok = True
         if address != idc.BADADDR:
             if idc.SetType(address, declaration + ";"):
@@ -114,8 +120,16 @@ def apply_types(isf_path, confirm=None):
         if not ok:
             failed += 1
     stats = dict(generator.stats, globals_declared=len(decls), globals_typed=typed, globals_failed=failed,
-                 globals_not_in_database=absent, percpu_typed=percpu)
+                 globals_not_in_database=absent, percpu_typed=percpu, globals_skipped_code=code)
     return {"stats": stats, "rejected": rejected, "missing": missing, "wrong_size": wrong}
+
+
+SEGPERM_EXEC = 1  # ida_segment.SEGPERM_EXEC
+
+
+def in_code(address):
+    """True inside an executable segment (the ELF loader sets segment permissions from the program headers)."""
+    return bool((idc.get_segm_attr(address, idc.SEGATTR_PERM) or 0) & SEGPERM_EXEC)
 
 
 def percpu_copies(name):
@@ -142,6 +156,9 @@ def report(result):
                      "%d failed; %d have no symbol in this database (address 0 in the ISF, or outside exported memory)"
                      % (stats["globals_typed"], stats["globals_declared"], stats.get("percpu_typed", 0),
                         stats["globals_failed"], stats["globals_not_in_database"]))
+    if stats.get("globals_skipped_code"):
+        lines.append("[MemLens] left %d names alone that the ISF declares as variables but that are code here (for example a function "
+                     "with the same name as a variable elsewhere)" % stats["globals_skipped_code"])
     lines += ["[MemLens] rejected by IDA's parser: %d" % len(result["rejected"]),
               "[MemLens] types missing afterwards: %d" % len(result["missing"]),
               "[MemLens] types with a size differing from the ISF: %d" % len(result["wrong_size"])]

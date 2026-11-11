@@ -105,7 +105,8 @@ class Elf:
         shoff = shstroff + len(shnames)
         shoff += -shoff % 8
 
-        entry = sections[0][1] if sections else 0
+        # Entry = the first executable section (kernel text), never the per-CPU data that sits below the kernel image.
+        entry = next((addr for _, addr, flags, _ in sections if flags & SHF_EXEC), sections[0][1] if sections else 0)
         out.write(b"\x7fELF\x02\x01\x01" + b"\0" * 9)
         out.write(struct.pack("<HHIQQQIHHHHHH", 2, 62, 1, entry, 64, shoff, 0, 64, 56, count, 64, count + 4, count + 3))
         for (name, addr, flags, data), offset in zip(sections, layout):

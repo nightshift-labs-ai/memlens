@@ -89,11 +89,18 @@ def apply_types(isf_path, confirm=None):
         return None
     generator = isf2c.Generator(isf)
 
+    stopped = {}
+
     def progress(done, total):
         ida_kernwin.replace_wait_box("MemLens: importing types (%d of %d)" % (done, total))
-        return ida_kernwin.user_cancelled()
+        if ida_kernwin.user_cancelled():
+            stopped["at"] = "while importing types, after %d of %d declarations; no global was typed" % (done, total)
+            return True
+        return False
 
     rejected = isf2c.import_in_batches(generator.declarations(), parse_batch, progress=progress)
+    if stopped:
+        return {"stats": dict(generator.stats), "rejected": rejected, "missing": [], "wrong_size": [], "cancelled": stopped["at"]}
     missing, wrong = check_sizes(generator.expected_sizes())
     typed = failed = absent = percpu = code = 0
     decls = isf2c.global_decls(generator, isf)
@@ -106,6 +113,7 @@ def apply_types(isf_path, confirm=None):
         if index % 2000 == 0:
             ida_kernwin.replace_wait_box("MemLens: typing globals (%d of %d)" % (index, len(decls)))
             if ida_kernwin.user_cancelled():
+                stopped["at"] = "while typing globals, after %d of %d" % (index, len(decls))
                 break
         address = idc.get_name_ea_simple(name)
         # A per-CPU variable has one copy per CPU, named cpu<N>.<name> by the exporter. Kernels that link the
@@ -136,7 +144,10 @@ def apply_types(isf_path, confirm=None):
             failed += 1
     stats = dict(generator.stats, globals_declared=len(decls), globals_typed=typed, globals_failed=failed,
                  globals_not_in_database=absent, percpu_typed=percpu, globals_skipped_code=code)
-    return {"stats": stats, "rejected": rejected, "missing": missing, "wrong_size": wrong}
+    result = {"stats": stats, "rejected": rejected, "missing": missing, "wrong_size": wrong}
+    if stopped:
+        result["cancelled"] = stopped["at"]
+    return result
 
 
 SEGPERM_EXEC = 1  # ida_segment.SEGPERM_EXEC
@@ -248,7 +259,8 @@ def percpu_copies(name, cpus=None, index=None):
 def report(result):
     """The import summary, so a user can see exactly what did and did not arrive."""
     stats = result["stats"]
-    lines = ["[MemLens] imported: %s" % stats]
+    lines = ["[MemLens] CANCELLED %s: the counts below are partial" % result["cancelled"]] if result.get("cancelled") else []
+    lines.append("[MemLens] declarations generated from the ISF: %s" % stats)
     if "globals_declared" in stats:
         lines.append("[MemLens] typed %d of the %d globals the ISF declares, plus %d per-CPU variables in every CPU's copy; "
                      "%d failed; %d have no symbol in this database (address 0 in the ISF, or outside exported memory)"

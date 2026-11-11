@@ -5,6 +5,7 @@ Taken from the GitHub release notes. Newest first.
 ## Unreleased
 
 - **A wrong or broken ISF file gives one clear message** instead of "unexpected error, please report it" and a traceback: picking `kernel.elf`, a text file, a truncated `.json.xz`, a missing file, or JSON that is not an ISF now says which file is not a readable Volatility ISF and why (plugin and `isf2c.py`). Found by a judge-style review.
+- **Cancel is reported as cancelled.** Cancelling Apply kernel types used to print a summary that looked like a full import (and the first line showed the counts generated from the ISF, not what IDA took). The Output window now starts with `CANCELLED while importing types, after N of M declarations` (nothing typed) or `CANCELLED while typing globals, after N of M`, and the first counts line is labelled "declarations generated from the ISF".
 - **Apply kernel types asks first when the database has no `linux_banner`** (it may not be a kernel): before, it imported about 25,000 kernel types into any database without a question. The headless runner refuses in that case unless `--any-kernel` is given.
 
 ## v0.3.25 (2026-11-13)

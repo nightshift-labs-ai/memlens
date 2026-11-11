@@ -67,6 +67,16 @@ with tempfile.TemporaryDirectory() as t:
     st = result["stats"]
     assert (st["globals_declared"], st["globals_typed"], st["globals_failed"], st["globals_not_in_database"]) == (2, 1, 0, 1), st
     assert "typed 1 of the 2 globals the ISF declares, plus 0 per-CPU variables in every CPU's copy; 0 failed; 1 have no symbol in this database" in m.report(result)
+    assert "CANCELLED" not in m.report(result) and "cancelled" not in result
+    kw.user_cancelled = lambda: True  # Cancel during the type import: nothing typed, the report says so
+    r = m.apply_types(p)
+    assert r["cancelled"].startswith("while importing types, after 0 of") and "globals_typed" not in r["stats"], r
+    assert m.report(r).startswith("[MemLens] CANCELLED while importing types"), m.report(r)
+    answers_c = iter([False, True])  # Cancel at the first globals checkpoint
+    kw.user_cancelled = lambda: next(answers_c)
+    r = m.apply_types(p)
+    assert r["cancelled"] == "while typing globals, after 0 of 2" and r["stats"]["globals_typed"] == 0, r
+    kw.user_cancelled = lambda: False
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; m.apply_types(p)
     assert [c for c in calls if c[0] == "settype"] == [("settype", 0x1000, "struct demo demo_var;")], calls
     # A per-CPU variable: no plain symbol, one copy per CPU named cpu<N>.<name> by the exporter.

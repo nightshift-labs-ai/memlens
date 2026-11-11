@@ -63,8 +63,17 @@ image = ps.Image(elf(code, symbols, struct.pack("<QQQQ", BASE + 0xb00, 0xfffffff
 assert [row[1] for row in ps.scan_functions(image)] == ["hooked"]
 assert [row[1] for row in ps.scan_syscalls(image)] == ["sys_call_table[1]"]
 symbols[-1] = ("sys_call_table", BASE + TEXT, 0x40)
-image = ps.Image(elf(code, symbols, struct.pack("<QQQ", BASE + 0xb00, BASE + TEXT + 8, past_end)))  # data pointer ends it
+image = ps.Image(elf(code, symbols, struct.pack("<QQQ", BASE + 0xb00, BASE + TEXT + 8, past_end)))
+# Inside a known table size a data pointer is reported, not taken as the end of the table.
+assert [(r[1], r[2]) for r in ps.scan_syscalls(image)] == [("sys_call_table[1]", "syscall entry is not a code pointer"),
+                                                          ("sys_call_table[2]", "syscall entry outside the handlers")]
+symbols[-1] = ("sys_call_table", BASE + TEXT, 0)                                # no size: a data pointer ends it
+image = ps.Image(elf(code, symbols, struct.pack("<QQQ", BASE + 0xb00, BASE + TEXT + 8, past_end)))
 assert ps.scan_syscalls(image) == []
+# One odd slot must not hide later ones: data pointer, zero padding, handler, kernel code, unmapped, handler.
+symbols[-1] = ("sys_call_table", BASE + TEXT, 0x30)
+image = ps.Image(elf(code, symbols, struct.pack("<QQQQQQ", BASE + TEXT + 8, 0, BASE + 0xb00, BASE + 0x200, 0xffffffffc0005000, BASE + 0xb00)))
+assert [r[1] for r in ps.scan_syscalls(image)] == ["sys_call_table[0]", "sys_call_table[3]", "sys_call_table[4]"], ps.scan_syscalls(image)
 code = bytearray(b"\x90" * TEXT)
 put(0x000, call(BASE, BASE + 0x900, 0xE9))                                      # kernel jumps to its own foo.constprop.0
 put(0x100, call(BASE + 0x100, 0xffffffffc0007000, 0xE9))                        # kernel jumps into a module

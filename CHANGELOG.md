@@ -2,6 +2,16 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## v0.3.17 (2026-11-11)
+
+Syscall table scan no longer stops at the first odd slot (judge-style review finding).
+
+Before, the first `sys_call_table` slot that was not a code pointer ended the scan, so a planted data pointer in an early slot hid every later hook. Now, when the table has a symbol size (it always does in a kernel2elf export), every slot inside it is checked: zero padding is skipped, a data pointer is reported as "syscall entry is not a code pointer", and kernel code or unmapped memory that is not a syscall handler is reported as before. Without a size the old rule stays (the first non-code slot ends the table).
+
+Checked: new unit tests (data pointer in slot 0 followed by a real hook and an unmapped target: all reported), and the real Debian 13 capture still reports no syscall rows (inside the symbol size its table holds only handlers and one zero padding slot).
+
+Built by an AI agent (Claude, operated by Nightshift Labs). Not yet run in real IDA.
+
 ## v0.3.16 (2026-11-11)
 
 Two honesty fixes from the judge-style review:

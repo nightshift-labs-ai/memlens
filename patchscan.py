@@ -230,7 +230,11 @@ def scan_syscalls(image, count=512):
     if not table:
         return []
     findings = []
-    if table[1]:  # newer kernels have fewer slots than count; what follows the table is other data
+    # With a symbol size every slot inside it is a table entry (the size reaches the next symbol, so it can
+    # include zero padding, which is skipped); a data pointer there is reported, not taken as the end, so
+    # one odd slot cannot hide later ones. Without a size, the first slot that is not a code pointer ends the table.
+    sized = bool(table[1])
+    if sized:
         count = min(count, table[1] // 8)
     for number in range(count):
         raw = image.read(table[0] + 8 * number, 8)
@@ -241,9 +245,14 @@ def scan_syscalls(image, count=512):
         if symbol and symbol.startswith(("__x64_sys_", "__ia32_sys_", "sys_ni_syscall", "__x64_compat_sys_")):
             continue
         segment = image.segment(target)
-        if target < 0xffff000000000000 or (segment and not segment[3]):  # not a code pointer: end of the table
-            break
-        findings.append((table[0] + 8 * number, "sys_call_table[%d]" % number, "syscall entry outside the handlers", describe(image, target), target))
+        code = target >= 0xffff000000000000 and not (segment and not segment[3])
+        if not code:
+            if not sized:
+                break
+            if target == 0:
+                continue
+        what = "syscall entry outside the handlers" if code else "syscall entry is not a code pointer"
+        findings.append((table[0] + 8 * number, "sys_call_table[%d]" % number, what, describe(image, target), target))
     return findings
 
 

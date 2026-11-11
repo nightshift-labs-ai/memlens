@@ -20,7 +20,7 @@ Each output row has an Item, a Name, an Address and a Count:
 |---|---|
 | `section` | Part of the kernel image; Count is bytes written |
 | `symbols` | Kernel symbols in the ISF; those outside exported memory are then left out |
-| `percpu` | One CPU's per-CPU area (Name `cpu<N>`), written as section `.percpu.cpu<N>` with symbols `cpu<N>.<variable>`; Count is the variables |
+| `percpu` | One CPU's per-CPU area (Name `cpu<N>`), written as section `.percpu.cpu<N>` (split into `.percpu.cpu<N>.<k>` around pages missing from the image) with symbols `cpu<N>.<variable>`; Count is the variables |
 | `module` | A loaded module; Count is its symbols |
 | `hook target` | A page of hook code outside the kernel and modules, copied into the ELF; it gets a `memlens_target_<address>` symbol |
 | `patched` | A function entry that was rewritten, or a syscall table slot outside the handlers |

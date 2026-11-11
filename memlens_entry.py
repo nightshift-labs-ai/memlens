@@ -93,21 +93,25 @@ def apply_types(isf_path, confirm=None):
             if ida_kernwin.user_cancelled():
                 break
         address = idc.get_name_ea_simple(name)
-        if address == idc.BADADDR:
-            # A per-CPU variable has one copy per CPU, named cpu<N>.<name> by the exporter.
-            copies = list(percpu_copies(name))
-            if not copies:
-                # Most of these have address 0 in the ISF, so the ELF has no symbol for them.
-                absent += 1
-                continue
+        # A per-CPU variable has one copy per CPU, named cpu<N>.<name> by the exporter. Kernels that link the
+        # per-CPU section at a kernel address (Linux 7.0) also keep a plain symbol for the boot template.
+        copies = list(percpu_copies(name))
+        if address == idc.BADADDR and not copies:
+            # Most of these have address 0 in the ISF, so the ELF has no symbol for them.
+            absent += 1
+            continue
+        ok = True
+        if address != idc.BADADDR:
+            if idc.SetType(address, declaration + ";"):
+                typed += 1
+            else:
+                ok = False
+        if copies:
             if all(idc.SetType(copy, declaration + ";") for copy in copies):
                 percpu += 1
             else:
-                failed += 1
-            continue
-        if idc.SetType(address, declaration + ";"):
-            typed += 1
-        else:
+                ok = False
+        if not ok:
             failed += 1
     stats = dict(generator.stats, globals_declared=len(decls), globals_typed=typed, globals_failed=failed,
                  globals_not_in_database=absent, percpu_typed=percpu)

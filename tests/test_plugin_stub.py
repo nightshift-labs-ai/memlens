@@ -63,6 +63,11 @@ with tempfile.TemporaryDirectory() as t:
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
     assert (st["globals_typed"], st["percpu_typed"], st["globals_not_in_database"]) == (1, 1, 0), st
     assert [c[1:] for c in calls if c[0] == "settype"] == [(0x2000, "struct demo absent;"), (0x2100, "struct demo absent;"), (0x1000, "struct demo demo_var;")], calls
+    # Linux 7.0 style: a plain symbol for the boot template plus one copy per CPU; all of them are typed.
+    idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000, "cpu0.demo_var": 0x3000, "cpu1.demo_var": 0x3100}.get(n, idc.BADADDR)
+    calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
+    assert (st["globals_typed"], st["percpu_typed"], st["globals_failed"], st["globals_not_in_database"]) == (1, 1, 0, 1), st
+    assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;"), (0x3000, "struct demo demo_var;"), (0x3100, "struct demo demo_var;")], calls
     idc.get_name_ea_simple = lambda n: 0x1000 if n == "demo_var" else idc.BADADDR
     assert sum(c[0] == "reg" for c in calls) == 3 and sum(c[0] == "menu" for c in calls) == 3
     cmd = m.export_command("/bin/vol", "/x/m.lime", "/out", "/sym")

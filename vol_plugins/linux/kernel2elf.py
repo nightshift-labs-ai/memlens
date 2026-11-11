@@ -30,6 +30,12 @@ MARKER_SUFFIXES = ("_text_start", "_text_end")
 MARKER_PREFIXES = ("__start_", "__stop_")
 GLOBAL = 1
 MAX_CPUS = 256
+# x86-64 zero-based per-CPU layout: offset 0 holds fixed_percpu_data (irq_stack_union before Linux 4.20) and the
+# page-aligned per-CPU variables (gdt_page, cpu_tss_rw, ...) start at the next page, so the rest of the first page is
+# padding. The ISF puts symbols it has no address for at 0 and absolute assembler constants (L4_PAGE_OFFSET = 273,
+# pgtno, ...) at small values, so in that page only these names are taken.
+ZERO_OFFSET_PERCPU = ("fixed_percpu_data", "irq_stack_union")
+PERCPU_FIRST_PAGE = 0x1000
 
 
 def canonical(address: int) -> int:
@@ -297,7 +303,11 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
                 value = kernel.get_symbol(name).address
             except exceptions.SymbolError:
                 continue
-            if start < value < end:  # address 0 is where the ISF puts symbols it has no address for
+            if start == 0:
+                wanted = PERCPU_FIRST_PAGE <= value < end or (value == 0 and name in ZERO_OFFSET_PERCPU)
+            else:
+                wanted = start <= value < end and not name.startswith("__per_cpu_")
+            if wanted:
                 variables.append((value, name))
         variables.sort()
         values = [value for value, _ in variables] + [end]

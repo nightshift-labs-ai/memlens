@@ -2,6 +2,11 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## Demo data update (2026-11-11, no code change)
+
+- `memlens-demo-debian13.zip` re-exported with v0.3.18: linker markers such as `_stext` are now untyped symbols in the demo `kernel.elf` too (the old file predated that fix; only those symbol-type bytes changed). `expected-patched-functions.txt` names the hook handlers; `SHA256SUMS.txt` added.
+- README: new "Export it yourself" section. The demo's source memory image (`trace.elf.xz`, 80 MB) is public; exporting it gives a byte-identical `kernel.elf` (checked from a fresh `pip install volatility3`, Volatility 3 2.28.2).
+
 ## v0.3.18 (2026-11-11)
 
 Two more hook patterns from the judge-style review, plus the judge's injection as a permanent test:

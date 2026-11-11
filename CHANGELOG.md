@@ -2,6 +2,10 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## v0.3.21 (2026-11-11)
+
+- **Headless runner for idalib** (IDA 9.0+): `python3 tools/memlens_headless.py kernel.elf <isf> [--no-analysis] [--any-kernel]` applies the types, comments the patched entries, prints the report and the patch list, and saves the database, using the plugin's own functions. Exit codes: 0 done, 1 IDA could not open the file (or it is not a MemLens ELF), 2 no idalib, 3 the ISF is for another kernel (nothing imported). New `tests/test_headless_stub.py` (fake `idapro` and `ida_*` modules). Not yet run with a real idalib.
+
 ## v0.3.20 (2026-11-11)
 
 - **Per-CPU variables are exported, one copy per CPU.** Until now the per-CPU variables (`runqueues`, the current task, `this_cpu_off`, ...) were missing from `kernel.elf`: their ISF values are offsets, not addresses. The exporter now reads `__per_cpu_offset[]` and writes each CPU's live area as section `.percpu.cpu<N>` with symbols `cpu<N>.<name>`; **Apply kernel types** types every copy. Both layouts are handled: per-CPU linked at 0 (x86-64 up to 6.x) and at a KASLR-moved kernel address (Linux 7.0). Checked on all five captures (6.1, 6.8, 6.12 twice, 7.0): CPU 0's current task points to `init_task`, each CPU's `this_cpu_off` holds that CPU's own per-CPU offset, the other Volatility rows are unchanged, Ghidra 12.2 loads the demo ELF. Demo `kernel.elf`: 234,081 symbols (388 variables x 2 CPUs added).

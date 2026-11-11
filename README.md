@@ -113,6 +113,14 @@ python3 isf2c.py <isf.json.xz> kernel_types.h
 python3 patchscan.py kernel.elf
 ```
 
+Headless, with idalib (IDA 9.0 or newer; set up the `idapro` module as Hex-Rays describes):
+
+```
+python3 tools/memlens_headless.py kernel.elf <isf.json.xz> [--no-analysis] [--any-kernel]
+```
+
+It opens `kernel.elf` as a database, applies the types (the per-CPU copies too), comments every patched entry, prints the same report and patch list as the menu actions and saves the database. It calls the plugin's own functions; like the rest of the IDA layer it has only been run against fake modules (`tests/test_headless_stub.py`), not a real idalib.
+
 ## What was verified
 
 Memory images were captured from QEMU guests; addresses differ per boot because of KASLR.

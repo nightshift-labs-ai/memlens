@@ -33,7 +33,13 @@ idc.BADADDR = -1
 idc.SEGATTR_PERM = 5
 code_eas = set()
 idc.get_segm_attr = lambda ea, attr: 5 if ea in code_eas else 6  # 5 = read+exec, 6 = read+write
-idc.get_name_ea_simple = lambda n: 0x1000 if n == "demo_var" else idc.BADADDR
+names = {}
+def set_names(table):
+    """The database's names: both the one-by-one lookup and idautils.Names() read this table."""
+    names.clear(); names.update(table)
+idc.get_name_ea_simple = lambda n: names.get(n, idc.BADADDR)
+autils = types.ModuleType("idautils"); autils.Names = lambda: [(ea, n) for n, ea in names.items()]
+set_names({"demo_var": 0x1000})
 idc.get_first_seg = lambda: idc.BADADDR  # no per-CPU sections unless a case adds them
 idc.get_next_seg = lambda ea: idc.BADADDR
 idc.SetType = lambda ea, d: calls.append(("settype", ea, d)) or True
@@ -43,7 +49,7 @@ idc.set_cmt = lambda ea, c, r: calls.append(("cmt", ea, c)) or comments.__setite
 idc.get_cmt = lambda ea, r: comments.get(ea)
 dbytes = types.ModuleType("ida_bytes"); dbytes.get_bytes = lambda ea, size: b"Linux version 1.0"[:size]
 kw.ASKBTN_NO, kw.ASKBTN_YES = 0, 1
-sys.modules.update(ida_kernwin=kw, ida_idaapi=api, ida_typeinf=ti, ida_nalt=nalt, idc=idc, ida_bytes=dbytes)
+sys.modules.update(ida_kernwin=kw, ida_idaapi=api, ida_typeinf=ti, ida_nalt=nalt, idc=idc, ida_bytes=dbytes, idautils=autils)
 import memlens_entry as m
 isf = {"base_types": {"unsigned int": {"size": 4, "signed": False, "kind": "int"}},
        "enums": {}, "symbols": {"demo_var": {"address": 1, "type": {"kind": "struct", "name": "demo"}}, "absent": {"address": 2, "type": {"kind": "struct", "name": "demo"}}, "fn": {"address": 3, "type": {"kind": "base", "name": "void"}}}, "user_types": {"demo": {"kind": "struct", "size": 8, "fields": {"a": {"offset": 4, "type": {"kind": "base", "name": "unsigned int"}}, "private": {"offset": 0, "type": {"kind": "base", "name": "unsigned int"}}}}, "shrunk": {"kind": "struct", "size": 4, "fields": {"a": {"offset": 0, "type": {"kind": "base", "name": "unsigned int"}}}}, "gone": {"kind": "struct", "size": 4, "fields": {"a": {"offset": 0, "type": {"kind": "base", "name": "unsigned int"}}}}}}
@@ -64,28 +70,28 @@ with tempfile.TemporaryDirectory() as t:
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; m.apply_types(p)
     assert [c for c in calls if c[0] == "settype"] == [("settype", 0x1000, "struct demo demo_var;")], calls
     # A per-CPU variable: no plain symbol, one copy per CPU named cpu<N>.<name> by the exporter.
-    idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000, "cpu0.absent": 0x2000, "cpu1.absent": 0x2100}.get(n, idc.BADADDR)
+    set_names({"demo_var": 0x1000, "cpu0.absent": 0x2000, "cpu1.absent": 0x2100})
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
     assert (st["globals_typed"], st["percpu_typed"], st["globals_not_in_database"]) == (1, 1, 0), st
     assert [c[1:] for c in calls if c[0] == "settype"] == [(0x2000, "struct demo absent;"), (0x2100, "struct demo absent;"), (0x1000, "struct demo demo_var;")], calls
     # If IDA stored '.' as '_', cpu<N>_<name> is taken, but only inside that CPU's per-CPU section.
     idc.get_segm_name = lambda ea: {0x2000: ".percpu.cpu0", 0x2100: "_percpu_cpu1", 0x4000: ".data"}.get(ea, "")
-    idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000, "cpu0_absent": 0x2000, "cpu1_absent": 0x2100}.get(n, idc.BADADDR)
+    set_names({"demo_var": 0x1000, "cpu0_absent": 0x2000, "cpu1_absent": 0x2100})
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
     assert (st["globals_typed"], st["percpu_typed"], st["globals_not_in_database"]) == (1, 1, 0), st
-    idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000, "cpu0_absent": 0x4000}.get(n, idc.BADADDR)  # a real symbol elsewhere
+    set_names({"demo_var": 0x1000, "cpu0_absent": 0x4000})  # a real symbol elsewhere
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
     assert (st["percpu_typed"], st["globals_not_in_database"]) == (0, 1), st
     assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;")], calls
     # A name the ISF declares as a variable but which is code here (schedule, strlen): never retyped.
-    idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000}.get(n, idc.BADADDR)
+    set_names({"demo_var": 0x1000})
     code_eas.add(0x1000)
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; result = m.apply_types(p); st = result["stats"]
     assert (st["globals_typed"], st["globals_skipped_code"]) == (0, 1) and not [c for c in calls if c[0] == "settype"], (st, calls)
     assert "left 1 names alone" in m.report(result)
     code_eas.clear()
     # Linux 7.0 style: a plain symbol for the boot template plus one copy per CPU; all of them are typed.
-    idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000, "cpu0.demo_var": 0x3000, "cpu1.demo_var": 0x3100}.get(n, idc.BADADDR)
+    set_names({"demo_var": 0x1000, "cpu0.demo_var": 0x3000, "cpu1.demo_var": 0x3100})
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
     assert (st["globals_typed"], st["percpu_typed"], st["globals_failed"], st["globals_not_in_database"]) == (1, 1, 0, 1), st
     assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;"), (0x3000, "struct demo demo_var;"), (0x3100, "struct demo demo_var;")], calls
@@ -95,7 +101,7 @@ with tempfile.TemporaryDirectory() as t:
     idc.get_next_seg = lambda ea: min([s for s in segs if s > ea], default=idc.BADADDR)
     idc.get_segm_name = lambda ea: segs.get(ea, "")
     assert m.percpu_cpus() == [0, 2]
-    idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000, "cpu0.demo_var": 0x3000, "cpu2.demo_var": 0x3200}.get(n, idc.BADADDR)
+    set_names({"demo_var": 0x1000, "cpu0.demo_var": 0x3000, "cpu2.demo_var": 0x3200})
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
     assert st["percpu_typed"] == 1, st
     assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;"), (0x3000, "struct demo demo_var;"), (0x3200, "struct demo demo_var;")], calls
@@ -103,17 +109,47 @@ with tempfile.TemporaryDirectory() as t:
     segs = {0x1000: ".data", 0x3000: ".percpu.cpu0", 0x3100: ".percpu.cpu1.0", 0x3180: "_percpu_cpu1_1", 0x3200: ".percpu.cpu2", 0x3300: ".percpu.cpu10"}
     assert m.percpu_cpus() == [0, 1, 2, 10]
     assert [m.segment_cpu(n) for n in (".percpu.cpu1x", ".percpu.cpu", "percpu.cpu3.", ".data.percpu", None)] == [None] * 5
-    idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000, "cpu0.demo_var": 0x3000, "cpu1_demo_var": 0x3180, "cpu2.demo_var": 0x3200}.get(n, idc.BADADDR)
+    set_names({"demo_var": 0x1000, "cpu0.demo_var": 0x3000, "cpu1_demo_var": 0x3180, "cpu2.demo_var": 0x3200})
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
     assert st["percpu_typed"] == 1, st
     assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;"), (0x3000, "struct demo demo_var;"), (0x3180, "struct demo demo_var;"), (0x3200, "struct demo demo_var;")], calls
     # A listed CPU without a copy of this variable is skipped; later CPUs are still typed.
     segs = {0x1000: ".data", 0x3000: ".percpu.cpu0", 0x3100: ".percpu.cpu1", 0x3200: ".percpu.cpu2"}
-    idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000, "cpu0.demo_var": 0x3000, "cpu2.demo_var": 0x3200}.get(n, idc.BADADDR)
+    set_names({"demo_var": 0x1000, "cpu0.demo_var": 0x3000, "cpu2.demo_var": 0x3200})
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
     assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;"), (0x3000, "struct demo demo_var;"), (0x3200, "struct demo demo_var;")], calls
+    # The per-CPU copies come from one pass over the names (percpu_index): '.' beats '_' in either order, a '_'
+    # copy outside its CPU's section and a zero-padded or unlisted CPU number are never taken.
+    segs = {0x1000: ".data", 0x3000: ".percpu.cpu0", 0x3100: ".percpu.cpu1", 0x3200: ".percpu.cpu2", 0x4000: ".data"}
+    for table in ({"cpu1_demo_var": 0x3108, "cpu1.demo_var": 0x3100}, {"cpu1.demo_var": 0x3100, "cpu1_demo_var": 0x3108}):
+        set_names(dict(table, demo_var=0x1000, **{"cpu0_demo_var": 0x4000, "cpu02.demo_var": 0x3208, "cpu3.demo_var": 0x3300}))
+        assert m.percpu_index(m.percpu_cpus()) == {"demo_var": {1: 0x3100}}, m.percpu_index(m.percpu_cpus())
+        calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
+        assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;"), (0x3100, "struct demo demo_var;")], calls
+    # A name list without the per-CPU copies (IDA can keep names out of it): the copies are looked up one by one.
+    set_names({"demo_var": 0x1000, "cpu1.demo_var": 0x3100})
+    autils.Names = lambda: [(0x1000, "demo_var")]
+    calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
+    assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;"), (0x3100, "struct demo demo_var;")], calls
+    autils.Names = lambda: [(ea, n) for n, ea in names.items()]
+    # The index gives exactly what the one-by-one lookup gives, on random databases (both read the same names).
+    import random
+    rng = random.Random(146)
+    for _ in range(3000):
+        segs = {0x1000: ".data", 0x9000: ".text"}
+        segs.update({0x10000 * (c + 1): rng.choice([".percpu.cpu%d", "_percpu_cpu%d", ".percpu.cpu%d.0"]) % c for c in rng.sample(range(12), rng.randint(1, 5))})
+        cpus = m.percpu_cpus()
+        table = {}
+        for _ in range(rng.randint(0, 12)):
+            cpu, var = rng.randint(0, 12), rng.choice(["a", "b", "a_b", "b.c"])
+            symbol = rng.choice(["cpu%d.%s", "cpu%d_%s", "cpu0%d.%s"]) % (cpu, var)
+            table[symbol] = rng.choice([0x10000 * (cpu + 1) + 8 * rng.randint(0, 3), 0x1000, 0x10000 * rng.randint(1, 13)])
+        set_names(table)
+        index = m.percpu_index(cpus)
+        for var in ("a", "b", "a_b", "b.c", "c"):
+            assert list(m.percpu_copies(var, cpus, index)) == list(m.percpu_copies(var, cpus)), (segs, table, var)
     idc.get_first_seg = lambda: idc.BADADDR
-    idc.get_name_ea_simple = lambda n: 0x1000 if n == "demo_var" else idc.BADADDR
+    set_names({"demo_var": 0x1000})
     assert sum(c[0] == "reg" for c in calls) == 3 and sum(c[0] == "menu" for c in calls) == 3
     cmd = m.export_command("/bin/vol", "/x/m.lime", "/out", "/sym")
     assert cmd[-1] == "linux.kernel2elf.Kernel2Elf" and "/x/m.lime" in cmd and "/sym" in cmd
@@ -133,7 +169,7 @@ with tempfile.TemporaryDirectory() as t:
     def banner_isf(text):
         data = dict(isf); data["symbols"] = dict(isf["symbols"], linux_banner={"address": 9, "constant_data": base64.b64encode(text + b"\0").decode()})
         q = os.path.join(t, "banner.json"); json.dump(data, open(q, "w")); return q
-    idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000, "linux_banner": 0x3000}.get(n, idc.BADADDR)
+    set_names({"demo_var": 0x1000, "linux_banner": 0x3000})
     asked = []
     same = banner_isf(b"Linux version 1.0")
     assert m.apply_types(same, lambda e, a: asked.append(e) or False) is not None and asked == []
@@ -145,7 +181,7 @@ with tempfile.TemporaryDirectory() as t:
     answers = []
     kw.ask_yn = lambda d, text: answers.append(text) or kw.ASKBTN_NO
     assert m.confirm_other_kernel(b"Linux 100% A", b"Linux B") is False and "100%%" in answers[0]
-    idc.get_name_ea_simple = lambda n: 0x1000 if n == "demo_var" else idc.BADADDR
+    set_names({"demo_var": 0x1000})
     assert m.banner_mismatch({"symbols": {"linux_banner": {"constant_data": "YQ=="}}}) is None  # no such symbol in the database
     comments[0x10] = "analyst note"
     m.add_comment(0x10, "MemLens: hook"); m.add_comment(0x10, "MemLens: hook"); m.add_comment(0x20, "MemLens: hook")

@@ -14,7 +14,7 @@ import re
 import sys
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-MODULES = ("ida_kernwin", "ida_idaapi", "ida_typeinf", "ida_nalt", "ida_bytes", "idc")
+MODULES = ("ida_kernwin", "ida_idaapi", "ida_typeinf", "ida_nalt", "ida_bytes", "idc", "idautils")
 
 
 def dotted(node):
@@ -46,6 +46,8 @@ def known_api(idapython):
     with open(os.path.join(idapython, "python", "idc.py")) as handle:
         source = handle.read()
     known |= {"idc." + name for name in re.findall(r"^(?:def )?([A-Za-z_]\w*)\s*[=(]", source, re.M)}
+    with open(os.path.join(idapython, "python", "idautils.py")) as handle:
+        known |= {"idautils." + name for name in re.findall(r"^def ([A-Za-z_]\w*)\s*\(", handle.read(), re.M)}
     # Plain Python constants live in the wrappers, not in the generated API list.
     for path, prefix in (("py_idaapi.py", "ida_idaapi."), ("py_kernwin_choose.py", "ida_kernwin.Choose.")):
         with open(os.path.join(idapython, "pywraps", path)) as handle:

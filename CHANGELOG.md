@@ -2,6 +2,11 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## Unreleased
+
+- **Apply kernel types reads the per-CPU copies in one pass.** It used to look up `cpu<N>.<name>` (and `cpu<N>_<name>`) for every CPU and every global the ISF declares: about 79,000 globals x 64 CPUs is some 10 million name lookups on a 64-CPU capture. It now reads IDA's name list once (`idautils.Names()`) and keeps the same rules: `cpu<N>.<name>` anywhere, `cpu<N>_<name>` only inside that CPU's `.percpu.cpu<N>` section, `.` before `_`. If the name list holds no per-CPU copy at all (IDA can keep names out of it), it falls back to the one-by-one lookup. Stub test: the index gives the same copies as the old lookup on 3,000 random databases; mutation-checked. Found by a pre-release code review. Tested with fake IDA modules only.
+- tests/check_ida_api.py also checks `idautils` names (53 names, 0 missing against the IDA SDK).
+
 ## v0.3.24 (2026-11-12)
 
 - **Per-CPU typing no longer stops at a missing CPU.** The exporter keeps real CPU numbers and leaves out a CPU whose per-CPU area is not in the memory image, so a capture can have `.percpu.cpu0` and `.percpu.cpu2` without `.percpu.cpu1`; Apply kernel types used to stop at the first gap. It now takes the CPU numbers from the `.percpu.cpu<N>` sections in the database, including the `.percpu.cpu<N>.<k>` pieces the exporter writes when a CPU's area is only partly in the image (the old cpu0, cpu1, ... probe is kept for databases without such sections). Found by a judge-style review; the split-section case by a pre-release check. Tested with fake IDA modules only.

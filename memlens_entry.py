@@ -90,6 +90,10 @@ def apply_types(isf_path, confirm=None):
     typed = failed = absent = percpu = code = 0
     decls = isf2c.global_decls(generator, isf)
     cpus = percpu_cpus()
+    copies_by_name = percpu_index(cpus) if cpus else None
+    if copies_by_name is not None and not any(copies_by_name.values()):
+        # IDA can keep names out of its name list; with no copy found there, look each one up as before.
+        copies_by_name = None
     for index, (name, declaration) in enumerate(decls):
         if index % 2000 == 0:
             ida_kernwin.replace_wait_box("MemLens: typing globals (%d of %d)" % (index, len(decls)))
@@ -98,7 +102,7 @@ def apply_types(isf_path, confirm=None):
         address = idc.get_name_ea_simple(name)
         # A per-CPU variable has one copy per CPU, named cpu<N>.<name> by the exporter. Kernels that link the
         # per-CPU section at a kernel address (Linux 7.0) also keep a plain symbol for the boot template.
-        copies = list(percpu_copies(name, cpus))
+        copies = list(percpu_copies(name, cpus, copies_by_name))
         if address == idc.BADADDR and not copies:
             # Most of these have address 0 in the ISF, so the ELF has no symbol for them.
             absent += 1
@@ -161,11 +165,47 @@ def percpu_cpus():
     return sorted(cpus)
 
 
-def percpu_copies(name, cpus=None):
-    """Addresses of cpu<N>.<name> for every CPU in cpus.
+# cpu<N>.<name> as the exporter writes it, or cpu<N>_<name> if IDA stored the '.' as '_'. <N> is written like "%d".
+PERCPU_SYMBOL = re.compile(r"cpu(0|[1-9][0-9]*)([._])(.+)$")
+
+
+def percpu_index(cpus):
+    """{name: {cpu: address}} for the per-CPU copies of the listed CPUs, from one pass over the database's names.
+
+    Same rule as the one-by-one lookup in percpu_copies: cpu<N>.<name> anywhere, cpu<N>_<name> only inside that
+    CPU's .percpu.cpu<N> section, and the '.' form wins when both exist. One pass instead of two name lookups
+    per CPU for every ISF global (about 79,000 globals x 64 CPUs = 10 million lookups on a 64-CPU capture).
+    """
+    import idautils  # only needed here, so databases without per-CPU sections never touch it
+
+    wanted = set(cpus)
+    index = {}
+    for address, symbol in idautils.Names():
+        match = PERCPU_SYMBOL.match(symbol or "")
+        if not match:
+            continue
+        cpu, separator, name = int(match.group(1)), match.group(2), match.group(3)
+        if cpu not in wanted:
+            continue
+        copies = index.setdefault(name, {})
+        if separator == ".":
+            copies[cpu] = address  # the exporter's own form: always wins
+        elif cpu not in copies and segment_cpu(idc.get_segm_name(address)) == cpu:
+            copies[cpu] = address
+    return index
+
+
+def percpu_copies(name, cpus=None, index=None):
+    """Addresses of cpu<N>.<name> for every CPU in cpus, in CPU order (from index when given, see percpu_index).
 
     Without per-CPU sections (cpus empty or None) the old rule applies: cpu0, cpu1, ... up to the first CPU without one.
     """
+    if cpus and index is not None:
+        copies = index.get(name, {})
+        for cpu in cpus:
+            if cpu in copies:
+                yield copies[cpu]
+        return
     numbers = iter(cpus) if cpus else itertools.count()
     for cpu in numbers:
         address = idc.get_name_ea_simple("cpu%d.%s" % (cpu, name))

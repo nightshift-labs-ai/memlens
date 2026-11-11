@@ -29,6 +29,7 @@ idc.get_segm_name = lambda ea: segments.get(ea, "")
 idc.parse_decls = lambda text, flags: 0
 names = {"demo_var": 0x1000, "cpu0.pcpu_var": 0x2000, "cpu1.pcpu_var": 0x2100, "linux_banner": 0x3000}
 idc.get_name_ea_simple = lambda n: names.get(n, idc.BADADDR)
+autils = types.ModuleType("idautils"); autils.Names = lambda: [(ea, n) for n, ea in names.items()]
 idc.SetType = lambda ea, d: calls.append(("settype", ea, d)) or True
 comments = {}
 idc.set_cmt = lambda ea, c, r: comments.__setitem__(ea, c)
@@ -39,7 +40,7 @@ dbytes = types.ModuleType("ida_bytes"); dbytes.get_bytes = lambda ea, size: bann
 idapro = types.ModuleType("idapro")
 idapro.open_database = lambda path, analysis: calls.append(("open", os.path.basename(path), analysis)) or 0
 idapro.close_database = lambda save: calls.append(("close", save))
-sys.modules.update(ida_kernwin=kw, ida_idaapi=api, ida_typeinf=ti, ida_nalt=nalt, idc=idc, ida_bytes=dbytes, idapro=idapro)
+sys.modules.update(ida_kernwin=kw, ida_idaapi=api, ida_typeinf=ti, ida_nalt=nalt, idc=idc, ida_bytes=dbytes, idapro=idapro, idautils=autils)
 import memlens_headless as h
 import memlens_entry as m
 isf = {"base_types": {"unsigned int": {"size": 4, "signed": False, "kind": "int"}}, "enums": {},

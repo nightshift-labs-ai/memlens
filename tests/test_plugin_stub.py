@@ -185,6 +185,15 @@ with tempfile.TemporaryDirectory() as t:
     code, out, err = m.run_cancellable([sys.executable, "-c", "import sys; print('written\\tkernel-1.elf\\t0x0\\t5'); sys.stderr.write('boom'); sys.exit(3)"])
     assert code == 3 and err == b"boom" and m.written_file(out) == "kernel-1.elf", (code, out, err)
     assert m.written_file(b"") == "kernel.elf"
+    # Export failure text: Volatility's own explanation (stdout) is shown, plus a hint for the missing-symbols case
+    vol_out = b"A symbol table requirement was not fulfilled.  Please verify that:\n\tYou have the correct symbol file\n"
+    vol_err = b"Unable to validate the plugin requirements: ['plugins.Kernel2Elf.kernel.symbol_table_name']\n"
+    ftext = m.export_failure_text(vol_out, vol_err, False)
+    assert "a fresh pip install has none" in ftext and "A symbol table requirement" in ftext and "symbol_table_name" in ftext, ftext
+    ftext = m.export_failure_text(vol_out, vol_err, True)
+    assert "built for another kernel" in ftext and "fresh pip install" not in ftext, ftext
+    ftext = m.export_failure_text(b"", b"Traceback ... OSError: disk full", True)
+    assert "no symbols" not in ftext and "disk full" in ftext, ftext
     table = m.PatchList([(0x10, "fn", "what", "tgt", 0x20)])
     assert table.OnGetSize() == 1 and table.OnGetLine(0) == ["10", "fn", "what", "tgt"]
     assert table.OnSelectLine(0) == (0,) and ("jump", 0x10) in calls

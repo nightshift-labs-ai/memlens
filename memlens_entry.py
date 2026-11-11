@@ -314,6 +314,27 @@ def written_file(stdout, folder=None, before=None):
     return "kernel.elf"
 
 
+def export_failure_text(stdout, stderr, isf_given):
+    """The dialog text for a failed export: a plain hint for the common cause, then the tail of what Volatility said.
+    Volatility prints its own explanation of a missing symbol table on stdout, not stderr."""
+    out, err = stdout.decode("utf-8", "replace"), stderr.decode("utf-8", "replace")
+    lines = ["Volatility failed."]
+    if "symbol_table_name" in err or "symbol table requirement" in out:
+        if isf_given:
+            lines.append("It found no symbols matching this image's kernel: the ISF you chose was probably built for another "
+                         "kernel (its linux_banner must match the image's).")
+        else:
+            lines.append("It found no symbols for this image's kernel. Without an ISF it only uses the Linux symbol files it "
+                         "already has, and a fresh pip install has none: run Export again and choose the ISF built for this "
+                         "kernel (dwarf2json, see the README).")
+    lines.append("Full output is in the Output window. Volatility said:")
+    if out.strip():
+        lines.append(out.strip()[-700:])
+    if err.strip():
+        lines.append(err.strip()[-800:])
+    return "\n\n".join(lines)
+
+
 def run_cancellable(command):
     """Run without freezing IDA. Returns (exit code, stdout, stderr); exit code None means cancelled."""
     with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
@@ -390,7 +411,9 @@ class ExportKernel(ida_kernwin.action_handler_t):
         if code is None:
             return 0
         if code:
-            ida_kernwin.warning("Volatility failed:\n" + stderr[-1500:].decode("utf-8", "replace"))
+            ida_kernwin.msg("[MemLens] Volatility failed (exit %s).\n[MemLens] its stdout:\n%s\n[MemLens] its stderr:\n%s\n"
+                            % (code, stdout.decode("utf-8", "replace"), stderr.decode("utf-8", "replace")))
+            ida_kernwin.warning(export_failure_text(stdout, stderr, bool(isf)))
             return 0
         message = "Wrote %s in %s. Open it in IDA, then use Apply kernel types." % (written_file(stdout, output, before), output)
         ida_kernwin.msg("[MemLens] %s\n" % message)  # info() can be silenced for good by its checkbox

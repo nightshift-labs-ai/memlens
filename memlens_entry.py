@@ -197,9 +197,13 @@ class ApplyTypes(ida_kernwin.action_handler_t):
             return 0
         ida_kernwin.show_wait_box("MemLens: reading ISF")
         try:
-            result = apply_types(path, confirm_other_kernel)
-        finally:
-            ida_kernwin.hide_wait_box()
+            try:
+                result = apply_types(path, confirm_other_kernel)
+            finally:
+                ida_kernwin.hide_wait_box()
+        except isf2c.ISFError as error:
+            ida_kernwin.warning("MemLens: %s" % error)
+            return 0
         if result is None:
             return 0
         ida_kernwin.msg(report(result))

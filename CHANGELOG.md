@@ -2,6 +2,11 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## v0.3.19 (2026-11-11)
+
+- **The plugin now loads on a Python built without `_lzma`.** `isf2c` imported `lzma` at load time, so on such a Python every MemLens action was missing. The import now happens only when a `.json.xz` ISF is read; there, IDA shows one warning ("this Python has no lzma module: decompress the ISF first (xz -dk ...) and choose the .json file") and `isf2c.py` prints one line and exits 1. Plain `.json` ISFs work as before.
+- New `tests/test_no_lzma.py` blocks `lzma` and runs the whole stub test, the `.xz` warning and the command line. The header generated from the demo ISF is byte-identical to v0.3.18.
+
 ## Demo data update (2026-11-11, no code change)
 
 - `memlens-demo-debian13.zip` re-exported with v0.3.18: linker markers such as `_stext` are now untyped symbols in the demo `kernel.elf` too (the old file predated that fix; only those symbol-type bytes changed). `expected-patched-functions.txt` names the hook handlers; `SHA256SUMS.txt` added.

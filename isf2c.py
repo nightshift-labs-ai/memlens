@@ -7,15 +7,27 @@ Standard library only.
 """
 import argparse
 import json
-import lzma
+import os
 import re
 import sys
 
 IDENT = re.compile(r"[^0-9A-Za-z_]")
 
 
+class ISFError(Exception):
+    """An ISF file that cannot be read here; the message says what to do."""
+
+
 def load_isf(path):
-    opener = lzma.open if path.endswith(".xz") else open
+    opener = open
+    if path.endswith(".xz"):
+        # Imported here, so a Python built without _lzma can still load the plugin and read plain .json ISFs.
+        try:
+            import lzma
+        except ImportError:
+            raise ISFError("this Python has no lzma module: decompress the ISF first "
+                             "(xz -dk %s) and choose the .json file" % os.path.basename(path))
+        opener = lzma.open
     with opener(path, "rt", encoding="utf-8") as handle:
         return json.load(handle)
 
@@ -344,7 +356,12 @@ def main(argv=None):
     parser.add_argument("output")
     parser.add_argument("--only", nargs="*", help="only these types and what they need by value")
     args = parser.parse_args(argv)
-    generator = Generator(load_isf(args.isf))
+    try:
+        isf = load_isf(args.isf)
+    except ISFError as error:
+        print("isf2c: %s" % error, file=sys.stderr)
+        return 1
+    generator = Generator(isf)
     text = generator.generate(set(args.only) if args.only else None)
     with open(args.output, "w", encoding="utf-8") as handle:
         handle.write(text)
@@ -352,4 +369,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

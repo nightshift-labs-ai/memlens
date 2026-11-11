@@ -2,6 +2,13 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## v0.3.20 (2026-11-11)
+
+- **Per-CPU variables are exported, one copy per CPU.** Until now the per-CPU variables (`runqueues`, the current task, `this_cpu_off`, ...) were missing from `kernel.elf`: their ISF values are offsets, not addresses. The exporter now reads `__per_cpu_offset[]` and writes each CPU's live area as section `.percpu.cpu<N>` with symbols `cpu<N>.<name>`; **Apply kernel types** types every copy. Both layouts are handled: per-CPU linked at 0 (x86-64 up to 6.x) and at a KASLR-moved kernel address (Linux 7.0). Checked on all five captures (6.1, 6.8, 6.12 twice, 7.0): CPU 0's current task points to `init_task`, each CPU's `this_cpu_off` equals its own area, the other Volatility rows are unchanged, Ghidra 12.2 loads the demo ELF. Demo `kernel.elf`: 234,081 symbols (388 variables x 2 CPUs added).
+- Absolute assembler constants that the ISF lists with small values (`L4_PAGE_OFFSET` = 273, `vector`, `pgtno`, ...) are not taken for per-CPU variables; on a per-CPU layout linked at 0, only `fixed_percpu_data` is taken at offset 0.
+- `--no-percpu` writes the old layout, byte for byte. Visible change otherwise: the per-CPU areas sit below the kernel image, so Ghidra shows the lowest one as the image base.
+- Demo data re-exported with v0.3.20 (new `SHA256SUMS.txt`).
+
 ## v0.3.19 (2026-11-11)
 
 - **The plugin now loads on a Python built without `_lzma`.** `isf2c` imported `lzma` at load time, so on such a Python every MemLens action was missing. The import now happens only when a `.json.xz` ISF is read; there, IDA shows one warning ("this Python has no lzma module: decompress the ISF first (xz -dk ...) and choose the .json file") and `isf2c.py` prints one line and exits 1. Plain `.json` ISFs work as before.

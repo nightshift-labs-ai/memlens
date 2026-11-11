@@ -28,6 +28,8 @@ A GitHub repository search (name and description, November 2026) found no tool t
 
 **Symbols.** Kernel symbols come from the ISF, module symbols from each module's own symbol table, as `module.symbol`. A symbol is written only if it lands in exported memory.
 
+**Per-CPU areas.** Each CPU's copy of the per-CPU variables is read through `__per_cpu_offset[cpu]` (for `nr_cpu_ids` CPUs, at most 256) and written as section `.percpu.cpu<N>`, with symbols `cpu<N>.<name>`. x86-64 kernels up to 6.x link the per-CPU section at address 0; Linux 7.0 links it at a kernel address, which moves with KASLR, and both layouts are handled. On every sample in the table, CPU 0's current task points to `init_task` and each CPU's `this_cpu_off` matches its own area. Variables per CPU: 6.1 379, 6.8 402, 6.12 388, 7.0 447. `--no-percpu` leaves the areas out.
+
 **Patched entries.** The finished ELF is scanned for each function's first instruction. Hook code in memory no module owns is copied in as a `.hook` section and labelled, so the target of a BPF or ftrace trampoline can be read like the rest of the kernel.
 
 ## 4. Validation
@@ -36,11 +38,11 @@ Every sample is a QEMU guest captured by us; addresses differ per boot because o
 
 | Sample | Modules | Symbols | Module symbols | `patched` rows |
 |---|---|---|---|---|
-| Debian 12, 6.1.0-54 | 85 | 151,384 | 30,700 | none |
-| Debian 13, 6.12.115 | 82 | 236,521 | 42,391 | `bpf_lsm_file_open` |
-| Debian 13, 6.12.115, hooks set | 69 | 233,305 | 39,173 | `bpf_lsm_file_open`, `do_sys_openat2`, `vfs_getattr` |
-| Ubuntu 24.04, 6.8.0-147 | 61 | 267,563 | 27,131 | `__hid_bpf_tail_call` |
-| Ubuntu 26.04, 7.0.0-38 | 72 | 316,618 | 37,167 | none |
+| Debian 12, 6.1.0-54 | 85 | 152,142 | 30,700 | none |
+| Debian 13, 6.12.115 | 82 | 237,297 | 42,391 | `bpf_lsm_file_open` |
+| Debian 13, 6.12.115, hooks set | 69 | 234,081 | 39,173 | `bpf_lsm_file_open`, `do_sys_openat2`, `vfs_getattr` |
+| Ubuntu 24.04, 6.8.0-147 | 61 | 268,367 | 27,131 | `__hid_bpf_tail_call` |
+| Ubuntu 26.04, 7.0.0-38 | 72 | 317,512 | 37,167 | none |
 
 Checks with tools independent of this code (`tests/check_elf.sh`, binutils and a short Python step): no LOAD segment overlaps, all addresses are canonical, `linux_banner` reads back the true kernel version, and `__x64_sys_read`, `nf_hook_slow` and `nft_do_chain` disassemble to real function prologues where those symbols are present.
 

@@ -125,7 +125,7 @@ It opens `kernel.elf` as a database, applies the types (the per-CPU copies too),
 
 Memory images were captured from QEMU guests; addresses differ per boot because of KASLR.
 
-| Kernel | Symbols in ELF | From modules | Loaded by Ghidra 12.2, disassembled at the right address |
+| Kernel | Symbols in ELF | From modules | Loaded by Ghidra 12.2: functions disassembled at the right address, per-CPU data at the ELF address |
 |---|---|---|---|
 | Debian 12, 6.1.0-54 | 152,142 | 30,700 | `linux_banner`, `nf_hook_slow`; `cpu0.current_task`, `cpu1.current_task`, `cpu0.runqueues` |
 | Debian 13, 6.12.115 | 237,297 | 42,391 | `linux_banner`, `__x64_sys_read`, `nf_hook_slow`, `nf_tables.nft_do_chain`; `cpu0.pcpu_hot`, `cpu1.pcpu_hot`, `cpu0.runqueues` |

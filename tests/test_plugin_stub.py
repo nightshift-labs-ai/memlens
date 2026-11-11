@@ -99,6 +99,14 @@ with tempfile.TemporaryDirectory() as t:
     calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
     assert st["percpu_typed"] == 1, st
     assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;"), (0x3000, "struct demo demo_var;"), (0x3200, "struct demo demo_var;")], calls
+    # A partly mapped per-CPU area is split by the exporter into .percpu.cpu<N>.<k> sections: that CPU is still typed.
+    segs = {0x1000: ".data", 0x3000: ".percpu.cpu0", 0x3100: ".percpu.cpu1.0", 0x3180: "_percpu_cpu1_1", 0x3200: ".percpu.cpu2", 0x3300: ".percpu.cpu10"}
+    assert m.percpu_cpus() == [0, 1, 2, 10]
+    assert [m.segment_cpu(n) for n in (".percpu.cpu1x", ".percpu.cpu", "percpu.cpu3.", ".data.percpu", None)] == [None] * 5
+    idc.get_name_ea_simple = lambda n: {"demo_var": 0x1000, "cpu0.demo_var": 0x3000, "cpu1_demo_var": 0x3180, "cpu2.demo_var": 0x3200}.get(n, idc.BADADDR)
+    calls[:] = [c for c in calls if c[0] in ("reg", "menu")]; st = m.apply_types(p)["stats"]
+    assert st["percpu_typed"] == 1, st
+    assert [c[1:] for c in calls if c[0] == "settype"] == [(0x1000, "struct demo demo_var;"), (0x3000, "struct demo demo_var;"), (0x3180, "struct demo demo_var;"), (0x3200, "struct demo demo_var;")], calls
     idc.get_first_seg = lambda: idc.BADADDR
     idc.get_name_ea_simple = lambda n: 0x1000 if n == "demo_var" else idc.BADADDR
     assert sum(c[0] == "reg" for c in calls) == 3 and sum(c[0] == "menu" for c in calls) == 3

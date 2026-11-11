@@ -135,11 +135,18 @@ def in_code(address):
     return bool((idc.get_segm_attr(address, idc.SEGATTR_PERM) or 0) & SEGPERM_EXEC)
 
 
-PERCPU_SEGMENT = re.compile(r"percpu\.cpu(\d+)$")
+# .percpu.cpu<N>, or .percpu.cpu<N>.<k> when the exporter split a partly mapped per-CPU area into several sections.
+PERCPU_SEGMENT = re.compile(r"percpu\.cpu(\d+)(?:\.\d+)?$")
+
+
+def segment_cpu(segment_name):
+    """The CPU number of a .percpu.cpu<N> section name ('_' read as '.'), or None."""
+    match = PERCPU_SEGMENT.search((segment_name or "").replace("_", "."))
+    return int(match.group(1)) if match else None
 
 
 def percpu_cpus():
-    """CPU numbers that have a .percpu.cpu<N> section in this database, in order.
+    """CPU numbers that have a .percpu.cpu<N> (or split .percpu.cpu<N>.<k>) section in this database, in order.
 
     The exporter keeps real CPU numbers and leaves out a CPU whose per-CPU area is not in the memory image,
     so the numbers can have gaps. Segment names are compared with '_' read as '.' in case IDA changed them.
@@ -147,9 +154,9 @@ def percpu_cpus():
     cpus = set()
     ea = idc.get_first_seg()
     while ea is not None and ea != idc.BADADDR:
-        match = PERCPU_SEGMENT.search((idc.get_segm_name(ea) or "").replace("_", "."))
-        if match:
-            cpus.add(int(match.group(1)))
+        cpu = segment_cpu(idc.get_segm_name(ea))
+        if cpu is not None:
+            cpus.add(cpu)
         ea = idc.get_next_seg(ea)
     return sorted(cpus)
 
@@ -165,8 +172,8 @@ def percpu_copies(name, cpus=None):
         if address == idc.BADADDR:
             # In case IDA stored the '.' as '_': take cpu<N>_<name> only inside that CPU's .percpu.cpu<N> section.
             address = idc.get_name_ea_simple("cpu%d_%s" % (cpu, name))
-            segment = (idc.get_segm_name(address) or "") if address != idc.BADADDR else ""
-            if not segment.replace("_", ".").endswith("percpu.cpu%d" % cpu):
+            segment = idc.get_segm_name(address) if address != idc.BADADDR else ""
+            if segment_cpu(segment) != cpu:
                 if cpus:
                     continue  # this CPU's copy has no such symbol: try the next CPU
                 return

@@ -144,7 +144,7 @@ Types are checked by compiling the generated header with gcc, asserting every st
 | Ubuntu 24.04, 6.8.0-147 | 81,563 | 86,362 | all pass |
 | Ubuntu 26.04, 7.0.0-38 | 89,321 | 123,349 | all pass |
 
-Global declarations are every typed global in the ISF, compiled as `extern` declarations; fewer can be applied in IDA (Debian 13 demo: 33,578, see above). Counts are from the current code. The gcc run was made on an earlier build that also declared 15 to 20 globals named like C++ keywords (`new`, `class`, ...), which are now skipped.
+Global declarations are every typed global in the ISF, compiled as `extern` declarations; fewer can be applied in IDA (Debian 13 demo: 33,578 plus 388 per-CPU variables, see above). Counts are from the current code. The gcc run was made on an earlier build that also declared 15 to 20 globals named like C++ keywords (`new`, `class`, ...), which are now skipped.
 
 Ghidra's C parser was run over the same header (`tests/ghidra/MemLensCheck.java`), after replacing `__int128` with a 16-byte struct, which Ghidra's parser does not know:
 

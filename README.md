@@ -66,7 +66,7 @@ The export takes about 25-50 s on our machine. `out/kernel.elf` is byte-identica
 
 We have no IDA, so there are no IDA screenshots. Below is real output for the demo `kernel.elf`, from the same code the plugin runs (`patchscan.py`, `isf2c.py`) and from binutils `objdump`.
 
-Patched functions, the same scan the IDA list runs (`python3 patchscan.py kernel.elf`):
+Patched functions, the same scan the IDA list runs (`python3 patchscan.py kernel.elf`; it first prints `125660 function symbols scanned` on stderr, and its columns are tab-separated, aligned here for reading):
 
 ```
 0xffffffff8e4f9250  bpf_lsm_file_open  call to memory with no symbol  memlens_target_ffffffffc0004940 (calls __bpf_tramp_enter, BPF trampoline)
@@ -74,7 +74,7 @@ Patched functions, the same scan the IDA list runs (`python3 patchscan.py kernel
 0xffffffff8e64e370  vfs_getattr        call to memory with no symbol  memlens_target_ffffffffc0b2b000 (calls function_trace_call, ftrace)
 ```
 
-A hooked entry and the hook page it calls, which no module owns and which MemLens copied into the ELF (`objdump -d kernel.elf`, excerpts):
+A hooked entry and the hook page it calls, which no module owns and which MemLens copied into the ELF (excerpts of `objdump -d --no-show-raw-insn --disassemble=vfs_getattr kernel.elf`, and the same with `do_sys_openat2`, `memlens_target_ffffffffc0b2b000` and `memlens_target_ffffffffc0b2d000`; a plain `objdump -d` prints the whole kernel, about 8.6 million lines):
 
 ```
 ffffffff8e64e370 <vfs_getattr>:

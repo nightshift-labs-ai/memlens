@@ -2,6 +2,11 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## Unreleased
+
+- **A wrong or broken ISF file gives one clear message** instead of "unexpected error, please report it" and a traceback: picking `kernel.elf`, a text file, a truncated `.json.xz`, a missing file, or JSON that is not an ISF now says which file is not a readable Volatility ISF and why (plugin and `isf2c.py`). Found by a judge-style review.
+- **Apply kernel types asks first when the database has no `linux_banner`** (it may not be a kernel): before, it imported about 25,000 kernel types into any database without a question. The headless runner refuses in that case unless `--any-kernel` is given.
+
 ## v0.3.25 (2026-11-13)
 
 - **Apply kernel types reads the per-CPU copies in one pass.** It used to look up `cpu<N>.<name>` (and `cpu<N>_<name>`) for every CPU and every typed global the ISF declares: 79,316 globals on the demo kernel, so on a 64-CPU capture some 10 million name lookups. It now reads IDA's name list once (`idautils.Names()`) and keeps the same rules: `cpu<N>.<name>` anywhere, `cpu<N>_<name>` only inside that CPU's `.percpu.cpu<N>` section, `.` before `_`. A per-CPU variable whose copy for some CPU is missing from the name list (IDA can keep single names out of it) is still looked up by name for that CPU; if the list holds no per-CPU copy at all, every global is looked up one by one as before. Stub tests: the index gives the same copies as the old lookup on 3,000 random databases; mutants of each rule (`.` before `_`, the section check, the per-CPU fallbacks, the name pattern) fail the test. New `tests/test_demo_percpu_index.py` (skipped without the demo): on the demo `kernel.elf`, with names taken from its symbol table, both ways give the same 776 copies of the 388 per-CPU variables, also if IDA stores `cpu0.runqueues` as `cpu0_runqueues`. Found by a pre-release code review; two independent reviews of the change found test gaps, now closed. Tested with fake IDA modules only.

@@ -28,8 +28,15 @@ def load_isf(path):
             raise ISFError("this Python has no lzma module: decompress the ISF first "
                              "(xz -dk %s) and choose the .json file" % os.path.basename(path))
         opener = lzma.open
-    with opener(path, "rt", encoding="utf-8") as handle:
-        return json.load(handle)
+    errors = (OSError, ValueError, EOFError) + ((lzma.LZMAError,) if path.endswith(".xz") else ())
+    try:
+        with opener(path, "rt", encoding="utf-8") as handle:
+            isf = json.load(handle)
+    except errors as error:  # ValueError covers bad JSON and bad UTF-8
+        raise ISFError("%s is not a readable Volatility ISF (.json or .json.xz): %s" % (os.path.basename(path), error))
+    if not isinstance(isf, dict) or not ({"user_types", "symbols"} & set(isf)):
+        raise ISFError("%s is JSON but not a Volatility ISF (no user_types or symbols)" % os.path.basename(path))
+    return isf
 
 
 # Names a C compiler accepts but IDA's parser may not: C keywords, C++ keywords (the kernel

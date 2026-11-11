@@ -25,7 +25,7 @@ def main(argv=None):
     parser.add_argument("elf", help="kernel.elf written by MemLens / linux.kernel2elf")
     parser.add_argument("isf", help="Volatility ISF for the same kernel (.json or .json.xz)")
     parser.add_argument("--no-analysis", action="store_true", help="skip IDA's auto-analysis (faster; types and comments are still applied)")
-    parser.add_argument("--any-kernel", action="store_true", help="import even if the ISF's kernel banner differs from the one in kernel.elf")
+    parser.add_argument("--any-kernel", action="store_true", help="import even if the ISF's kernel banner differs from the one in kernel.elf, or kernel.elf has none")
     args = parser.parse_args(argv)
     for path in (args.elf, args.isf):
         if not os.path.isfile(path):
@@ -45,8 +45,8 @@ def main(argv=None):
         import memlens_entry
         result = memlens_entry.apply_types(args.isf, confirm=lambda expected, actual: args.any_kernel)
         if result is None:
-            print("memlens_headless: the ISF was built for a different kernel than kernel.elf; nothing imported "
-                  "(use --any-kernel to import anyway)", file=sys.stderr)
+            print("memlens_headless: the ISF was built for a different kernel than kernel.elf, or the database has no "
+                  "linux_banner; nothing imported (use --any-kernel to import anyway)", file=sys.stderr)
             return 3
         sys.stdout.write(memlens_entry.report(result))
         patchscan = memlens_entry.patchscan

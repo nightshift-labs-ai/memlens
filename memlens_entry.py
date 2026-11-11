@@ -50,20 +50,28 @@ def check_sizes(expected):
 
 
 def banner_mismatch(isf):
-    """(ISF banner, database banner) if the ISF was built for another kernel; None if they agree or cannot be compared."""
+    """(ISF banner, database banner) if the ISF was built for another kernel, or (ISF banner, b"") if the database has
+    no linux_banner at all (so it may not be a kernel); None if they agree or the ISF has no banner to compare."""
     data = (isf.get("symbols", {}).get("linux_banner") or {}).get("constant_data")
-    address = idc.get_name_ea_simple("linux_banner")
-    if not data or address == idc.BADADDR:
+    if not data:
         return None
+    address = idc.get_name_ea_simple("linux_banner")
     expected = base64.b64decode(data).split(b"\0")[0]
+    if address == idc.BADADDR:
+        return (expected, b"")
     actual = ida_bytes.get_bytes(address, len(expected)) or b""
     return None if actual == expected else (expected, actual)
 
 
 def confirm_other_kernel(expected, actual):
     ida_kernwin.hide_wait_box()
-    text = "This ISF was built for a different kernel, so its types may be wrong here.\n\nISF: %s\nDatabase: %s\n\nImport anyway?" % (
-        expected.decode("ascii", "replace").strip(), actual.decode("ascii", "replace").strip())
+    isf_banner = expected.decode("ascii", "replace").strip()
+    if actual:
+        text = "This ISF was built for a different kernel, so its types may be wrong here.\n\nISF: %s\nDatabase: %s\n\nImport anyway?" % (
+            isf_banner, actual.decode("ascii", "replace").strip())
+    else:
+        text = ("This database has no linux_banner symbol, so it may not be a Linux kernel (MemLens: Export kernel "
+                "writes one).\n\nISF: %s\n\nImport the kernel types anyway?" % isf_banner)
     answer = ida_kernwin.ask_yn(ida_kernwin.ASKBTN_NO, text.replace("%", "%%"))
     ida_kernwin.show_wait_box("MemLens: importing types")
     return answer == ida_kernwin.ASKBTN_YES

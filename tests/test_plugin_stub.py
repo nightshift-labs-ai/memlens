@@ -195,7 +195,10 @@ with tempfile.TemporaryDirectory() as t:
     kw.ask_yn = lambda d, text: answers.append(text) or kw.ASKBTN_NO
     assert m.confirm_other_kernel(b"Linux 100% A", b"Linux B") is False and "100%%" in answers[0]
     set_names({"demo_var": 0x1000})
-    assert m.banner_mismatch({"symbols": {"linux_banner": {"constant_data": "YQ=="}}}) is None  # no such symbol in the database
+    assert m.banner_mismatch({"symbols": {"linux_banner": {"constant_data": "YQ=="}}}) == (b"a", b"")  # no such symbol in the database
+    assert m.banner_mismatch({"symbols": {}}) is None  # the ISF has no banner to compare
+    answers[:] = []
+    assert m.confirm_other_kernel(b"Linux A", b"") is False and "no linux_banner symbol" in answers[0]
     comments[0x10] = "analyst note"
     m.add_comment(0x10, "MemLens: hook"); m.add_comment(0x10, "MemLens: hook"); m.add_comment(0x20, "MemLens: hook")
     assert comments == {0x10: "analyst note\nMemLens: hook", 0x20: "MemLens: hook"}, comments

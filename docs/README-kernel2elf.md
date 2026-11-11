@@ -2,7 +2,7 @@
 
 Writes the Linux kernel found in a memory image as one ordinary ELF file, and lists the kernel functions whose entry was rewritten.
 
-The ELF holds the kernel image and every loaded module at their real KASLR-adjusted addresses, with a full symbol table. `objdump`, Ghidra and similar tools open it with no custom loader, so a memory image can be disassembled like any binary.
+The ELF holds the kernel image, every loaded module and each CPU's copy of the per-CPU variables at their real KASLR-adjusted addresses, with a full symbol table. `objdump`, Ghidra and similar tools open it with no custom loader, so a memory image can be disassembled like any binary.
 
 ## Use
 
@@ -12,7 +12,7 @@ Copy `vol_plugins/` and `patchscan.py` so that they keep this layout, then:
 vol -p vol_plugins -s <symbols> -o <outdir> -f <image> linux.kernel2elf.Kernel2Elf
 ```
 
-It needs the ordinary Linux ISF for the image's kernel. `--no-modules` leaves out the modules.
+It needs the ordinary Linux ISF for the image's kernel. `--no-modules` leaves out the modules; `--no-percpu` leaves out the per-CPU areas (the output is then byte-identical to the version before per-CPU support).
 
 Each output row has an Item, a Name, an Address and a Count:
 
@@ -20,6 +20,7 @@ Each output row has an Item, a Name, an Address and a Count:
 |---|---|
 | `section` | Part of the kernel image; Count is bytes written |
 | `symbols` | Kernel symbols in the ISF; those outside exported memory are then left out |
+| `percpu` | One CPU's per-CPU area (Name `cpu<N>`), written as section `.percpu.cpu<N>` with symbols `cpu<N>.<variable>`; Count is the variables |
 | `module` | A loaded module; Count is its symbols |
 | `hook target` | A page of hook code outside the kernel and modules, copied into the ELF; it gets a `memlens_target_<address>` symbol |
 | `patched` | A function entry that was rewritten, or a syscall table slot outside the handlers |

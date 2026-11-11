@@ -39,7 +39,9 @@ Only code bytes at each function entry are read, so this does not depend on ftra
 - a `call` to `ftrace_caller` or a sibling
 - `int3` at the entry (kprobes, breakpoints)
 - a `jmp` or `call` from the kernel into a module
-- `sys_call_table` slots that do not point to a syscall handler
+- absolute-address hooks (`jmp [rip+0]` + address, `movabs` + `jmp`/`call reg`, `push imm32; ret`), also after the ftrace NOP
+- after the ftrace NOP, or through a pointer in memory (`jmp`/`call [rip+disp32]`): only targets the compiler could not produce, that is memory with no symbol or a kernel function jumping into a module
+- `sys_call_table` slots that do not point to a syscall handler (every slot inside the table's symbol size is checked; zero padding is skipped)
 
 ## Limits
 

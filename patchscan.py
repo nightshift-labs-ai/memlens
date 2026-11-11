@@ -162,6 +162,32 @@ def absolute_hook(code, start):
     return None
 
 
+def memory_hook(image, code, site, start):
+    """(how, target) for jmp/call [rip+disp32] at code[start] (site = its address), reading the pointer it uses.
+
+    jmp [rip+0] with the target inline is absolute_hook's case. The pointer can be anywhere, and a kernel can
+    legitimately call through one, so the caller reports only targets that the compiler could not produce.
+    """
+    at = code[start:start + 6]
+    if len(at) < 6 or at[0] != 0xFF or at[1] not in (0x25, 0x15):
+        return None
+    disp = struct.unpack_from("<i", at, 2)[0]
+    raw = image.read((site + 6 + disp) & 0xFFFFFFFFFFFFFFFF, 8)
+    if raw is None:
+        return None
+    return ("%s [rip%+#x]" % ("jmp" if at[1] == 0x25 else "call", disp)), struct.unpack("<Q", raw)[0]
+
+
+def foreign_target(image, name, target):
+    """'to memory with no symbol' or 'from kernel into a module' when compiler output could not jump there."""
+    symbol = image.symbol_at(target)
+    if symbol is None or symbol.startswith(TARGET_PREFIX):
+        return "to memory with no symbol"
+    if into_module(name, symbol):
+        return "from kernel into a module"
+    return None
+
+
 def absolute_finding(image, entry, name, how, target):
     symbol = image.symbol_at(target)
     if symbol is None or symbol.startswith(TARGET_PREFIX):
@@ -184,11 +210,29 @@ def classify_entry(image, entry, name):
         hook = absolute_hook(code, start)
         if hook:
             return absolute_finding(image, entry, name, hook[0], hook[1])
+    # Through a pointer in memory, at the entry or after the ftrace NOP: only foreign targets count.
+    for start in (first, first + 5) if code[first:first + 5] == FENTRY_NOP else (first,):
+        hook = memory_hook(image, code, entry + start, start)
+        if hook:
+            where = foreign_target(image, name, hook[1])
+            if where:
+                return (entry, name, "%s %s" % (hook[0], where), hook_label(image, hook[1]), hook[1])
+            return None
     start = first
     op = code[start]
     site = entry + start
     if code[start:start + 5] == FENTRY_NOP:
-        return None
+        # ftrace is off here; the next instruction is ordinary code, so a rel32 there counts only when the
+        # compiler could not have produced it (no symbol, or a kernel function into a module).
+        start += 5
+        if len(code) < start + 5 or code[start] not in (0xE8, 0xE9):
+            return None
+        target = (entry + start + 5 + struct.unpack_from("<i", code, start + 1)[0]) & 0xFFFFFFFFFFFFFFFF
+        where = foreign_target(image, name, target)
+        if not where:
+            return None
+        verb = "call" if code[start] == 0xE8 else "jmp"
+        return (entry, name, "%s after the ftrace NOP %s" % (verb, where), hook_label(image, target), target)
     if op == 0xCC:
         # A breakpoint replaces one byte, so the next one is still code; int3 padding runs on.
         if code[start + 1] == 0xCC or name.endswith(("_start", "_end")):

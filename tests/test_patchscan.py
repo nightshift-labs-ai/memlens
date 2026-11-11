@@ -135,6 +135,22 @@ symbols2 = [("a_fn", BASE, 0x100), ("b_fn", BASE + 0x100, 0x100), ("c_fn.isra.0"
             ("evil.cold_path", 0xffffffffc0007000, 0x100), ("evil.hook", 0xffffffffc0007100, 0x100)]
 found = {row[1]: row for row in ps.scan_functions(ps.Image(elf(code, symbols2)))}
 assert set(found) == {"a_fn", "c_fn.isra.0"}, found
+# Hooks the compiler cannot produce after the ftrace NOP, and jmp/call through a pointer in memory.
+code = bytearray(b"\x90" * TEXT)
+def rip(site, slot, op):                                                       # jmp/call [rip+disp32]
+    return b"\xff" + bytes([op]) + struct.pack("<i", slot - (site + 6))
+put(0x000, NOP + call(BASE + 5, 0xffffffffc000a000))                            # NOP; call unmapped
+put(0x100, NOP + call(BASE + 0x105, BASE + 0x900, 0xE9))                        # NOP; tail jump to own function: clean
+put(0x200, b"\xf3\x0f\x1e\xfa" + NOP + call(BASE + 0x209, 0xffffffffc0007000, 0xE9))  # endbr; NOP; jmp into a module
+put(0x300, rip(BASE + 0x300, BASE + TEXT, 0x25))                                # jmp [rip+X] -> unmapped
+put(0x400, rip(BASE + 0x400, BASE + TEXT + 8, 0x15))                            # call [rip+X] -> kernel function: clean
+put(0x500, NOP + rip(BASE + 0x505, BASE + TEXT + 16, 0x15))                     # NOP; call [rip+X] -> module
+symbols3 = [("p0", BASE, 0x100), ("p1", BASE + 0x100, 0x100), ("p2", BASE + 0x200, 0x100), ("p3", BASE + 0x300, 0x100),
+            ("p4", BASE + 0x400, 0x100), ("p5", BASE + 0x500, 0x100), ("own", BASE + 0x900, 0x100), ("evil.hook", 0xffffffffc0007000, 0x100)]
+pointers = struct.pack("<QQQ", 0xffffffffc000b000, BASE + 0x900, 0xffffffffc0007000)
+found = {row[1]: row[2] for row in ps.scan_functions(ps.Image(elf(code, symbols3, pointers)))}
+assert found == {"p0": "call after the ftrace NOP to memory with no symbol", "p2": "jmp after the ftrace NOP from kernel into a module",
+                 "p3": "jmp [rip+0x3cfa] to memory with no symbol", "p5": "call [rip+0x3b05] from kernel into a module"}, found
 # Other architectures are refused, and a kernel file from disk is recognised.
 blob = elf(code, symbols)
 arm = blob[:18] + struct.pack("<H", 183) + blob[20:]

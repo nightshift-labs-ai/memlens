@@ -14,7 +14,7 @@ import re
 import sys
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-MODULES = ("ida_kernwin", "ida_idaapi", "ida_typeinf", "ida_nalt", "idc")
+MODULES = ("ida_kernwin", "ida_idaapi", "ida_typeinf", "ida_nalt", "ida_bytes", "idc")
 
 
 def dotted(node):

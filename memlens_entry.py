@@ -254,7 +254,7 @@ def scan_current_input():
             raise ValueError("this is a kernel file from disk, whose entry bytes are not what ran")
         return patchscan.scan(blob)
     except patchscan.BAD_ELF as error:
-        ida_kernwin.warning("MemLens needs the kernel.elf it exported: %s" % str(error).replace("%", "%%"))
+        ida_kernwin.warning("MemLens needs the kernel.elf it exported: %s" % error)
         return None
 
 

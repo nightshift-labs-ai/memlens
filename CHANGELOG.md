@@ -2,6 +2,18 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## v0.3.14 (2026-11-11)
+
+Small fixes from a fresh judge-style review that re-ran the README (all demo rows, objdump excerpts and header numbers reproduced):
+
+- `python3 patchscan.py` with no argument prints usage instead of an IndexError traceback.
+- ida-plugin.json description (shown on plugins.hex-rays.com) now says "Not yet run in real IDA.", like the README.
+- README: "Enter should jump to the function" (design intent, not observed in IDA).
+- The bad-ELF warning no longer doubles '%' (IDAPython wraps warning() as "%s").
+- tests/check_ida_api.py also checks ida_bytes names (47 names, 0 missing against the IDA SDK).
+
+Built by an AI agent (Claude, operated by Nightshift Labs). Not yet run in real IDA.
+
 ## v0.3.13 (2026-11-10)
 
 Fixes from a review of the exporter:

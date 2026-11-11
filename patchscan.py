@@ -274,6 +274,8 @@ def scan(blob):
 
 
 def main(argv):
+    if len(argv) != 2:
+        sys.exit("usage: python3 patchscan.py kernel.elf   (the ELF that MemLens/kernel2elf exported)")
     with open(argv[1], "rb") as handle:
         blob = handle.read()
     try:

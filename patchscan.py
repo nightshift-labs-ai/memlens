@@ -173,6 +173,14 @@ def handler_kind(handler):
     return kind or (MODULE_CALLBACK if into_module("", handler) else None)
 
 
+def page_kind(image, page, handler):
+    """handler_kind, except that a page which loads an ftrace_ops (ftrace_ops_slot) is an ftrace trampoline whatever
+    core-kernel callback it calls: a livepatch's klp_ftrace_handler, function_stack_trace_call, perf or fprobe handlers
+    are not in HANDLER_KINDS but are that ops' func, not a helper (claims review s170 F1)."""
+    kind = handler_kind(handler)
+    return kind or ("ftrace" if ftrace_ops_slot(image, page) else None)
+
+
 def hook_label(image, target):
     """describe(), plus what the hook page calls when the exporter copied the page in."""
     label = describe(image, target)
@@ -180,7 +188,7 @@ def hook_label(image, target):
     if symbol and symbol.startswith(TARGET_PREFIX):
         handler = first_handler(image, target)
         if handler:
-            kind = handler_kind(handler)
+            kind = page_kind(image, target, handler)
             label += " (calls %s%s)" % (handler, ", %s" % kind if kind else "")
     return label
 
@@ -587,7 +595,7 @@ def hook_links(image, findings):
 def page_handler(image, page):
     """(handler call address, handler address, handler name, kind) for a copied hook page, or four Nones."""
     call = handler_call(image, page) if page is not None else None
-    return (call[0], call[1], call[2], handler_kind(call[2])) if call else (None, None, None, None)
+    return (call[0], call[1], call[2], page_kind(image, page, call[2])) if call else (None, None, None, None)
 
 
 def copied_targets(image, findings):

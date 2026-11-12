@@ -54,7 +54,7 @@ HEAP_OPS, HIDDEN_OPS = 0xffff888003c41a00, 0xffffffffc0400000  # not in the ELF:
 ktext, kdata = bytearray(b"\xcc" * 0x2000), bytearray(0x1000)
 mtext, mdata = bytearray(b"\xcc" * 0x1000), bytearray(0x1000)
 hooks = bytearray(b"\x90" * 0x4000)
-FTRACE, ASSIST, KPROBE, PRINTK = KTEXT + 0x1000, KTEXT + 0x1100, KTEXT + 0x1200, KTEXT + 0x1400
+FTRACE, ASSIST, KPROBE, PRINTK, KLP = KTEXT + 0x1000, KTEXT + 0x1100, KTEXT + 0x1200, KTEXT + 0x1400, KTEXT + 0x1500
 GLOBAL_OPS, OTHER_OPS = KDATA + 0x100, KDATA + 0x200
 THUNK, KILL = MTEXT + 0x100, MTEXT + 0x200
 HOOK_ARRAY = MDATA + 0x40   # evilmod.hooks: struct ftrace_hook[], its ftrace_ops 0x20 into the first element
@@ -76,7 +76,7 @@ def trampoline(page, handler, ops, ret=b"\xc3\xcc\x00\x00\x00", load=0x74, call=
 
 PAGES = {name: HOOKS + 0x400 * index for index, name in enumerate(
     ("vfs_getattr", "__x64_sys_getdents64", "__x64_sys_kill", "__x64_sys_read", "__x64_sys_write", "far_load", "thunked",
-     "direct_cb", "plumbing_only", "retthunk", "sls", "offset8", "noret", "bare_ret", "printk_first"))}
+     "direct_cb", "plumbing_only", "retthunk", "sls", "offset8", "noret", "bare_ret", "printk_first", "livepatched"))}
 SLOTS = {}
 SLOTS["vfs_getattr"] = trampoline(PAGES["vfs_getattr"], FTRACE, GLOBAL_OPS)                        # tracefs function tracer
 SLOTS["__x64_sys_getdents64"] = trampoline(PAGES["__x64_sys_getdents64"], ASSIST, HOOK_ARRAY + 0x20)  # ftrace-hook rootkit
@@ -97,6 +97,7 @@ put(hooks, HOOKS, page + 0x40, rel32(page + 0x40, PRINTK))
 put(hooks, HOOKS, page + 0x60, rel32(page + 0x60, KILL))
 SLOTS["retthunk"] = trampoline(PAGES["retthunk"], FTRACE, GLOBAL_OPS, ret=rel32(PAGES["retthunk"] + 0xd8, KTEXT + 0x1300, 0xE9))
 SLOTS["sls"] = trampoline(PAGES["sls"], FTRACE, GLOBAL_OPS, ret=b"\xc3\xcc")
+SLOTS["livepatched"] = trampoline(PAGES["livepatched"], KLP, GLOBAL_OPS)  # an ftrace callback MemLens does not list (livepatch): still ftrace (claims s170 F1)
 SLOTS["bare_ret"] = trampoline(PAGES["bare_ret"], FTRACE, GLOBAL_OPS, ret=b"\xc3")  # no RETPOLINE/SLS: RET_SIZE 1 (claims s165 N5)
 SLOTS["offset8"] = trampoline(PAGES["offset8"], FTRACE, OTHER_OPS)
 SLOTS["noret"] = trampoline(PAGES["noret"], FTRACE, GLOBAL_OPS, ret=b"\x90" * 5)  # slot in the page, no ret before it
@@ -109,7 +110,7 @@ for name, entry in ENTRIES.items():
     put(ktext, KTEXT, entry, b"\xf3\x0f\x1e\xfa" + rel32(entry + 4, PAGES[name]))
 symbols = [(name, entry, 0x40, FUNC) for name, entry in ENTRIES.items()]
 symbols += [("function_trace_call", FTRACE, 0x100, FUNC), ("ftrace_ops_assist_func", ASSIST, 0x100, FUNC),
-            ("kprobe_ftrace_handler", KPROBE, 0x100, FUNC), ("__x86_return_thunk", KTEXT + 0x1300, 0x10, FUNC), ("_printk", PRINTK, 0x80, FUNC),
+            ("kprobe_ftrace_handler", KPROBE, 0x100, FUNC), ("__x86_return_thunk", KTEXT + 0x1300, 0x10, FUNC), ("_printk", PRINTK, 0x80, FUNC), ("klp_ftrace_handler", KLP, 0x80, FUNC),
             ("global_ops", GLOBAL_OPS, 0xd8, OBJECT), ("other_ops", OTHER_OPS, 0xd8, OBJECT), ("linux_banner", KDATA, 0x20, OBJECT),
             ("evilmod.fh_ftrace_thunk", THUNK, 0x80, FUNC), ("evilmod.fh_sys_kill", KILL, 0x80, FUNC),
             ("evilmod.hooks", HOOK_ARRAY, 0xc0, OBJECT)]
@@ -162,6 +163,9 @@ owner8 = {link.function: link.owner for link in ps.hook_links(image8, findings)}
 assert owner8 == ps.Owner("kprobe_ftrace_handler (ftrace_ops other_ops)", KPROBE, "ftrace_ops",
                           [(SLOTS["offset8"], OTHER_OPS, D), (OTHER_OPS + 8, KPROBE, D)]), owner8
 assert ps.Image(blob).ftrace_ops_func == ps.FTRACE_OPS_FUNC == 0
+lp = links["livepatched"]
+assert (lp.handler_name, lp.kind) == ("klp_ftrace_handler", "ftrace") and owners["livepatched"].text == "klp_ftrace_handler (ftrace_ops global_ops)", (lp, owners["livepatched"])
+assert ps.role_names(image, [lp]) == {PAGES["livepatched"]: "ftrace_tramp_livepatched"}, ps.role_names(image, [lp])
 print("owner tests OK (hand-made ELF: %d hooked entries, %d with an ftrace_ops owner)" % (
     len(links), sum(1 for owner in owners.values() if owner and owner.how == "ftrace_ops")))
 
@@ -209,7 +213,7 @@ with tempfile.TemporaryDirectory() as work:
     lines, out = owner_lines(path)
     expected = [["%#x" % link.target, "%#x" % link.owner.address if link.owner.address is not None else "-", link.owner.text]
                 for link in sorted(links.values(), key=lambda link: link.target) if link.owner]
-    assert lines == expected and len(lines) == 12, (lines, expected)
+    assert lines == expected and len(lines) == 13, (lines, expected)
     assert "owner\t%#x\t-\tftrace_ops at 0xffff888003c41a00 (no symbol: heap)" % PAGES["__x64_sys_kill"] in out, out
     assert "xref\t%#x\t%#x\tdata\tevilmod.hooks+0x20 -> evilmod.fh_ftrace_thunk" % (HOOK_ARRAY + 0x20, THUNK) in out, out
     # --isf: the offset of ftrace_ops.func from the ISF (here 8, for the offset8 page).

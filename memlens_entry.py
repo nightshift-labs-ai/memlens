@@ -570,8 +570,9 @@ def kernel_hint(check, isf_given):
     if not banners:
         return ["Volatility found no Linux kernel in this file: banners.Banners found no \"Linux version\" line in it, "
                 "so it is probably not a Linux memory image, or one in a format Volatility cannot read. Volatility 2.28.2 "
-                "reads raw images, LiME, 64-bit ELF core dumps, VMware .vmem (with its .vmss or .vmsn file next to it), "
-                "QEMU suspend images and Xen core dumps; AVML images need the snappy library."]
+                "reads raw images, LiME, 64-bit ELF core dumps, VMware .vmem (read as a raw image; its .vmss or .vmsn file "
+                "next to it is needed for the right layout), QEMU suspend images and Xen core dumps, and xz, gzip or bzip2 "
+                "compressed copies of these (named .xz, .gz or .bz2); AVML images need the snappy library."]
     if not isf_given:
         return ["It found no symbols for this image's kernel. Without an ISF it only uses the Linux symbol files it already "
                 "has, and a fresh pip install has none. Get the ISF built for this image's kernel: its linux_banner must be "

@@ -233,6 +233,8 @@ with tempfile.TemporaryDirectory() as work:
         text = dialogs[0]
         assert len(ran_banners(log)) == 1, log
         assert "Volatility found no Linux kernel in this file" in text and "LiME" in text and "AVML" in text, text
+        assert "and xz, gzip or bzip2 compressed copies of these (named .xz, .gz or .bz2);" in text, text
+        assert "VMware .vmem (read as a raw image; its .vmss or .vmsn file next to it is needed for the right" in text, text
         assert "another kernel" not in text and "Image:" not in text and "ISF:" not in text, text
         assert "fresh pip install" not in text, text
 

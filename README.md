@@ -120,6 +120,14 @@ In IDA, with any database open (plugin menu entries need one), under **Edit > Pl
 3. **MemLens: Apply kernel types from ISF**: choose the ISF. If its kernel banner differs from the one in the database, MemLens asks before importing anything. The Output window then says how many types IDA rejected, how many are missing and how many differ in size from the ISF.
 4. **MemLens: Show patched kernel functions**: opens the list and adds a comment at each entry.
 
+### An ISF for your own image
+
+The ISF must come from exactly the kernel that was running when the image was taken.
+
+1. Find that kernel: `vol -q -f <image> banners.Banners` prints its `Linux version ...` line.
+2. Get an ISF for that banner. A ready-made one may exist in the community collection [Abyss-W4tcher/volatility3-symbols](https://github.com/Abyss-W4tcher/volatility3-symbols) (Debian, Ubuntu, Kali, AlmaLinux, Rocky; its `banners/` folder lists the banners it covers). Otherwise build one with [dwarf2json](https://github.com/volatilityfoundation/dwarf2json) from the kernel's debug image: `dwarf2json linux --elf /usr/lib/debug/boot/vmlinux-<version> | xz > <version>.json.xz` (Debian: package `linux-image-<version>-dbg`; Ubuntu: the matching `-dbgsym` package from ddebs.ubuntu.com).
+3. Export with that ISF (step 1 above), then apply the same ISF (step 3).
+
 Without IDA:
 
 ```

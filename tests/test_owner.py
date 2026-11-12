@@ -280,9 +280,11 @@ EXPECTED = {
     "vfs_getattr": ("function_trace_call (ftrace_ops global_ops)", "function_trace_call", 0xdd, "global_ops"),
     "do_sys_openat2": ("kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)", "kprobe_ftrace_handler", 0x162, "kprobe_ftrace_ops"),
 }
-# BPF trampolines: the program call's offset in the page and the program's address (linux.kallsyms --bpf names them
-# bpf_prog_e8932b6bae2b9745_restrict_filesystems on the demo, bpf_prog_7cc47bbf07148bfe_hid_tail_call on Ubuntu 24.04).
-EXPECTED_BPF = {"bpf_lsm_file_open": (0x53, 0xffffffffc0004664), "__hid_bpf_tail_call": (0x53, 0xffffffffc0043958)}
+# BPF trampolines: the program call's offset in the page, the kernel's name for the program (an export with BPF names
+# has it as bpf.<name>), and the program's address in the exports without BPF names that we know (page -> program):
+# the demo kernel.elf and the Ubuntu 24.04 export.
+EXPECTED_BPF = {"bpf_lsm_file_open": (0x53, "bpf_prog_e8932b6bae2b9745_restrict_filesystems", {0xffffffffc0004940: 0xffffffffc0004664}),
+                "__hid_bpf_tail_call": (0x53, "bpf_prog_7cc47bbf07148bfe_hid_tail_call", {0xffffffffc0043a00: 0xffffffffc0043958})}
 for path in sys.argv[1:]:
     image = ps.Image(open(path, "rb").read())
     findings = ps.scan(None, image)
@@ -290,8 +292,16 @@ for path in sys.argv[1:]:
     known = [link for link in links if link.function in EXPECTED]
     for link in links:
         if link.function in EXPECTED_BPF:
-            site, program = EXPECTED_BPF[link.function]
+            site, kernel_name, programs = EXPECTED_BPF[link.function]
+            assert link.owner and len(link.owner.refs) == 1 and link.owner.refs[0][0] == link.target + site, link
+            program = link.owner.refs[0][1]
             name = ps.symbol_start(image, program)
+            if name:
+                assert name == "bpf." + kernel_name, (name, link)
+            elif link.target in programs:
+                assert program == programs[link.target], link
+            else:
+                print("%s: %s: program address not checked (no BPF names, unknown capture)" % (path, link.function))
             text = "%s (BPF program)" % name if name else "BPF program at %#x" % program
             assert link.owner == ps.Owner(text, program, "BPF program", [(link.target + site, program, "call")]), link
             print("%s: %s -> %s" % (path, link.function, link.owner.text))

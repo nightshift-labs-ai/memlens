@@ -5,6 +5,7 @@ Taken from the GitHub release notes. Newest first.
 ## Unreleased
 
 - ISF files compressed with gzip or bzip2 (`.json.gz`, `.json.bz2`, which Volatility also accepts) are now read by **Apply kernel types from ISF**, `isf2c.py` and the headless runner; before, only `.json` and `.json.xz` were, so the export accepted an ISF that Apply refused. The compression is taken from the file's first bytes. The file dialog's ISF filter lists `*.gz` and `*.bz2` too. `tests/test_isf_formats.py`.
+- **Show patched kernel functions** on a database whose input file has no function symbols (any file other than MemLens' exported kernel.elf, for example a user-space binary) now warns that nothing was checked and opens no list; before, it opened an empty list that looked like a clean kernel (the command line already warned). `tests/test_findpatches_stub.py`.
 
 ## v0.3.26 (2026-11-14)
 

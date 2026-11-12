@@ -456,6 +456,12 @@ def scan_current_input():
     try:
         if patchscan.on_disk_kernel(blob):
             raise ValueError("this is a kernel file from disk, whose entry bytes are not what ran")
+        if not any(symbol[3] == patchscan.STT_FUNC for symbol in patchscan.Image(blob).symbols):
+            # An empty list would look like a clean kernel (the command line warns the same way).
+            ida_kernwin.warning("MemLens checked nothing: %s has no function symbols, so an empty list would not "
+                                "mean clean. This works on the kernel.elf that MemLens exported from a memory image."
+                                % os.path.basename(path))
+            return None
         return patchscan.scan(blob)
     except patchscan.BAD_ELF as error:
         ida_kernwin.warning("MemLens needs the kernel.elf it exported: %s" % error)

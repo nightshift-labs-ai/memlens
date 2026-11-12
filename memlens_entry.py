@@ -384,10 +384,20 @@ def export_failure_text(stdout, stderr, isf_given):
                          "kernel (dwarf2json, see the README).")
     lines.append("Full output is in the Output window. Volatility said:")
     if out.strip():
-        lines.append(out.strip()[-700:])
+        lines.append(tail(out, 700))
     if err.strip():
-        lines.append(err.strip()[-800:])
+        lines.append(tail(err, 800))
     return "\n\n".join(lines)
+
+
+def tail(text, size):
+    """About the last size characters of text, starting at a whole line (a line longer than size is cut)."""
+    text = text.strip()
+    if len(text) <= size:
+        return text
+    cut = text[-size:]
+    newline = cut.find("\n")
+    return cut[newline + 1:].lstrip("\n") if 0 <= newline < len(cut) - 1 else cut
 
 
 def run_cancellable(command):

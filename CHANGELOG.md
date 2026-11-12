@@ -4,6 +4,7 @@ Taken from the GitHub release notes. Newest first.
 
 ## Unreleased
 
+- The failure dialog quotes Volatility's output from the start of a line; it began with a cut-off `2.28.2`.
 - ISF files compressed with gzip or bzip2 (`.json.gz`, `.json.bz2`, which Volatility also accepts) are now read by **Apply kernel types from ISF**, `isf2c.py` and the headless runner; before, only `.json` and `.json.xz` were, so the export accepted an ISF that Apply refused. The compression is taken from the file's first bytes. The file dialog's ISF filter lists `*.gz` and `*.bz2` too. `tests/test_isf_formats.py`.
 - **Show patched kernel functions** on a database whose input file is not a kernel (no function symbols, or no `linux_banner` symbol: any file other than MemLens' exported kernel.elf, for example a stripped or unstripped user-space binary) now warns that nothing was checked and opens no list; before, it opened an empty list that looked like a clean kernel (the command line `patchscan.py` gives the same warning). `tests/test_findpatches_stub.py`.
 - Export with a Volatility that cannot load MemLens' exporter (seen with 2.11.0: Volatility answers "invalid choice linux.kernel2elf.Kernel2Elf" and lists its other plugins) now says so, names the Volatility version, and, for a version older than 2.28.2 (the version MemLens is tested with), gives the install line for 2.28.2; with 2.28.2 or newer it says the usual cause does not apply and asks for a report; before, the dialog showed only the tail of the plugin list. Stub test with the recorded message shape.

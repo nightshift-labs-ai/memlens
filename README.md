@@ -2,19 +2,25 @@
 
 Reverse engineer a Linux kernel **as it was running**, from a memory image, in IDA.
 
-**Before:** a memory image is a raw dump. The demo's `trace.elf` is a 1 GB ELF core: 5 `LOAD` segments at physical addresses, no symbol table, no code sections.
-**After:** MemLens turns it into a `kernel.elf` that IDA understands: the kernel and its modules at their live addresses with 234,081 symbols, every kernel type, one copy of the per-CPU variables per CPU, and the hooks someone placed:
+**Before:** `trace.elf`, the 1 GB memory image of the demo VM (not part of the demo zip), is an ELF core: 5 `LOAD` segments at physical addresses, no symbol table, no code sections.
+
+**After:** `kernel.elf`, an ordinary ELF: the kernel and its loaded modules at their live addresses, 234,081 symbols, one copy of the per-CPU variables per CPU. With the kernel's ISF, MemLens types it in IDA (every struct, union, enum and typed global) and lists the functions someone hooked. `objdump` excerpt of `kernel.elf` (`vfs_getattr`'s entry was rewritten by ftrace; the hook page was copied from memory):
 
 ```
-vfs_getattr:                       call memlens_target_ffffffffc0b2b000    <- ftrace rewrote this entry
-memlens_target_ffffffffc0b2b000:   ... call function_trace_call            <- the hook page, copied from memory
+ffffffff8e64e370 <vfs_getattr>:
+ffffffff8e64e370:	endbr64
+ffffffff8e64e374:	call   ffffffffc0b2b000 <memlens_target_ffffffffc0b2b000>
+...
+ffffffffc0b2b094:	call   ffffffff8e434a40 <function_trace_call>
 ```
 
 ```mermaid
 flowchart LR
-  img[memory image] -->|"Volatility 3 + linux.kernel2elf"| elf[kernel.elf]
-  isf[ISF of that kernel] --> ida
+  img[memory image] --> vol["MemLens: Export<br/>(Volatility 3 + linux.kernel2elf)"]
+  isf[ISF of that kernel] --> vol
+  vol --> elf[kernel.elf]
   elf --> ida[IDA + MemLens]
+  isf --> ida
   ida --> types[kernel types + typed globals]
   ida --> pcpu["per-CPU copies (cpu0.runqueues, ...)"]
   ida --> hooks[patched functions list]
@@ -23,7 +29,7 @@ flowchart LR
 - **`kernel.elf`**: the kernel and every loaded module at their real (KASLR) addresses, with a full symbol table. An ordinary ELF.
 - **Every kernel type**: all structs, unions and enums from a Volatility 3 ISF, as one C header with exact layouts.
 - **Typed globals**: kernel data symbols get their real type, so `init_task` becomes a `struct task_struct`.
-- **Per-CPU variables, one copy per CPU**: `cpu0.runqueues`, `cpu1.pcpu_hot`, ...: each CPU's live copy, typed.
+- **Per-CPU variables, one copy per CPU**: each CPU's live copy (`cpu0.runqueues`, `cpu1.pcpu_hot`, ...), typed like the globals.
 - **Patched kernel functions**: entries rewritten by ftrace, kprobes, BPF trampolines or hook code, and syscall slots that leave the handlers.
 
 The full description of each is under [Details](#details).
@@ -94,7 +100,7 @@ Patched functions, the same scan the IDA list runs (`python3 patchscan.py kernel
 0xffffffff8e64e370  vfs_getattr        call to memory with no symbol  memlens_target_ffffffffc0b2b000 (calls function_trace_call, ftrace)
 ```
 
-A hooked entry and the hook page it calls, which no module owns and which MemLens copied into the ELF (excerpts of `objdump -d --no-show-raw-insn --disassemble=vfs_getattr kernel.elf`, and the same with `do_sys_openat2`, `memlens_target_ffffffffc0b2b000` and `memlens_target_ffffffffc0b2d000`; a plain `objdump -d` prints the whole kernel, about 8.6 million lines):
+A hooked entry and the hook page it calls, which no module owns and which MemLens copied into the ELF (excerpts of `objdump -d --no-show-raw-insn --disassemble=vfs_getattr kernel.elf`, and the same with `do_sys_openat2`, `memlens_target_ffffffffc0b2b000` and `memlens_target_ffffffffc0b2d000`; a plain `objdump -d` prints the whole kernel, about 8.6 million lines; tabs shown as two spaces):
 
 ```
 ffffffff8e64e370 <vfs_getattr>:

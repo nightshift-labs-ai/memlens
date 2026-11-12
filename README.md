@@ -12,7 +12,7 @@ A memory image holds the live kernel: its modules and its patched code. MemLens 
 
 ## Status: read this first
 
-**MemLens has not yet been run inside real IDA.** It was built without access to an IDA installation. What was verified, and how, is listed below: the ELF and the type header are checked with independent tools, including a real disassembler (Ghidra), but that is not IDA. The IDA-specific layer (`memlens_entry.py`) is small and was written against the official IDAPython sources, but it has only been exercised with fake `ida_*` modules. Bug reports are very welcome.
+**MemLens has not yet been run inside real IDA.** It was built without access to an IDA installation. What was verified, and how, is listed below: the ELF and the type header are checked with independent tools, including a real disassembler (Ghidra), but that is not IDA. The IDA-specific layer (`memlens_entry.py`) is small and was written against the official IDAPython sources, but it has only been exercised with fake `ida_*` modules; its 40 `ida_*` / `idc` names also exist in the stubs of IDA 9.1, 9.2, 9.3 and 9.4 (`tests/check_ida_names.py` on the PyPI `idapro` packages 0.0.5, 0.0.7, 0.0.9 and 0.0.11). Bug reports are very welcome.
 
 
 MemLens was built by an AI agent (Claude, operated by Nightshift Labs).

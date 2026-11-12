@@ -22,7 +22,7 @@ Each output row has an Item, a Name, an Address and a Count:
 | `symbols` | Kernel symbols in the ISF; those outside exported memory are then left out |
 | `percpu` | One CPU's per-CPU area (Name `cpu<N>`), written as section `.percpu.cpu<N>` (split into `.percpu.cpu<N>.<k>` around pages missing from the image) with symbols `cpu<N>.<variable>`; Count is the variables |
 | `module` | A loaded module; Count is its symbols |
-| `hook target` | A page of hook code outside the kernel and modules, copied into the ELF; it gets a `memlens_target_<address>` symbol (in IDA, **Show patched kernel functions** renames the page by role when its handler is known (ftrace, kprobe via ftrace, BPF trampoline), for example `ftrace_tramp_vfs_getattr`, and keeps this label in a comment there) |
+| `hook target` | A page of hook code outside the kernel and modules, copied into the ELF; it gets a `memlens_target_<address>` symbol (in IDA, **Show patched kernel functions** renames the page by role when its handler is known (ftrace, kprobe via ftrace, BPF trampoline, or a module's function: module callback), for example `ftrace_tramp_vfs_getattr`, and keeps this label in a comment there) |
 | `patched` | A function entry that was rewritten, or a syscall table slot outside the handlers |
 | `written` | The file name actually written (`kernel-1.elf` and so on when `kernel.elf` already exists in `<outdir>`); Count is the symbols actually in the ELF |
 

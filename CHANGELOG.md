@@ -2,6 +2,10 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## Unreleased
+
+- ISF files compressed with gzip or bzip2 (`.json.gz`, `.json.bz2`, which Volatility also accepts) are now read by **Apply kernel types from ISF**, `isf2c.py` and the headless runner; before, only `.json` and `.json.xz` were, so the export accepted an ISF that Apply refused. The compression is taken from the file's first bytes. The file dialog's ISF filter lists `*.gz` and `*.bz2` too. `tests/test_isf_formats.py`.
+
 ## v0.3.26 (2026-11-14)
 
 - `tests/check_ida_names.py <stub dir>...`: checks that every `ida_*` / `idc` name MemLens uses exists in a folder of IDAPython stubs; all 40 are in the stubs of IDA 9.1 to 9.5 (PyPI `idapro` 0.0.5, 0.0.7, 0.0.9 and 0.0.11, and IDA 9.5 stubs).

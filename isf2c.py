@@ -18,22 +18,58 @@ class ISFError(Exception):
     """An ISF file that cannot be read here; the message says what to do."""
 
 
+ISF_KINDS = "(.json, .json.xz, .json.gz or .json.bz2)"
+
+
+def isf_compression(path):
+    """'xz', 'gz', 'bz2' or None, from the file's first bytes (the extension only when the file cannot be read).
+    Volatility accepts .json, .json.xz, .json.gz and .json.bz2 ISFs, so MemLens reads the same four."""
+    try:
+        with open(path, "rb") as handle:
+            magic = handle.read(6)
+    except OSError:
+        magic = b""
+    if magic.startswith(b"\xfd7zXZ\x00"):
+        return "xz"
+    if magic.startswith(b"\x1f\x8b"):
+        return "gz"
+    if magic.startswith(b"BZh"):
+        return "bz2"
+    if not magic:
+        for ext in ("xz", "gz", "bz2"):
+            if path.endswith("." + ext):
+                return ext
+    return None
+
+
 def load_isf(path):
     opener = open
-    if path.endswith(".xz"):
-        # Imported here, so a Python built without _lzma can still load the plugin and read plain .json ISFs.
+    errors = (OSError, ValueError, EOFError)
+    kind = isf_compression(path)
+    # Imported here, so a Python built without _lzma / _bz2 can still load the plugin and read plain .json ISFs.
+    if kind == "xz":
         try:
             import lzma
         except ImportError:
             raise ISFError("this Python has no lzma module: decompress the ISF first "
                              "(xz -dk %s) and choose the .json file" % os.path.basename(path))
         opener = lzma.open
-    errors = (OSError, ValueError, EOFError) + ((lzma.LZMAError,) if path.endswith(".xz") else ())
+        errors += (lzma.LZMAError,)
+    elif kind == "gz":
+        import gzip
+        opener = gzip.open
+    elif kind == "bz2":
+        try:
+            import bz2
+        except ImportError:
+            raise ISFError("this Python has no bz2 module: decompress the ISF first "
+                             "(bunzip2 -k %s) and choose the .json file" % os.path.basename(path))
+        opener = bz2.open
     try:
         with opener(path, "rt", encoding="utf-8") as handle:
             isf = json.load(handle)
-    except errors as error:  # ValueError covers bad JSON and bad UTF-8
-        raise ISFError("%s is not a readable Volatility ISF (.json or .json.xz): %s" % (os.path.basename(path), error))
+    except errors as error:  # ValueError covers bad JSON, bad UTF-8 and a damaged gzip/bz2 stream
+        raise ISFError("%s is not a readable Volatility ISF %s: %s" % (os.path.basename(path), ISF_KINDS, error))
     if not isinstance(isf, dict) or not ({"user_types", "symbols"} & set(isf)):
         raise ISFError("%s is JSON but not a Volatility ISF (no user_types or symbols)" % os.path.basename(path))
     return isf

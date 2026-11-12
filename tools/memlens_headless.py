@@ -23,7 +23,7 @@ if ROOT not in sys.path:
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Apply MemLens to kernel.elf with idalib (no IDA window).")
     parser.add_argument("elf", help="kernel.elf written by MemLens / linux.kernel2elf")
-    parser.add_argument("isf", help="Volatility ISF for the same kernel (.json or .json.xz)")
+    parser.add_argument("isf", help="Volatility ISF for the same kernel (.json, .json.xz, .json.gz or .json.bz2)")
     parser.add_argument("--no-analysis", action="store_true", help="skip IDA's auto-analysis (faster; types and comments are still applied)")
     parser.add_argument("--any-kernel", action="store_true", help="import even if the ISF's kernel banner differs from the one in kernel.elf, or kernel.elf has none")
     args = parser.parse_args(argv)

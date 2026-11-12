@@ -23,7 +23,7 @@ import ida_nalt
 import ida_typeinf
 import idc
 
-ISF_FILTER = "FILTER Volatility ISF|*.json;*.xz|All files|*\n"
+ISF_FILTER = "FILTER Volatility ISF|*.json;*.xz;*.gz;*.bz2|All files|*\n"
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)

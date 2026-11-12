@@ -338,6 +338,18 @@ def written_file(stdout, folder=None, before=None):
     return "kernel.elf"
 
 
+def remove_unusable(folder, name, before):
+    """Remove an unusable export so nobody opens it by mistake, but only a file that was not in the folder before the
+    export (before = elf_files(folder) then); returns the sentence for the dialog (judge s160 finding 6)."""
+    if name not in elf_files(folder) - before:
+        return "It is not a new file in that folder, so MemLens left it in place."
+    try:
+        os.remove(os.path.join(folder, name))
+    except OSError as error:
+        return "MemLens could not remove it (%s); do not open it." % error
+    return "MemLens removed it, so it cannot be opened by mistake."
+
+
 def export_rows(stdout):
     """kernel2elf's rows (kind, name, address, count) from Volatility's tab-separated text output."""
     rows = []
@@ -781,8 +793,9 @@ class ExportKernel(ida_kernwin.action_handler_t):
             return 0
         problems = export_problems(stdout)
         if problems:
-            message = "Volatility wrote %s in %s, but it is not a usable kernel export.\n\n%s" % (
-                written_file(stdout, output, before), output, "\n\n".join(problems))
+            name = written_file(stdout, output, before)
+            message = "Volatility wrote %s in %s, but it is not a usable kernel export. %s\n\n%s" % (
+                name, output, remove_unusable(output, name, before), "\n\n".join(problems))
             ida_kernwin.msg("[MemLens] %s\n[MemLens] Volatility's output:\n%s\n" % (message, stdout.decode("utf-8", "replace")))
             ida_kernwin.warning(message)
             return 0

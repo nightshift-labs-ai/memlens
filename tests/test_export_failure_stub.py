@@ -134,6 +134,9 @@ with open(os.path.join(here, "calls.log"), "a") as log:
     log.write(json.dumps([kind] + sys.argv[1:]) + "\\n")
 step = plan[kind]
 time.sleep(step.get("sleep", 0))
+if step.get("write"):  # the file Volatility writes into its -o folder (kernel2elf's export)
+    with open(os.path.join(sys.argv[sys.argv.index("-o") + 1], step["write"]), "wb") as out:
+        out.write(bytes(376))
 sys.stdout.buffer.write(open(step["path"] + ".stdout", "rb").read())
 sys.stderr.buffer.write(open(step["path"] + ".stderr", "rb").read())
 sys.exit(step["exit"])
@@ -190,12 +193,12 @@ with tempfile.TemporaryDirectory() as work:
     m.run_cancellable = lambda command: started.append(command) or real_run_cancellable(command)
 
     def run(export, banners=None, isf=None, cancel=lambda: False, export_sleep=0, banners_sleep=0, banners_exit=0,
-            image_bytes=b""):
+            image_bytes=b"", export_exit=1, export_write=None):
         """Export with the recorded export output, then (if the plugin asks) the recorded banners output. The image
         file holds image_bytes (the plugin reads it only to look for the ISF's exact kernel version line)."""
         with open(image, "wb") as handle:
             handle.write(image_bytes)
-        plan = {"export": {"path": os.path.join(FIX, export), "exit": 1, "sleep": export_sleep},
+        plan = {"export": {"path": os.path.join(FIX, export), "exit": export_exit, "sleep": export_sleep, "write": export_write},
                 "banners": {"path": os.path.join(FIX, banners or "banners_random"), "exit": banners_exit,
                             "sleep": banners_sleep}}
         with open(os.path.join(bindir, "plan.json"), "w") as handle:
@@ -219,6 +222,27 @@ with tempfile.TemporaryDirectory() as work:
         scans = [command[1:] for command in started if "banners.Banners" in command]
         assert [entry[1:] for entry in log if entry[0] == "banners"] in ([], scans), (log, scans)
         return [["banners"] + scan for scan in scans]
+
+    # Volatility exits 0 but the export is not usable (.text: 0 bytes; judge s160 finding 6): the file it just wrote is
+    # removed so nobody opens it by mistake; a kernel.elf that was in the folder before is never touched.
+    old_elf = os.path.join(work, "kernel.elf")
+    with open(old_elf, "wb") as handle:
+        handle.write(b"keep")
+    dialogs, log, _ = run("export_random_with_banner_isf", isf=d13, export_exit=0, export_write="kernel-1.elf")
+    assert len(dialogs) == 1 and "kernel-1.elf" in dialogs[0] and "not a usable kernel export" in dialogs[0], dialogs
+    assert "MemLens removed it" in dialogs[0] and ".text: 0 bytes" in dialogs[0], dialogs[0]
+    assert not os.path.exists(os.path.join(work, "kernel-1.elf")), os.listdir(work)
+    assert open(old_elf, "rb").read() == b"keep", "a file that was there before the export must be left alone"
+    os.remove(old_elf)
+    dialogs, log, _ = run("export_random_with_banner_isf", isf=d13, export_exit=0, export_write="kernel.elf")
+    assert len(dialogs) == 1 and "MemLens removed it" in dialogs[0] and not os.path.exists(old_elf), (dialogs, os.listdir(work))
+    # No new file (the export row names one that was there before): nothing is removed, and the dialog says so.
+    with open(old_elf, "wb") as handle:
+        handle.write(b"keep")
+    dialogs, log, _ = run("export_random_with_banner_isf", isf=d13, export_exit=0)
+    assert len(dialogs) == 1 and "MemLens removed it" not in dialogs[0] and "left it in place" in dialogs[0], dialogs[0]
+    assert open(old_elf, "rb").read() == b"keep"
+    os.remove(old_elf)
 
     # A Debian 12 ISF on the Debian 13 image (the judge's case): the ISF is named as another kernel, both lines shown.
     dialogs, log, _ = run("export_trace_wrong_isf", "banners_trace", d12)

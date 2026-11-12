@@ -321,8 +321,17 @@ def on_disk_kernel(blob):
     return bool(section_names(blob) & ON_DISK_SECTIONS)
 
 
-def scan(blob):
-    image = Image(blob)
+def nothing_to_check(image):
+    """Why a scan of image would check nothing (an empty list would then look clean), or None for a kernel.elf."""
+    if not any(symbol[3] == STT_FUNC for symbol in image.symbols):
+        return "no function symbols"
+    if "linux_banner" not in image.by_name:
+        return "no linux_banner symbol, so it is not a Linux kernel"
+    return None
+
+
+def scan(blob, image=None):
+    image = image or Image(blob)
     return scan_functions(image) + scan_syscalls(image)
 
 
@@ -340,9 +349,10 @@ def main(argv):
         image = Image(blob)
         functions = sum(1 for symbol in image.symbols if symbol[3] == STT_FUNC)
         print("%d function symbols scanned" % functions, file=sys.stderr)
-        if not functions:
-            print("warning: no function symbols, so nothing was checked; an empty list here does not mean clean", file=sys.stderr)
-        findings = scan(blob)
+        reason = nothing_to_check(image)
+        if reason:
+            print("warning: %s, so nothing was checked; an empty list here does not mean clean" % reason, file=sys.stderr)
+        findings = scan(blob, image)
     except BAD_ELF as error:
         sys.exit("patchscan: not a usable 64-bit ELF: %s" % error)
     for address, name, kind, target, _ in findings:

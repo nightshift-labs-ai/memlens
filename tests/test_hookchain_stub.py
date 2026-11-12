@@ -52,9 +52,9 @@ put(0x300, b"\x48\xb8" + struct.pack("<Q", B) + b"\xff\xe0")                    
 put(0x400, b"\xcc\x89\xe5")                                                     # int3: a row without a handler
 symbols = [("traced_a", BASE, 0x100), ("traced_b", BASE + 0x100, 0x100), ("probed", BASE + 0x200, 0x100), ("movjmp", BASE + 0x300, 0x100),
            ("kprobe_me", BASE + 0x400, 0x100), ("function_trace_call", FTRACE, 0x100), ("kprobe_ftrace_handler", KPROBE, 0x100),
-           ("__bpf_tramp_enter", BPF, 0x100), ("linux_banner", BASE + TEXT, 0x10)]
+           ("__bpf_tramp_enter", BPF, 0x100), ("linux_banner", BASE + TEXT, 0x20), ("sys_call_table", BASE + TEXT + 0x20, 8)]
 symbols += [("%s%x" % (ps.TARGET_PREFIX, page), page, 0) for page in (F, K, B)]
-blob = elf(code, symbols, b"Linux version 6.12\0".ljust(0x10, b"\0"))
+blob = elf(code, symbols, b"Linux version 6.12\0".ljust(0x20, b"\0") + struct.pack("<Q", K))  # sys_call_table[0] -> page K
 with tempfile.TemporaryDirectory() as work:
     path = os.path.join(work, "kernel.elf")
     with open(path, "wb") as handle:
@@ -79,6 +79,9 @@ with tempfile.TemporaryDirectory() as work:
     assert lines["traced_a"][3:] == ["ftrace_tramp_%x" % F, "function_trace_call (ftrace)"], lines
     assert lines["probed"][3:] == ["kprobe_ftrace_tramp_probed", "kprobe_ftrace_handler (kprobe via ftrace)"], lines
     assert lines["kprobe_me"][3:] == ["", ""], lines
+    # The syscall slot that points at page K: not linked, but it shows the page's new name and its handler.
+    assert lines["sys_call_table[0]"][3:] == ["kprobe_ftrace_tramp_probed", "kprobe_ftrace_handler (kprobe via ftrace)"], lines
+    table.OnEditLine(list(lines).index("sys_call_table[0]")); assert calls[-1] == ("jump", KPROBE), calls[-1]
     index = [table.OnGetLine(n)[1] for n in range(table.OnGetSize())]
     table.OnSelectLine(index.index("movjmp")); assert calls[-1] == ("jump", BASE + 0x300), calls[-1]
     table.OnEditLine(index.index("movjmp")); assert calls[-1] == ("jump", BPF), calls[-1]
@@ -118,8 +121,8 @@ with tempfile.TemporaryDirectory() as work:
     blobs[next(iter(blobs))] = b"{not json"
     crefs, renames, out = run()
     assert len(crefs) == 7, crefs
-    # If linking itself fails (here the netnode read raises), the list is still shown with the scan's labels and the
-    # traceback goes to the Output window.
+    # If linking itself fails (here the netnode read raises), the list is still shown (nothing renamed; the handlers are
+    # read from the ELF) and the traceback goes to the Output window.
     database(blob)
     good_getblob = netnode.getblob
     def broken(self, start, tag): raise TypeError("getblob broke")
@@ -130,7 +133,7 @@ with tempfile.TemporaryDirectory() as work:
         netnode.getblob = good_getblob
     assert crefs == [] and renames == [] and "getblob broke" in out and "hook chain not added" in out, out
     lines = {line[1]: line for line in (m._open_list.OnGetLine(n) for n in range(m._open_list.OnGetSize()))}
-    assert lines["traced_a"][3:] == ["memlens_target_%x (calls function_trace_call, ftrace)" % F, ""] and len(lines) == 5, lines
+    assert lines["traced_a"][3:] == ["memlens_target_%x" % F, "function_trace_call (ftrace)"] and len(lines) == 6, lines
 print("hook chain stub test OK (hand-made ELF; fake IDA modules)")
 
 for path in sys.argv[1:2]:

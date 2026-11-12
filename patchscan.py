@@ -413,10 +413,20 @@ def hook_links(image, findings):
         if not site:
             continue
         page = copied_page(image, target)
-        call = handler_call(image, target) if page else None
-        handler = (call[0], call[1], call[2], handler_kind(call[2])) if call else (None, None, None, None)
-        links.append(Link(entry, name, site[0], site[1], target, page, *handler))
+        links.append(Link(entry, name, site[0], site[1], target, page, *page_handler(image, target if page else None)))
     return links
+
+
+def page_handler(image, page):
+    """(handler call address, handler address, handler name, kind) for a copied hook page, or four Nones."""
+    call = handler_call(image, page) if page is not None else None
+    return (call[0], call[1], call[2], handler_kind(call[2])) if call else (None, None, None, None)
+
+
+def copied_targets(image, findings):
+    """The copied hook pages the findings point at (linked entries and syscall slots alike): the addresses whose name
+    in the database the list shows."""
+    return {target for _, _, _, _, target in findings if target and copied_page(image, target)}
 
 
 def hook_xrefs(links):
@@ -495,12 +505,16 @@ def list_rows(image, findings, links, names):
     """Rows of the IDA list: (address, function, what, target, handler, handler address or None).
 
     names maps a hook page to the name the database gives it now (after renaming). For a linked entry the target is that
-    name, else the ELF's name for it; the handler has its own column. Other rows keep the scan's target label.
+    name, else the ELF's name for it; the handler has its own column. A syscall slot is never linked, but when it points
+    at a copied hook page it gets the same: that page's name now and its handler. Other rows keep the scan's target
+    label.
     """
     by_entry = {(link.entry, link.function): link for link in links}
     rows = []
     for address, function, what, label, target in findings:
         link = by_entry.get((address, function))
+        if link is None and target and copied_page(image, target):
+            link = Link(address, function, None, None, target, True, *page_handler(image, target))
         if link is None:
             rows.append((address, function, what, label, "", None))
             continue

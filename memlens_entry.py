@@ -367,13 +367,21 @@ def export_failure_text(stdout, stderr, isf_given):
         if parts and parts >= (2, 28, 2):
             # Not the old-API case: say so instead of telling the user to install the version they already have.
             lines.append("This Volatility (%s) could not load MemLens' exporter (linux.kernel2elf), and it is not older "
-                         "than 2.28.2, the version MemLens is tested with, so the usual cause does not apply. Please report "
-                         "it with the text below." % number)
+                         "than 2.28.2, the version MemLens is tested with, so the usual cause does not apply. Run vol with "
+                         "-vvv to see why the plugin failed to import, and please report it with the text below." % number)
+        elif not number:
+            # Volatility 2.27 and later stop at the plugin-name check before printing their version (2.11 and 2.26 print
+            # it first), so a modern Volatility gives no number here: name both cases instead of guessing.
+            lines.append("This Volatility could not load MemLens' exporter (linux.kernel2elf). `vol -h` shows its version "
+                         "on the first line. Older than 2.28.2 (seen with 2.11.0): MemLens is tested with Volatility 2.28.2, "
+                         "so pipx install volatility3==2.28.2 (or a venv, see the README), then make sure IDA finds that vol "
+                         "first on PATH. 2.28.2 or newer: run vol with -vvv to see why the plugin failed to import, and "
+                         "please report it with the text below.")
         else:
             lines.append("This Volatility%s could not load MemLens' exporter (linux.kernel2elf), usually because it is older "
                          "than the Linux module API the exporter uses. MemLens is tested with Volatility 2.28.2: "
                          "pipx install volatility3==2.28.2 (or a venv, see the README), then make sure IDA finds that vol "
-                         "first on PATH." % (" (%s)" % number if number else ""))
+                         "first on PATH." % (" (%s)" % number))
     elif "symbol_table_name" in err or "symbol table requirement" in out:
         if isf_given:
             lines.append("It found no symbols matching this image's kernel: the ISF you chose was probably built for another "

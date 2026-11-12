@@ -326,7 +326,7 @@ def nothing_to_check(image):
     if not any(symbol[3] == STT_FUNC for symbol in image.symbols):
         return "no function symbols"
     if "linux_banner" not in image.by_name:
-        return "no linux_banner symbol, so it is not a Linux kernel"
+        return "no linux_banner symbol (not a kernel.elf exported by MemLens)"
     return None
 
 
@@ -352,7 +352,7 @@ def main(argv):
         reason = nothing_to_check(image)
         if reason:
             print("warning: %s, so nothing was checked; an empty list here does not mean clean" % reason, file=sys.stderr)
-        findings = scan(blob, image)
+        findings = [] if reason else scan(blob, image)
     except BAD_ELF as error:
         sys.exit("patchscan: not a usable 64-bit ELF: %s" % error)
     for address, name, kind, target, _ in findings:

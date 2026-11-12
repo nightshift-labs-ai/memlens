@@ -54,7 +54,13 @@ def main(argv=None):
             if patchscan.on_disk_kernel(blob):
                 print("[MemLens] patch list skipped: this is a kernel file from disk, whose entry bytes are not what ran")
                 return 0
-            findings = patchscan.scan(blob)
+            image = patchscan.Image(blob)
+            reason = patchscan.nothing_to_check(image)
+            if reason:  # an empty list would read as a clean kernel
+                print("[MemLens] patch list skipped: %s has %s; an empty list would not mean clean"
+                      % (os.path.basename(args.elf), reason))
+                return 0
+            findings = patchscan.scan(blob, image)
         except patchscan.BAD_ELF as error:
             print("memlens_headless: patch list needs the kernel.elf MemLens exported: %s" % error, file=sys.stderr)
             return 1

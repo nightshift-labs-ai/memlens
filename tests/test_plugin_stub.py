@@ -68,9 +68,10 @@ with tempfile.TemporaryDirectory() as t:
     assert (st["globals_declared"], st["globals_typed"], st["globals_failed"], st["globals_not_in_database"]) == (2, 1, 0, 1), st
     assert "typed 1 of the 2 globals the ISF declares, plus 0 per-CPU variables in every CPU's copy; 0 failed; 1 have no symbol in this database" in m.report(result)
     assert "CANCELLED" not in m.report(result) and "cancelled" not in result
-    big = dict(result, stats=dict(st, globals_typed=33500, globals_declared=79316, percpu_typed=388,
+    big = dict(result, stats=dict(st, globals_typed=33500, globals_declared=79316, percpu_typed=1388, globals_failed=1234,
                                   globals_not_in_database=45350, globals_skipped_code=1078))
     assert "typed 33,500 of the 79,316 globals" in m.report(big) and "45,350 have no symbol" in m.report(big), m.report(big)
+    assert "plus 1,388 per-CPU" in m.report(big) and "1,234 failed" in m.report(big), m.report(big)
     assert "left 1,078 names alone" in m.report(big), m.report(big)
     kw.user_cancelled = lambda: True  # Cancel during the type import: nothing typed, the report says so
     r = m.apply_types(p)
@@ -207,6 +208,11 @@ with tempfile.TemporaryDirectory() as t:
     assert "built for another kernel" not in ftext, ftext
     ftext = m.export_failure_text(b"", old_err, False)
     assert "This Volatility could not load" in ftext and "fresh pip install" not in ftext, ftext
+    # Real Volatility 2.28.2 (recorded: empty stdout, argparse usage + "invalid choice" on stderr, exit 2) prints no
+    # version before the plugin-name check, so the text must cover both cases rather than assume an old one.
+    recorded = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "invalid_choice_vol2.28.2.stderr"), "rb").read()
+    ftext = m.export_failure_text(b"", recorded, True)
+    assert "vol -h" in ftext and "-vvv" in ftext and "volatility3==2.28.2" in ftext and "(2." not in ftext.split("Volatility said")[0], ftext
     # The same error from the tested version or a newer one is not the old-API case: no install-2.28.2 advice.
     for newer in (b"2.28.2", b"2.30.0", b"3.0"):
         ftext = m.export_failure_text(b"Volatility 3 Framework " + newer + b"\n", old_err, True)

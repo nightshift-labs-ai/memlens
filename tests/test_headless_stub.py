@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """tools/memlens_headless.py against a FAKE idapro and FAKE ida_* modules. Checks the orchestration only
 (open, types, comments, close + save, exit codes); this is not a test with a real idalib."""
+import contextlib, io
 import json, os, subprocess, sys, tempfile, types
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(ROOT, "tools"))
@@ -50,7 +51,10 @@ isf = {"base_types": {"unsigned int": {"size": 4, "signed": False, "kind": "int"
        "user_types": {"demo": {"kind": "struct", "size": 8, "fields": {"a": {"offset": 0, "type": {"kind": "base", "name": "unsigned int"}}}}}}
 findings = [(0x1000, "vfs_getattr", "call to memory with no symbol", "memlens_target_ffffffffc0b2b000 (calls function_trace_call, ftrace)", None)]
 m.patchscan.on_disk_kernel = lambda blob: False
-m.patchscan.scan = lambda blob: findings
+m.patchscan.Image = lambda blob: "image"
+not_kernel = [None]
+m.patchscan.nothing_to_check = lambda image: not_kernel[0]
+m.patchscan.scan = lambda blob, image=None: findings
 with tempfile.TemporaryDirectory() as t:
     elf, p = os.path.join(t, "kernel.elf"), os.path.join(t, "x.json")
     open(elf, "wb").write(b"\x7fELF"); json.dump(isf, open(p, "w"))
@@ -63,6 +67,14 @@ with tempfile.TemporaryDirectory() as t:
     banner[0] = b"Linux version 2.0"; calls[:] = []
     assert h.main([elf, p]) == 3 and not [c for c in calls if c[0] == "settype"] and calls[-1] == ("close", True), calls
     calls[:] = []; assert h.main([elf, p, "--any-kernel"]) == 0 and [c for c in calls if c[0] == "settype"], calls
+    # Not a kernel.elf (e.g. a user program, imported with --any-kernel): no empty "0 patched entries" that reads clean.
+    not_kernel[0] = "no linux_banner symbol (not a kernel.elf exported by MemLens)"; comments.clear(); calls[:] = []
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        assert h.main([elf, p, "--any-kernel"]) == 0
+    assert "patch list skipped: kernel.elf has no linux_banner symbol" in out.getvalue() and "patched entries" not in out.getvalue(), out.getvalue()
+    assert not comments and calls[-1] == ("close", True), (comments, calls)
+    not_kernel[0] = None
     # IDA cannot open the file.
     idapro.open_database = lambda path, analysis: 1; calls[:] = []
     assert h.main([elf, p]) == 1 and calls == [], calls

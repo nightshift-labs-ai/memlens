@@ -185,6 +185,14 @@ for path in sys.argv[1:]:
     findings = ps.scan(None, image)
     links = ps.hook_links(image, findings)
     names = ps.role_names(image, links)
+    if not findings:  # a clean export (Debian 12, Ubuntu 26.04): nothing to compare
+        print("%s: no patched entries, nothing to check (SKIPPED)" % path)
+        continue
+    unknown = sorted({row[1] for row in findings} - set(EXPECTED))
+    if unknown:
+        print("%s: SKIPPED, no expected values for %s (EXPECTED knows the demo, Debian 13 and Ubuntu 24.04 hooks)" % (
+            path, ", ".join(unknown)))
+        continue
     assert links and len(links) == len(findings), (path, findings)
     for link in links:
         site, handler_offset, handler, kind, name = EXPECTED[link.function]

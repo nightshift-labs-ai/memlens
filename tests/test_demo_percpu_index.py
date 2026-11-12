@@ -37,7 +37,7 @@ allocated = sorted((s[3], s[3] + s[5], cstr(shstr_off + s[0])) for s in sections
 
 idc = types.ModuleType("idc"); idc.BADADDR = -1
 autils = types.ModuleType("idautils")
-for module in ("ida_kernwin", "ida_typeinf", "ida_nalt", "ida_bytes"):
+for module in ("ida_kernwin", "ida_typeinf", "ida_nalt", "ida_bytes", "ida_name", "ida_netnode", "ida_xref"):
     sys.modules[module] = types.ModuleType(module)
 api = types.ModuleType("ida_idaapi"); api.plugin_t = object; api.PLUGIN_KEEP = 2; api.PLUGIN_HIDE = 0x10
 sys.modules["ida_kernwin"].action_handler_t = object; sys.modules["ida_kernwin"].Choose = object

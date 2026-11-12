@@ -13,8 +13,9 @@ kw.unregister_action = lambda a: calls.append(("unreg", a)) or True
 kw.msg = lambda s: calls.append(("msg", s)); kw.info = kw.warning = lambda s: calls.append(("ui", s))
 kw.show_wait_box = kw.replace_wait_box = lambda s: None; kw.hide_wait_box = lambda: None; kw.user_cancelled = lambda: False
 class chooser:
-    CHCOL_HEX = 1 << 24; NOTHING_CHANGED = 0
-    def __init__(self, title, cols): self.title = title
+    CHCOL_HEX = 1 << 24; NOTHING_CHANGED = 0; CH_CAN_EDIT = 1024
+    def __init__(self, title, cols, flags=0, popup_names=None):
+        self.title, self.cols, self.flags, self.popup_names = title, cols, flags, popup_names
     def Show(self): calls.append(("show", self.title))
 kw.Choose = chooser; kw.jumpto = lambda ea: calls.append(("jump", ea))
 ti = types.ModuleType("ida_typeinf"); ti.get_idati = lambda: "til"
@@ -44,12 +45,37 @@ idc.get_first_seg = lambda: idc.BADADDR  # no per-CPU sections unless a case add
 idc.get_next_seg = lambda ea: idc.BADADDR
 idc.SetType = lambda ea, d: calls.append(("settype", ea, d)) or True
 nalt = types.ModuleType("ida_nalt"); nalt.get_input_file_path = lambda: ""
+# Hook chain: xrefs and names are recorded; flag values as in the IDA 9.1-9.4 stubs (ida_xref.pyi, ida_name.pyi).
+xref = types.ModuleType("ida_xref"); xref.fl_CN, xref.fl_JN, xref.XREF_USER = 17, 19, 32
+xref.add_cref = lambda frm, to, kind: calls.append(("cref", frm, to, kind)) or True
+iname = types.ModuleType("ida_name"); iname.SN_NOWARN = 256
+iname.get_name = lambda ea: next((n for n, a in names.items() if a == ea), "")
+def set_name(ea, name, flags):
+    calls.append(("setname", ea, name, flags))
+    if names.get(name, ea) != ea:
+        return False  # used at another address: IDA refuses without SN_FORCE
+    for old in [n for n, a in names.items() if a == ea]:
+        del names[old]
+    names[name] = ea
+    return True
+iname.set_name = set_name
+blobs = {}
+nnode = types.ModuleType("ida_netnode")
+class netnode:
+    def __init__(self, name, namelen=0, create=False): self.name = name
+    def getblob(self, start, tag): return blobs.get((self.name, start, tag))
+    def setblob(self, data, start, tag): blobs[(self.name, start, tag)] = bytes(data); return True
+nnode.netnode = netnode
 comments = {}
 idc.set_cmt = lambda ea, c, r: calls.append(("cmt", ea, c)) or comments.__setitem__(ea, c)
 idc.get_cmt = lambda ea, r: comments.get(ea)
 dbytes = types.ModuleType("ida_bytes"); dbytes.get_bytes = lambda ea, size: b"Linux version 1.0"[:size]
+dummy_names = set()  # addresses whose name IDA made up (sub_..., loc_...): not a real name
+dbytes.get_flags = lambda ea: ea  # the fake flags are the address, for has_user_name below
+dbytes.has_user_name = lambda flags: bool(iname.get_name(flags)) and flags not in dummy_names
 kw.ASKBTN_NO, kw.ASKBTN_YES = 0, 1
-sys.modules.update(ida_kernwin=kw, ida_idaapi=api, ida_typeinf=ti, ida_nalt=nalt, idc=idc, ida_bytes=dbytes, idautils=autils)
+sys.modules.update(ida_kernwin=kw, ida_idaapi=api, ida_typeinf=ti, ida_nalt=nalt, idc=idc, ida_bytes=dbytes, idautils=autils,
+                   ida_xref=xref, ida_name=iname, ida_netnode=nnode)
 import memlens_entry as m
 isf = {"base_types": {"unsigned int": {"size": 4, "signed": False, "kind": "int"}},
        "enums": {}, "symbols": {"demo_var": {"address": 1, "type": {"kind": "struct", "name": "demo"}}, "absent": {"address": 2, "type": {"kind": "struct", "name": "demo"}}, "fn": {"address": 3, "type": {"kind": "base", "name": "void"}}}, "user_types": {"demo": {"kind": "struct", "size": 8, "fields": {"a": {"offset": 4, "type": {"kind": "base", "name": "unsigned int"}}, "private": {"offset": 0, "type": {"kind": "base", "name": "unsigned int"}}}}, "shrunk": {"kind": "struct", "size": 4, "fields": {"a": {"offset": 0, "type": {"kind": "base", "name": "unsigned int"}}}}, "gone": {"kind": "struct", "size": 4, "fields": {"a": {"offset": 0, "type": {"kind": "base", "name": "unsigned int"}}}}}}
@@ -230,9 +256,13 @@ with tempfile.TemporaryDirectory() as t:
                     "rejected": [], "missing": [], "wrong_size": []})
     assert "declarations generated from the ISF: 9,734 structs, 1,715 unions, 2,149 enums, 2 skipped\n" in rep, rep
     assert "{" not in rep and "globals_typed" not in rep, rep
-    table = m.PatchList([(0x10, "fn", "what", "tgt", 0x20)])
-    assert table.OnGetSize() == 1 and table.OnGetLine(0) == ["10", "fn", "what", "tgt"]
-    assert table.OnSelectLine(0) == (0,) and ("jump", 0x10) in calls
+    table = m.PatchList([(0x10, "fn", "what", "tgt", "handler_fn (ftrace)", 0x30), (0x40, "sys_call_table[1]", "odd", "x", "", None)])
+    assert [c[0] for c in table.cols] == ["Address", "Where", "What", "Target", "Handler"], table.cols
+    assert table.flags & kw.Choose.CH_CAN_EDIT and table.popup_names[2] == "Jump to handler", (table.flags, table.popup_names)
+    assert table.OnGetSize() == 2 and table.OnGetLine(0) == ["10", "fn", "what", "tgt", "handler_fn (ftrace)"]
+    assert table.OnSelectLine(0) == (0,) and calls[-1] == ("jump", 0x10)
+    assert table.OnEditLine(0) == (0,) and calls[-1] == ("jump", 0x30)  # Ctrl+E: the handler
+    assert table.OnEditLine(1) == (0,) and calls[-1][0] == "msg" and "no handler is known for sys_call_table[1]" in calls[-1][1], calls[-1]
     import base64
     def banner_isf(text):
         data = dict(isf); data["symbols"] = dict(isf["symbols"], linux_banner={"address": 9, "constant_data": base64.b64encode(text + b"\0").decode()})

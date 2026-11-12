@@ -40,7 +40,11 @@ dbytes = types.ModuleType("ida_bytes"); dbytes.get_bytes = lambda ea, size: bann
 idapro = types.ModuleType("idapro")
 idapro.open_database = lambda path, analysis: calls.append(("open", os.path.basename(path), analysis)) or 0
 idapro.close_database = lambda save: calls.append(("close", save))
-sys.modules.update(ida_kernwin=kw, ida_idaapi=api, ida_typeinf=ti, ida_nalt=nalt, idc=idc, ida_bytes=dbytes, idapro=idapro, idautils=autils)
+xref = types.ModuleType("ida_xref"); xref.fl_CN, xref.fl_JN, xref.XREF_USER = 17, 19, 32
+iname = types.ModuleType("ida_name"); iname.SN_NOWARN = 256
+nnode = types.ModuleType("ida_netnode")
+sys.modules.update(ida_kernwin=kw, ida_idaapi=api, ida_typeinf=ti, ida_nalt=nalt, idc=idc, ida_bytes=dbytes, idapro=idapro, idautils=autils,
+                   ida_xref=xref, ida_name=iname, ida_netnode=nnode)
 import memlens_headless as h
 import memlens_entry as m
 isf = {"base_types": {"unsigned int": {"size": 4, "signed": False, "kind": "int"}}, "enums": {},
@@ -50,7 +54,11 @@ isf = {"base_types": {"unsigned int": {"size": 4, "signed": False, "kind": "int"
        "user_types": {"demo": {"kind": "struct", "size": 8, "fields": {"a": {"offset": 0, "type": {"kind": "base", "name": "unsigned int"}}}}}}
 findings = [(0x1000, "vfs_getattr", "call to memory with no symbol", "memlens_target_ffffffffc0b2b000 (calls function_trace_call, ftrace)", None)]
 m.patchscan.on_disk_kernel = lambda blob: False
-m.patchscan.scan = lambda blob: findings
+m.patchscan.Image = lambda blob: ("image", blob)
+m.patchscan.scan = lambda blob, image=None: findings
+# The hook chain itself is tested in test_hookchain_stub.py; here only that the runner applies it to the scanned image.
+m.link_hooks = lambda image, found: calls.append(("link", image, found)) or ([], dict.fromkeys(
+    ("xrefs", "xrefs_before", "xrefs_failed", "renamed", "named_before", "kept", "rename_failed"), 0))
 with tempfile.TemporaryDirectory() as t:
     elf, p = os.path.join(t, "kernel.elf"), os.path.join(t, "x.json")
     open(elf, "wb").write(b"\x7fELF"); json.dump(isf, open(p, "w"))
@@ -58,6 +66,7 @@ with tempfile.TemporaryDirectory() as t:
     assert calls[0] == ("open", "kernel.elf", False) and calls[-1] == ("close", True), calls
     assert ("settype", 0x1000, "struct demo demo_var;") in calls and ("settype", 0x2100, "struct demo pcpu_var;") in calls, calls
     assert comments[0x1000].startswith("MemLens: call to memory with no symbol memlens_target_ffffffffc0b2b000"), comments
+    assert ("link", ("image", b"\x7fELF"), findings) in calls and calls.index(("link", ("image", b"\x7fELF"), findings)) < len(calls) - 1, calls
     calls[:] = []; assert h.main([elf, p]) == 0 and calls[0] == ("open", "kernel.elf", True)
     # Different kernel: nothing imported without --any-kernel, database still closed.
     banner[0] = b"Linux version 2.0"; calls[:] = []

@@ -914,9 +914,16 @@ def add_comment(address, text):
     # A line an older build wrote, which this text only extends (a kind added after a comma or a space), is replaced,
     # so re-running on an older database does not keep both (code review s170 m-1).
     def extended(line):
+        if not line.startswith("MemLens: "):
+            return False
+        if text.startswith(line) and text[len(line):len(line) + 1] == ";":  # a v0.3.27 line ending with a role, now + "; owner: ..."
+            return True
         stem = line[:-1] if line.endswith(")") else line
-        return line.startswith("MemLens: ") and text.startswith(stem) and text[len(stem):len(stem) + 1] in (",", " ")
-    lines = [line for line in old.split("\n") if line and not extended(line)]
+        return text.startswith(stem) and text[len(stem):len(stem) + 1] in (",", " ")
+    if not old:
+        idc.set_cmt(address, text, False)
+        return
+    lines = [line for line in old.split("\n") if not extended(line)]  # empty lines in an analyst's comment stay (claims check s171)
     idc.set_cmt(address, "\n".join(lines + [text]), False)
 
 

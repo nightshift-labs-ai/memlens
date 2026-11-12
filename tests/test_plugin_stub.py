@@ -339,6 +339,17 @@ with tempfile.TemporaryDirectory() as t:
     comments[0x50] = "MemLens: call to sys_kill (calls a)"
     m.add_comment(0x50, "MemLens: call to sys_kill (calls ab, module callback)")
     assert comments[0x50] == "MemLens: call to sys_kill (calls a)\nMemLens: call to sys_kill (calls ab, module callback)", comments[0x50]
+    # claims check s171: empty lines in an analyst's existing comment are kept (the m-1 replace must not drop them)
+    comments[0x60] = "para one\n\npara two"
+    m.add_comment(0x60, "MemLens: hook")
+    assert comments[0x60] == "para one\n\npara two\nMemLens: hook", repr(comments[0x60])
+    comments[0x61] = "note\n\nMemLens: call to f (calls m.g)"
+    m.add_comment(0x61, "MemLens: call to f (calls m.g, module callback)")
+    assert comments[0x61] == "note\n\nMemLens: call to f (calls m.g, module callback)", repr(comments[0x61])
+    # builder s171: a v0.3.27 page line that already ended with a role and now only gains "; owner: ..." is replaced too
+    comments[0x62] = "MemLens: hook page; first named call: function_trace_call (ftrace)"
+    m.add_comment(0x62, "MemLens: hook page; first named call: function_trace_call (ftrace); owner: function_trace_call (ftrace_ops global_ops)")
+    assert comments[0x62] == "MemLens: hook page; first named call: function_trace_call (ftrace); owner: function_trace_call (ftrace_ops global_ops)", repr(comments[0x62])
     # code review s170 n-2: a folder listing that fails is unknown (None), never an empty folder, so nothing is removed on it
     missing = os.path.join(tempfile.mkdtemp(), "no-such-folder")
     assert m.elf_files(missing) is None

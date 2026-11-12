@@ -54,6 +54,9 @@ torn = [KAS("bpf_prog_neg", "t", PROG & MASK, -0x40, "bpf"), KAS("bpf_prog_huge"
 kept, dropped = k.sane_ksyms(torn)
 assert kept == [ksyms[0], ksyms[2]] and dropped == 2, (kept, dropped)
 assert k.sane_ksyms(ksyms) == (ksyms, 0) and k.sane_ksyms([KAS("z", "t", PROG & MASK, 0, "bpf")])[1] == 0
+# The bound itself (claims s170): a 2 MB span is kept, one byte more is dropped.
+edge = [KAS("at_max", "t", PROG & MASK, k.MAX_BPF_SPAN, "bpf"), KAS("over_max", "t", PROG2 & MASK, k.MAX_BPF_SPAN + 1, "bpf")]
+assert k.MAX_BPF_SPAN == 0x200000 and k.sane_ksyms(edge) == ([edge[0]], 1), k.sane_ksyms(edge)
 
 
 class Layer:
@@ -93,7 +96,14 @@ assert image.segment(DISPATCH)[3] and image.segment(PROG2)[3], "BPF pages must b
 assert list(plugin._bpf(k.Elf(), layer, [], set())) == [(0, ("bpf symbols", "bpf", 0, 0))]
 # Torn entries through the plugin path (s166 m2): left out, the rest is exported, and the ELF still writes.
 elf2 = k.Elf()
+import logging  # noqa: E402
+seen = []
+handler = logging.Handler()
+handler.emit = lambda record: seen.append(record.getMessage())
+logging.getLogger(k.__name__).addHandler(handler)
 rows2 = list(plugin._bpf(elf2, layer, torn, set()))
+logging.getLogger(k.__name__).removeHandler(handler)
+assert seen == ["kernel2elf: 2 BPF symbol(s) with an impossible size left out"], seen
 assert rows2 == [(0, ("bpf pages", ".bpf.ffffffffc0004000", 0xffffffffc0004000, 0x1000)),
                  (0, ("bpf pages", ".bpf.ffffffffc0009000", 0xffffffffc0009000, 0x1000)),
                  (0, ("bpf symbols", "bpf", 0, 2))], rows2

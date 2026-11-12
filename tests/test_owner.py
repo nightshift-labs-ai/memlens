@@ -249,9 +249,11 @@ BSITES = {
     "odd": bpf_trampoline(BPAGES["odd"], [(PROG_ENTER, PROG)], extra=b"\x90"),  # an instruction invoke_bpf_prog does not emit
     "unexported": bpf_trampoline(BPAGES["unexported"], [(PROG_ENTER, UNEXPORTED_PROG)]),
     "decoy": bpf_trampoline(BPAGES["decoy"], [(PROG_ENTER, PROG)], decoy=True),
-    # BPF_LSM_CGROUP (kernel/bpf/trampoline.c cgroup_shim_alloc): the trampoline runs a shim whose bpf_func is a kernel
-    # function; the real programs hang off the cgroup's effective array (review s166 m1).
-    "lsm_cgroup": bpf_trampoline(BPAGES["lsm_cgroup"], [(ENTER_LSM_CG, RUN_LSM_CUR)]),
+    # BPF_LSM_CGROUP (kernel/bpf/trampoline.c cgroup_shim_alloc): the trampoline runs a shim prog whose bpf_func is a kernel
+    # function; the real programs hang off the cgroup's effective array. The shim is BPF_LSM_MAC and not JIT-compiled, so it
+    # is entered through plain __bpf_prog_enter, with movabs rsi, insnsi (review s166 m1; claims s170 F1).
+    "lsm_cgroup": bpf_trampoline(BPAGES["lsm_cgroup"], [(PROG_ENTER, RUN_LSM_CUR)],
+                                 extra=b"\x48\xbe" + struct.pack("<Q", 0xffff8880e8e8e8e8)),
 }
 BENTRIES = {name: KTEXT + 0x40 * index for index, name in enumerate(BPAGES)}
 for name, entry in BENTRIES.items():
@@ -276,7 +278,7 @@ assert bowners["named"] == ps.Owner("bpf.bpf_prog_e8932b6bae2b9745_restrict_file
 # not JIT-compiled, and a cgroup LSM trampoline runs the kernel's shim, whose programs are per cgroup.
 assert bowners["interp"] == ps.Owner("__bpf_prog_run32 (BPF interpreter: the program is not JIT-compiled)", PROG_RUN, B,
                                      [(BSITES["interp"][0], PROG_RUN, C)]), bowners["interp"]
-assert bowners["lsm_cgroup"] == ps.Owner("__cgroup_bpf_run_lsm_current (cgroup LSM shim: the programs are per cgroup)",
+assert bowners["lsm_cgroup"] == ps.Owner("__cgroup_bpf_run_lsm_current (cgroup LSM shim: runs each cgroup's programs, not named here)",
                                          RUN_LSM_CUR, B, [(BSITES["lsm_cgroup"][0], RUN_LSM_CUR, C)]), bowners["lsm_cgroup"]
 assert ps.bpf_program_label("bpf_prog_e8932b6bae2b9745_restrict_filesystems", NAMED_PROG, "__bpf_prog_enter") == (
     "bpf_prog_e8932b6bae2b9745_restrict_filesystems (BPF program)")  # a kernel BPF name without the export's "bpf."

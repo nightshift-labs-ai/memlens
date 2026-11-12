@@ -482,14 +482,16 @@ BPF_PROG_NAME = re.compile(r"(bpf\.)?bpf_prog_[0-9a-f]{16}(_|$)")
 def bpf_program_label(name, program, enter):
     """The Owner text for what a BPF trampoline calls after enter (the __bpf_prog_enter* it called). Only a BPF name
     (the export's bpf.bpf_prog_<tag>_<name>, or the kernel's own without "bpf.") or no symbol is called a BPF program; a
-    kernel function there is the interpreter (a program that is not JIT-compiled) or, after the cgroup LSM enter, the
-    kernel's shim, whose programs hang off each cgroup (review s166 m1)."""
+    kernel function there is the interpreter (a program that is not JIT-compiled), the kernel's cgroup LSM shim (whose
+    programs hang off each cgroup), or else just a function the trampoline calls (review s166 m1, claims s170 F1)."""
     if not name:
         return "BPF program at %#x" % program
     if BPF_PROG_NAME.match(name):
         return "%s (BPF program)" % name
-    if enter.startswith(BPF_ENTER_LSM_CGROUP):
-        return "%s (cgroup LSM shim: the programs are per cgroup)" % name
+    if name.startswith("__cgroup_bpf_run_lsm_") or enter.startswith(BPF_ENTER_LSM_CGROUP):
+        # cgroup_shim_alloc makes the shim BPF_LSM_MAC, so the trampoline enters it through plain __bpf_prog_enter: the
+        # callee (__cgroup_bpf_run_lsm_current/_sock/_socket) is what marks it (claims s170 F1)
+        return "%s (cgroup LSM shim: runs each cgroup's programs, not named here)" % name
     if name.lstrip("_").startswith("bpf_prog_run"):
         return "%s (BPF interpreter: the program is not JIT-compiled)" % name
     return "%s (called by the BPF trampoline)" % name

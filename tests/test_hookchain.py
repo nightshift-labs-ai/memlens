@@ -155,6 +155,21 @@ assert (plinks["traced"].handler_site, plinks["traced"].kind) == (P2 + 0x94, "ft
 assert ps.role_names(pimage, list(plinks.values())) == {P2: "ftrace_tramp_traced"}
 assert (P1 + 0x94, FTRACE, "call") not in ps.hook_xrefs(list(plinks.values()))
 assert ps.handler_call(pimage, P2) == (P2 + 0x94, FTRACE, "function_trace_call")  # the last symbol: up to span or segment end
+
+# Three more hook forms: a REX movabs (r11) after the ftrace NOP, push+ret after endbr64 and the ftrace NOP, and
+# jmp [rip+X] whose pointer is elsewhere (the movabs/push/rip forms above have the hook at the entry itself).
+forms = bytearray(b"\x90" * TEXT)
+PG = BASE + 0x2000
+forms[PG - BASE + 0x40:PG - BASE + 0x45] = call(PG + 0x40, FTRACE)
+forms[0x000:0x012] = ps.FENTRY_NOP + b"\x49\xbb" + struct.pack("<Q", PG) + b"\x41\xff\xe3"            # nop5; movabs r11; jmp r11
+forms[0x100:0x10f] = ENDBR + ps.FENTRY_NOP + b"\x68" + struct.pack("<i", PG - (1 << 64)) + b"\xc3"     # endbr; nop5; push; ret
+forms[0x200:0x206] = b"\xff\x25" + struct.pack("<i", (BASE + TEXT) - (BASE + 0x206))                  # jmp [rip+X] -> PG
+fimage = ps.Image(elf(forms, [("rexmov", BASE, 0x100), ("nop_push", BASE + 0x100, 0x100), ("ripfar", BASE + 0x200, 0x100),
+                              ("function_trace_call", FTRACE, 0x100), ("%s%x" % (ps.TARGET_PREFIX, PG), PG, 0)], struct.pack("<Q", PG)))
+flinks = {link.function: (link.site - link.entry, link.flow, link.target, link.handler_name)
+          for link in ps.hook_links(fimage, ps.scan(None, fimage))}
+assert flinks == {"rexmov": (15, "jmp", PG, "function_trace_call"), "nop_push": (14, "jmp", PG, "function_trace_call"),
+                  "ripfar": (0, "jmp", PG, "function_trace_call")}, flinks
 print("hook chain tests OK (hand-made ELFs: %d links, %d xrefs, %d pages renamed; packed trampolines; patchscan.py --links)" % (
     len(links), len(xrefs), len(names)))
 

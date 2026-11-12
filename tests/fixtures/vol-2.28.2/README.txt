@@ -12,6 +12,9 @@ Images:
                           "MESSAGE=<the Debian 12 ISF's line>" then NUL bytes planted in a zero page at 0x30000000
                           (a copy of an earlier boot's kernel line; the image's own journal holds such a copy of its
                           kernel's line at 0xc066ae8). Made by a code review (s158), recorded 2026-11-12.
+  truncated.elf           the first 125 MB (131,072,000 bytes) of trace.elf; its ELF headers describe 1,090,717,808.
+                          The real linux_banner (with its "\n\0") is still in it, at file offset 119035056, but
+                          banners.Banners lists only the "# SMP" line. Made by a code review (s158).
 ISFs (copied into <symbols>/linux/ as MemLens does):
   Debian 13  debian-6.12.115+deb13.1-amd64.json.xz (the demo ISF, matches trace.elf)
   Debian 12  debian-6.1.0-54.json.xz (another kernel: wrong for trace.elf)
@@ -30,7 +33,9 @@ export_avml_header_isf        1     5.1      -p <memlens>/vol_plugins -s <Debian
 export_random_with_banner_isf 0     32.7     -p <memlens>/vol_plugins -s <Debian 13> -o <out> -f random_with_banner.bin linux.kernel2elf.Kernel2Elf
 banners_journal_copy          0     11.5     -f journal_copy.lime banners.Banners
 export_journal_copy_wrong_isf 1     7.4      -p <memlens>/vol_plugins -s <Debian 12> -o <out> -f journal_copy.lime linux.kernel2elf.Kernel2Elf
+banners_truncated             0     13.7     -f truncated.elf banners.Banners
+export_truncated_isf          1     14.5     -p <memlens>/vol_plugins -s <Debian 13> -o <out> -f truncated.elf linux.kernel2elf.Kernel2Elf
 
-The six failed exports other than AVML print byte-identical stdout and stderr: Volatility's text cannot tell a wrong
-ISF from no ISF or from a file that is not a memory image. random_with_banner.bin is not a failure: Volatility exits 0
+The seven failed exports other than AVML print byte-identical stdout and stderr: Volatility's text cannot tell a wrong
+ISF from no ISF, from a cut image with the right ISF or from a file that is not a memory image. random_with_banner.bin is not a failure: Volatility exits 0
 and writes an ELF with 0 bytes of .text.

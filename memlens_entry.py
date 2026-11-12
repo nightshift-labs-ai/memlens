@@ -11,6 +11,7 @@ import traceback
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -445,9 +446,57 @@ def kernel_check_wanted(stdout, stderr):
     return kernel_not_found(out, err) and AVML_WITHOUT_SNAPPY not in out + err
 
 
+LIME_MAGIC = 0x4C694D45  # "EMiL" on disk
+
+
+def short_file(path):
+    """(file size, size its own header describes, "ELF" or "LiME") when the file is shorter than its 64-bit ELF program
+    headers (end of the last PT_LOAD) or its chain of LiME range headers say, else None. banners.Banners silently misses
+    kernel lines near the end of such a cut file, so no banner-based verdict holds for it."""
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as handle:
+            head = handle.read(64)
+            if head[:4] == b"\x7fELF" and len(head) == 64 and head[4] == 2 and head[5] == 1:  # 64-bit, little-endian
+                phoff, = struct.unpack_from("<Q", head, 32)
+                phentsize, phnum = struct.unpack_from("<HH", head, 54)
+                if phentsize < 56:
+                    return None
+                handle.seek(phoff)
+                table = handle.read(phentsize * phnum)
+                end, kind = phoff + phentsize * phnum, "ELF"
+                if len(table) == phentsize * phnum:
+                    for index in range(phnum):
+                        p_type, _, p_offset, _, _, p_filesz = struct.unpack_from("<IIQQQQ", table, index * phentsize)
+                        if p_type == 1:  # PT_LOAD
+                            end = max(end, p_offset + p_filesz)
+            elif len(head) >= 4 and struct.unpack_from("<I", head)[0] == LIME_MAGIC:
+                end, kind = 0, "LiME"
+                for _ in range(1 << 16):  # one 32-byte header per physical range
+                    if end + 32 > size:
+                        handle.seek(end)
+                        rest = handle.read(4)
+                        if rest and struct.pack("<I", LIME_MAGIC).startswith(rest):
+                            end += 32  # a cut header
+                        break
+                    handle.seek(end)
+                    magic, _, start, stop = struct.unpack("<IIQQ", handle.read(24))
+                    if magic != LIME_MAGIC:
+                        break
+                    end += 32 + stop - start + 1
+            else:
+                return None
+    except (OSError, struct.error):
+        return None
+    return (size, end, kind) if end > size else None
+
+
 def check_kernel(vol, image, isf_path):
     """Which kernel the image holds (Volatility's banners.Banners, cancellable) and which one the ISF was built for.
     Called only after Volatility found no kernel layer or symbol table; the dict goes to export_failure_text."""
+    short = short_file(image)
+    if short:
+        return {"short": short}  # no banner scan: it would miss lines in the missing part without a word
     ida_kernwin.show_wait_box("MemLens: export failed, Volatility is looking for the image's kernel version")
     try:
         code, stdout, stderr = run_cancellable(banner_command(vol, image))
@@ -485,6 +534,12 @@ def banner_lines(banners, isf_line=None, mark=" (the ISF's)"):
 
 def kernel_hint(check, isf_given):
     """The paragraphs that explain a failed export from what check_kernel found, or None if it found nothing to go by."""
+    if check and check.get("short"):
+        size, described, kind = check["short"]
+        return ["The image file is shorter than its own %s headers say (%s bytes; they describe at least %s): it is probably an "
+                "incomplete copy, so Volatility cannot read all of it, and its search for the kernel's version line can "
+                "miss it. Copy or download the image again, then export again." % (kind, "{:,}".format(size),
+                                                                                    "{:,}".format(described))]
     if not check or "banners" not in check:
         return None
     banners = check["banners"]

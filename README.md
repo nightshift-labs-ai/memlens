@@ -124,6 +124,7 @@ In IDA, with any database open (plugin menu entries need one), under **Edit > Pl
 
 Volatility 2.28.2 prints the same error, byte for byte, for a wrong ISF, for no ISF and for a file that is not a memory image ("A translation layer requirement was not fulfilled ... A symbol table requirement was not fulfilled"). After that error MemLens runs `vol -q -f <image> banners.Banners` (Cancel stops it; it took 14 to 20 s on the 1 GB demo image on our machine), reads the ISF's own `linux_banner`, and the dialog says which case it is:
 
+- The file is shorter than its own ELF or LiME headers say (ELF: the end of the last `PT_LOAD`; LiME: the chain of range headers): it is probably an incomplete copy, so copy or download it again. This is checked first and no banner scan runs, because banners.Banners silently misses kernel lines near the end of a cut file: on the first 125 MB of the demo `trace.elf` it lists only a variant of the line (`# SMP` for `#1 SMP`), though the kernel's own line is in that part.
 - No `Linux version` line in the file: Volatility found no Linux kernel in it, so it is probably not a Linux memory image. The dialog lists what Volatility 2.28.2 reads (from its layer list): raw images, LiME, 64-bit ELF core dumps, VMware `.vmem` (with its `.vmss` or `.vmsn` next to it), QEMU suspend images and Xen core dumps; AVML needs the snappy library.
 - The ISF's line is not among the image's: the ISF was built for another kernel. Both are shown; with the Debian 12 ISF on the demo `trace.elf` (lines shortened here):
   ```
@@ -137,7 +138,7 @@ Volatility 2.28.2 prints the same error, byte for byte, for a wrong ISF, for no 
 - No ISF chosen: the image's lines, so you know which ISF to get (next section).
 - An AVML image that Volatility cannot read because the snappy library is missing: the dialog says so (Volatility's own warning).
 
-These cases were run with real Volatility 2.28.2 (the demo `trace.elf` with a Debian 12 ISF and with none, 50 MiB of random bytes with and without the right ISF, an AVML header without snappy, a LiME copy of `trace.elf` with a journal copy of the Debian 12 line planted in it, with the Debian 12 ISF) through the plugin's export code on fake IDA modules, not in real IDA.
+These cases were run with real Volatility 2.28.2 (the demo `trace.elf` with a Debian 12 ISF and with none, 50 MiB of random bytes with and without the right ISF, an AVML header without snappy, a LiME copy of `trace.elf` with a journal copy of the Debian 12 line planted in it, with the Debian 12 ISF, the first 110 MB and 125 MB of `trace.elf` and 125 MB of its LiME copy, with the right ISF) through the plugin's export code on fake IDA modules, not in real IDA.
 
 ### An ISF for your own image
 

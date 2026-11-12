@@ -2,7 +2,7 @@
 """A failed export names the image's kernel. Drives Export kernel from memory image on FAKE ida_* modules with a fake
 `vol` that replays real Volatility 2.28.2 output recorded in tests/fixtures/vol-2.28.2 (see its README.txt), through
 the plugin's own run_cancellable. Checks our logic only; this is not a test in real IDA or with a real Volatility run."""
-import base64, json, os, runpy, stat, sys, tempfile, time
+import base64, json, os, runpy, stat, struct, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIX = os.path.join(HERE, "fixtures", "vol-2.28.2")
 
@@ -29,7 +29,7 @@ assert D13_LINE.startswith("Linux version 6.12.115+deb13.1-amd64 ") and D12_LINE
 # --- What the recordings show -------------------------------------------------------------------------------------
 # Volatility's text is the same for a wrong ISF, no ISF and a file that is not a memory image: only banners can tell.
 failed = ["export_trace_wrong_isf", "export_kernel_file_wrong_isf", "export_random_isf", "export_trace_no_isf",
-          "export_random_no_isf", "export_journal_copy_wrong_isf"]
+          "export_random_no_isf", "export_journal_copy_wrong_isf", "export_truncated_isf"]
 for name in failed:
     assert fixture(name + ".stdout") == fixture(failed[0] + ".stdout"), name
     assert fixture(name + ".stderr") == fixture(failed[0] + ".stderr"), name
@@ -78,6 +78,49 @@ with tempfile.TemporaryDirectory() as work:
     kw.user_cancelled = lambda: False
     found, why = m.holds_bytes(os.path.join(work, "missing"), D12_EXACT)
     assert found is None and why.startswith("the file could not be read"), why
+
+# A cut image: banners.Banners missed the real linux_banner in the first 125 MB of trace.elf (recorded), so the size the
+# file's own ELF or LiME headers describe is checked first. Small hand-made files with the same layout here.
+truncated = m.image_banners(fixture("banners_truncated.stdout"))
+assert len(truncated) == 1 and D13_LINE not in truncated and truncated[0].endswith(" # SMP PREEMPT_DYNAMIC Debian "
+                                                                                    "6.12.115-2 (2026-11-01)"), truncated
+
+
+def elf_core(loads, ident=b"\x7fELF\x02\x01\x01", phentsize=56):
+    """A 64-bit ELF core: header, one PT_NOTE, then a PT_LOAD per (size) in loads, data right after the headers."""
+    phnum = 1 + len(loads)
+    offset = 64 + phentsize * phnum
+    table = struct.pack("<IIQQQQQQ", 4, 0, 0, 0, 0, 0, 0, 0).ljust(phentsize, b"\0")
+    for size in loads:
+        table += struct.pack("<IIQQQQQQ", 1, 7, offset, 0, 0, size, size, 0).ljust(phentsize, b"\0")
+        offset += size
+    head = ident.ljust(16, b"\0") + struct.pack("<HHIQQQIHHHHHH", 4, 62, 1, 0, 64, 0, 0, 64, phentsize, phnum, 64, 0, 0)
+    return head + table + b"\x5a" * (offset - 64 - phentsize * phnum)
+
+
+def lime(sizes):
+    return b"".join(struct.pack("<IIQQ8x", 0x4C694D45, 1, 0x1000 * n, 0x1000 * n + size - 1) + b"\x5a" * size
+                    for n, size in enumerate(sizes))
+
+
+with tempfile.TemporaryDirectory() as work:
+    path = os.path.join(work, "img")
+
+    def short(data):
+        with open(path, "wb") as handle:
+            handle.write(data)
+        return m.short_file(path)
+    core, cut = elf_core([0x30, 0x2000]), elf_core([0x30, 0x2000])[:-0x100]
+    assert short(core) is None and short(core + b"tail") is None, short(core)
+    assert short(cut) == (len(cut), len(core), "ELF") and short(core[:-1]) == (len(core) - 1, len(core), "ELF")
+    assert short(core[:64 + 56]) == (64 + 56, 64 + 56 * 3, "ELF")  # cut inside the program header table
+    assert short(elf_core([0x30], ident=b"\x7fELF\x01\x01\x01")[:80]) is None  # 32-bit: not read by Volatility
+    full = lime([0x40, 0x3000, 0x80])
+    assert short(full) is None and short(full + b"\0" * 5) is None, short(full)
+    assert short(full[:-1]) == (len(full) - 1, len(full), "LiME") and short(full[:200]) == (200, 32 + 0x40 + 32 + 0x3000, "LiME")
+    assert short(full[:32 + 0x40 + 10]) == (32 + 0x40 + 10, 32 + 0x40 + 32, "LiME")  # cut inside the second header
+    assert short(struct.pack("<IIQQ8x", 0x4C694D45, 1, 0x2000, 0x1000) + b"\0" * 64) is None  # end before start
+    assert short(b"\0" * 100) is None and short(b"") is None and m.short_file(os.path.join(work, "missing")) is None
 one = m.banner_lines([D13_LINE])
 assert one == "Image: " + D13_LINE, one
 
@@ -248,6 +291,16 @@ with tempfile.TemporaryDirectory() as work:
     # The banner scan fails too: said so, and no claim about the kernel.
     text = run("export_trace_no_isf", "banners_trace", None, banners_exit=1)[0][0]
     assert "banners.Banners exited with 1" in text and "Image:" not in text and "fresh pip install" in text, text
+
+    # A cut image with the right ISF (recorded): said so, before any banner-based verdict, and no banner scan.
+    for data, kind in ((elf_core([0x30, 0x2000])[:-0x100], "ELF"), (lime([0x40, 0x3000])[:500], "LiME")):
+        dialogs, log, _ = run("export_truncated_isf", "banners_truncated", d13, image_bytes=data)
+        text = dialogs[0]
+        assert ran_banners(log) == [] and "The image file is shorter than its own %s headers say" % kind in text, text
+        assert "probably an incomplete copy" in text and "Copy or download the image again" in text, text
+        assert "another kernel" not in text and "no Linux kernel" not in text and "Image:" not in text, text
+    text = run("export_truncated_isf", "banners_truncated", d13, image_bytes=b"\0" * 64 + D13_EXACT)[0][0]
+    assert "another kernel" in text and "Image: " in text, text  # a plain file: only the banner scan to go by
 
     # Not a kernel-not-found failure (an old Volatility without the exporter): no banner scan.
     old = os.path.join(work, "old_volatility")  # the message shape seen with 2.11.0 (an absolute path wins in join)

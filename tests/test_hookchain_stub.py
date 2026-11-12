@@ -257,6 +257,49 @@ with tempfile.TemporaryDirectory() as work:
     assert m._open_list.OnGetLine(0)[5] == "ftrace_ops_assist_func (ftrace_ops evilmod.hooks+0x20)", m._open_list.OnGetLine(0)
     assert sorted(c[1:] for c in calls if c[0] == "dref") == [(PAGE + 0xdd, OPS, DATA), (OPS + 8, ASSIST, DATA)], calls
     nalt.get_input_file_path = lambda: ""
+
+# Hook pages with no ftrace, kprobe or BPF role (judge s160 finding 5). Page MP's first named call is a module's function,
+# a module callback: MP is renamed module_hook_<entry>, the Handler and Owner columns name the callback and Ctrl+E jumps
+# there. Page HP (a hidden module's hook code) calls _printk first: the Handler column says it is hook code and names that
+# call, Ctrl+E does not jump into _printk (it says why), HP keeps its label; the xref of that real call is still added.
+code = bytearray(b"\x90" * TEXT)
+MODCB, PRINTK, MP, HP = BASE + 0x1000, BASE + 0x1100, BASE + 0x2000, BASE + 0x2200
+put(MP - BASE + 0x40, call(MP + 0x40, MODCB))
+put(HP - BASE + 0x40, call(HP + 0x40, PRINTK))
+put(HP - BASE + 0x60, call(HP + 0x60, MODCB))
+put(0x000, b"\xf3\x0f\x1e\xfa" + call(BASE + 4, MP))                              # __x64_sys_kill: endbr64; call MP
+put(0x100, b"\x68" + struct.pack("<i", HP - (1 << 64)) + b"\xc3")                 # vfs_read: push HP; ret
+symbols = [("__x64_sys_kill", BASE, 0x100), ("vfs_read", BASE + 0x100, 0x100), ("evilmod.fh_sys_kill", MODCB, 0x100),
+           ("_printk", PRINTK, 0x100), ("linux_banner", BASE + TEXT, 0x20)]
+symbols += [("%s%x" % (ps.TARGET_PREFIX, page), page, 0) for page in (MP, HP)]
+blob = elf(code, symbols, b"Linux version 6.12\0".ljust(0x20, b"\0"))
+with tempfile.TemporaryDirectory() as work:
+    path = os.path.join(work, "kernel.elf")
+    with open(path, "wb") as handle:
+        handle.write(blob)
+    nalt.get_input_file_path = lambda: path
+    database(blob)
+    crefs, renames, out = run()
+    assert crefs == sorted([(BASE + 4, MP, CALL), (BASE + 0x105, HP, JUMP), (MP + 0x40, MODCB, CALL), (HP + 0x40, PRINTK, CALL)]), crefs
+    assert renames == [(MP, "module_hook___x64_sys_kill", RENAME)], renames
+    assert "4 code xrefs added; 1 hook pages renamed by role\n" in out, out
+    table = m._open_list
+    rows = [table.OnGetLine(n) for n in range(table.OnGetSize())]
+    lines = {line[1]: line for line in rows}
+    assert lines["__x64_sys_kill"][3:] == ["module_hook___x64_sys_kill", "evilmod.fh_sys_kill (module callback)",
+                                           "evilmod.fh_sys_kill (module callback)"], lines
+    assert lines["vfs_read"][3:] == ["memlens_target_%x" % HP, "(hook code; first call: _printk)", ""], lines
+    index = [line[1] for line in rows]
+    table.OnEditLine(index.index("__x64_sys_kill")); assert calls[-1] == ("jump", MODCB), calls[-1]
+    table.OnInsertLine(index.index("__x64_sys_kill")); assert calls[-1] == ("jump", MODCB), calls[-1]
+    del calls[:]
+    table.OnEditLine(index.index("vfs_read"))
+    assert calls[-1][0] == "msg" and "no handler is known for vfs_read (hook code; first call: _printk)" in calls[-1][1], calls
+    assert not [c for c in calls if c[0] == "jump"], calls
+    table.OnInsertLine(index.index("vfs_read")); assert calls[-1][0] == "msg" and "module callback" in calls[-1][1], calls[-1]
+    assert comments[MP].endswith("reached from __x64_sys_kill; first named call: evilmod.fh_sys_kill (module callback)"), comments[MP]
+    assert comments[HP].endswith("reached from vfs_read; first named call: _printk"), comments[HP]
+    nalt.get_input_file_path = lambda: ""
 print("hook chain stub test OK (hand-made ELFs; fake IDA modules)")
 
 for path in sys.argv[1:2]:

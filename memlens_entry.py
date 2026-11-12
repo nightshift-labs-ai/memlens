@@ -810,8 +810,9 @@ class ExportKernel(ida_kernwin.action_handler_t):
 
 class PatchList(ida_kernwin.Choose):
     """Patched entries and odd syscall slots. Enter jumps to the entry; Ctrl+E (the chooser's Edit command, captioned
-    "Jump to handler" in its context menu) jumps to the handler the hook page calls; Ins (the Insert command, captioned
-    "Jump to owner") jumps to the page's owner when it is in the database."""
+    "Jump to handler" in its context menu) jumps to the handler the hook page calls, when its role is known (not to the
+    first call of a page with no known role, a core-kernel helper); Ins (the Insert command, captioned "Jump to owner")
+    jumps to the page's owner when it is in the database."""
 
     def __init__(self, rows):
         columns = [["Address", 18 | ida_kernwin.Choose.CHCOL_HEX], ["Where", 34], ["What", 34], ["Target", 40], ["Handler", 36],
@@ -834,7 +835,11 @@ class PatchList(ida_kernwin.Choose):
 
     def OnEditLine(self, n):
         handler = self.rows[n][5]
-        if handler is None:
+        if handler is None and self.rows[n][4]:  # "(hook code; first call: _printk)": no known role
+            ida_kernwin.msg("[MemLens] no handler is known for %s %s: the first named call of a hook page with no known "
+                            "role goes to a kernel function the hook code uses, not to its handler\n"
+                            % (self.rows[n][1], self.rows[n][4]))
+        elif handler is None:
             ida_kernwin.msg("[MemLens] no handler is known for %s (only hook pages that MemLens copied have one)\n" % self.rows[n][1])
         else:
             ida_kernwin.jumpto(handler)
@@ -848,8 +853,8 @@ class PatchList(ida_kernwin.Choose):
         elif self.rows[n][6]:
             ida_kernwin.msg("[MemLens] the owner of %s is not in this database: %s\n" % (self.rows[n][1], self.rows[n][6]))
         else:
-            ida_kernwin.msg("[MemLens] no owner is known for %s (MemLens reads it from the BPF program a trampoline runs "
-                            "or the ftrace_ops an ftrace trampoline loads)\n" % self.rows[n][1])
+            ida_kernwin.msg("[MemLens] no owner is known for %s (MemLens reads it from the BPF program a trampoline runs, "
+                            "the ftrace_ops an ftrace trampoline loads, or the module callback a hook page calls)\n" % self.rows[n][1])
         return (ida_kernwin.Choose.NOTHING_CHANGED,)
 
 
@@ -937,12 +942,13 @@ def load_hook_record():
 
 def link_hooks(image, findings):
     """Apply the hook chain that patchscan decides: a user code xref from each hooking instruction to its target and
-    from each copied hook page's handler call to the handler, a role name for each such page (once, and only while it
-    still has the exporter's memlens_target_ label or no name but IDA's dummy one), and a comment there with the old
-    label. What was added is kept in the HOOK_RECORD netnode, so a second run adds no xref and renames nothing again,
-    and an xref or name the user removed since is not put back. The owner's references are added too: the call to a
-    BPF program, and for an ftrace trampoline user data xrefs (dr_O) from its ftrace_ops slot to the ops and from
-    ops->func to the callback; ops->func is read at the ISF's offset when Apply kernel types recorded one. Returns
+    from each copied hook page's first named call to that function, a role name for each such page whose role is known
+    (ftrace, kprobe via ftrace, BPF trampoline or module callback; once, and only while it still has the exporter's
+    memlens_target_ label or no name but IDA's dummy one), and a comment there with the old label. What was added is
+    kept in the HOOK_RECORD netnode, so a second run adds no xref and renames nothing again, and an xref or name the
+    user removed since is not put back. The owner's references are added too: the call to a BPF program, and for an
+    ftrace trampoline user data xrefs (dr_O) from its ftrace_ops slot to the ops and from ops->func to the callback;
+    ops->func is read at the ISF's offset when Apply kernel types recorded one. Returns
     (links, counts)."""
     func_offset = load_layout().get("ftrace_ops.func")
     if isinstance(func_offset, int):

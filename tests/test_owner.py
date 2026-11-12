@@ -54,7 +54,7 @@ HEAP_OPS, HIDDEN_OPS = 0xffff888003c41a00, 0xffffffffc0400000  # not in the ELF:
 ktext, kdata = bytearray(b"\xcc" * 0x2000), bytearray(0x1000)
 mtext, mdata = bytearray(b"\xcc" * 0x1000), bytearray(0x1000)
 hooks = bytearray(b"\x90" * 0x4000)
-FTRACE, ASSIST, KPROBE = KTEXT + 0x1000, KTEXT + 0x1100, KTEXT + 0x1200
+FTRACE, ASSIST, KPROBE, PRINTK = KTEXT + 0x1000, KTEXT + 0x1100, KTEXT + 0x1200, KTEXT + 0x1400
 GLOBAL_OPS, OTHER_OPS = KDATA + 0x100, KDATA + 0x200
 THUNK, KILL = MTEXT + 0x100, MTEXT + 0x200
 HOOK_ARRAY = MDATA + 0x40   # evilmod.hooks: struct ftrace_hook[], its ftrace_ops 0x20 into the first element
@@ -76,7 +76,7 @@ def trampoline(page, handler, ops, ret=b"\xc3\xcc\x00\x00\x00", load=0x74, call=
 
 PAGES = {name: HOOKS + 0x400 * index for index, name in enumerate(
     ("vfs_getattr", "__x64_sys_getdents64", "__x64_sys_kill", "__x64_sys_read", "__x64_sys_write", "far_load", "thunked",
-     "direct_cb", "plumbing_only", "retthunk", "sls", "offset8", "noret", "bare_ret"))}
+     "direct_cb", "plumbing_only", "retthunk", "sls", "offset8", "noret", "bare_ret", "printk_first"))}
 SLOTS = {}
 SLOTS["vfs_getattr"] = trampoline(PAGES["vfs_getattr"], FTRACE, GLOBAL_OPS)                        # tracefs function tracer
 SLOTS["__x64_sys_getdents64"] = trampoline(PAGES["__x64_sys_getdents64"], ASSIST, HOOK_ARRAY + 0x20)  # ftrace-hook rootkit
@@ -92,6 +92,9 @@ page = PAGES["direct_cb"]
 put(hooks, HOOKS, page + 0x40, rel32(page + 0x40, KILL))                                          # calls a module function, no ops
 page = PAGES["plumbing_only"]
 put(hooks, HOOKS, page + 0x40, rel32(page + 0x40, FTRACE))                                        # ftrace plumbing, no ops load
+page = PAGES["printk_first"]  # a hidden module's hook code: _printk first, then the module's function (judge s160 finding 5)
+put(hooks, HOOKS, page + 0x40, rel32(page + 0x40, PRINTK))
+put(hooks, HOOKS, page + 0x60, rel32(page + 0x60, KILL))
 SLOTS["retthunk"] = trampoline(PAGES["retthunk"], FTRACE, GLOBAL_OPS, ret=rel32(PAGES["retthunk"] + 0xd8, KTEXT + 0x1300, 0xE9))
 SLOTS["sls"] = trampoline(PAGES["sls"], FTRACE, GLOBAL_OPS, ret=b"\xc3\xcc")
 SLOTS["bare_ret"] = trampoline(PAGES["bare_ret"], FTRACE, GLOBAL_OPS, ret=b"\xc3")  # no RETPOLINE/SLS: RET_SIZE 1 (claims s165 N5)
@@ -106,7 +109,7 @@ for name, entry in ENTRIES.items():
     put(ktext, KTEXT, entry, b"\xf3\x0f\x1e\xfa" + rel32(entry + 4, PAGES[name]))
 symbols = [(name, entry, 0x40, FUNC) for name, entry in ENTRIES.items()]
 symbols += [("function_trace_call", FTRACE, 0x100, FUNC), ("ftrace_ops_assist_func", ASSIST, 0x100, FUNC),
-            ("kprobe_ftrace_handler", KPROBE, 0x100, FUNC), ("__x86_return_thunk", KTEXT + 0x1300, 0x10, FUNC),
+            ("kprobe_ftrace_handler", KPROBE, 0x100, FUNC), ("__x86_return_thunk", KTEXT + 0x1300, 0x10, FUNC), ("_printk", PRINTK, 0x80, FUNC),
             ("global_ops", GLOBAL_OPS, 0xd8, OBJECT), ("other_ops", OTHER_OPS, 0xd8, OBJECT), ("linux_banner", KDATA, 0x20, OBJECT),
             ("evilmod.fh_ftrace_thunk", THUNK, 0x80, FUNC), ("evilmod.fh_sys_kill", KILL, 0x80, FUNC),
             ("evilmod.hooks", HOOK_ARRAY, 0xc0, OBJECT)]
@@ -132,15 +135,20 @@ assert owners["__x64_sys_write"].text == "evilmod.fh_sys_kill (ftrace_ops evilmo
 assert owners["__x64_sys_kill"] == ps.Owner("ftrace_ops at 0xffff888003c41a00 (no symbol: heap)", None, "ftrace_ops", []), owners
 assert owners["__x64_sys_read"] == ps.Owner("ftrace_ops at 0xffffffffc0400000 (no symbol: module memory MemLens did not export)",
                                             None, "ftrace_ops", []), owners["__x64_sys_read"]
-# A rip-relative load that is not the trampoline's slot (no ret right before it) is not an ftrace_ops; the page calls a
-# module function, so that first named call is the owner, marked as such.
-assert owners["far_load"] == ps.Owner("evilmod.fh_sys_kill (first named call)", KILL, "first named call", []), owners["far_load"]
-assert owners["direct_cb"] == ps.Owner("evilmod.fh_sys_kill (first named call)", KILL, "first named call", []), owners["direct_cb"]
+# A rip-relative load that is not the trampoline's slot (no ret right before it) is not an ftrace_ops; the page's first
+# named call is a module function, a module callback (judge s160 finding 5): the handler, and the owner under the same label.
+assert owners["far_load"] == ps.Owner("evilmod.fh_sys_kill (module callback)", KILL, "module callback", []), owners["far_load"]
+assert owners["direct_cb"] == ps.Owner("evilmod.fh_sys_kill (module callback)", KILL, "module callback", []), owners["direct_cb"]
+assert {name: links[name].kind for name in ("far_load", "direct_cb", "thunked")} == dict.fromkeys(
+    ("far_load", "direct_cb", "thunked"), "module callback"), links
 # An ops without the RECURSION flag: the trampoline calls the callback itself; the ops still names it.
+# The page is then a module callback (its first named call), and its owner still comes from the ftrace_ops.
 assert owners["thunked"].text == "evilmod.fh_ftrace_thunk (ftrace_ops evilmod.hooks+0x20)" and owners["thunked"].how == "ftrace_ops"
 # Known plumbing and no ops: no owner (the Handler column already shows the plumbing).
 assert owners["plumbing_only"] is None, owners["plumbing_only"]
 assert owners["noret"] is None, owners["noret"]  # a pointer in the page but no ret before it: not the ops slot
+# A first named call into the core kernel (_printk) is a helper the hook code uses: no kind, no owner (review s166 M1).
+assert (links["printk_first"].handler_name, links["printk_first"].kind, owners["printk_first"]) == ("_printk", None, None), links
 # The ret before the slot may be a jmp to the return thunk (RET_SIZE 5) or ret; int3 (SLS).
 assert owners["retthunk"].text == owners["sls"].text == owners["bare_ret"].text == "function_trace_call (ftrace_ops global_ops)", (
     owners["retthunk"], owners["sls"], owners["bare_ret"])
@@ -163,10 +171,22 @@ rows = {row[1]: row for row in ps.list_rows(image, findings, list(links.values()
 assert rows["__x64_sys_getdents64"][4:] == ("ftrace_ops_assist_func (ftrace)", ASSIST,
                                             "evilmod.fh_ftrace_thunk (ftrace_ops evilmod.hooks+0x20)", THUNK), rows["__x64_sys_getdents64"]
 assert rows["__x64_sys_kill"][6:] == ("ftrace_ops at 0xffff888003c41a00 (no symbol: heap)", None), rows["__x64_sys_kill"]
-assert rows["direct_cb"][6:] == ("evilmod.fh_sys_kill (first named call)", KILL) and rows["plumbing_only"][6:] == ("", None), rows
+assert rows["direct_cb"][4:] == ("evilmod.fh_sys_kill (module callback)", KILL, "evilmod.fh_sys_kill (module callback)", KILL), rows
+assert rows["plumbing_only"][6:] == ("", None), rows
+# No known role: the Handler column says it is hook code and names the first call, with no handler address to jump to.
+assert rows["printk_first"][4:] == ("(hook code; first call: _printk)", None, "", None), rows["printk_first"]
+assert rows["thunked"][4:] == ("evilmod.fh_ftrace_thunk (module callback)", THUNK,
+                               "evilmod.fh_ftrace_thunk (ftrace_ops evilmod.hooks+0x20)", THUNK), rows["thunked"]
+# Role names: the ftrace trampolines by their entry, and the module callback pages as module_hook_<entry>.
+names = ps.role_names(image, list(links.values()))
+assert {name: names.get(page) for name, page in PAGES.items() if name.startswith(("d", "f", "t", "p"))} == {
+    "direct_cb": "module_hook_direct_cb", "far_load": "module_hook_far_load", "thunked": "module_hook_thunked",
+    "plumbing_only": "ftrace_tramp_plumbing_only", "printk_first": None}, names
+assert names[PAGES["__x64_sys_getdents64"]] == "ftrace_tramp___x64_sys_getdents64", names
 comments = ps.page_comments(list(links.values()))
 assert comments[PAGES["__x64_sys_getdents64"]].endswith(
     "first named call: ftrace_ops_assist_func (ftrace); owner: evilmod.fh_ftrace_thunk (ftrace_ops evilmod.hooks+0x20)"), comments
+assert comments[PAGES["direct_cb"]].endswith("first named call: evilmod.fh_sys_kill (module callback)"), comments[PAGES["direct_cb"]]
 assert "owner" not in comments[PAGES["direct_cb"]] and "owner" not in comments[PAGES["plumbing_only"]], comments
 xrefs = ps.hook_xrefs(list(links.values()))
 assert len(xrefs) == len(set(xrefs)) and xrefs.count((HOOK_ARRAY + 0x20, THUNK, "data")) == 1, xrefs  # two pages share that ops

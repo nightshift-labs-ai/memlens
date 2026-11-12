@@ -113,6 +113,7 @@ def describe(image, address):
 HANDLER_KINDS = (("function_trace_call", "ftrace"), ("ftrace_ops_list_func", "ftrace"), ("ftrace_ops_assist_func", "ftrace"),
                  ("kprobe_ftrace_handler", "kprobe via ftrace"), ("__bpf_prog_enter", "BPF trampoline"),
                  ("__bpf_tramp_enter", "BPF trampoline"), ("arch_ftrace_ops_list_func", "ftrace"))
+MODULE_CALLBACK = "module callback"  # the kind of a page whose first named call is a module's function (module.symbol)
 
 
 def page_code(image, page, span=0x200):
@@ -165,8 +166,11 @@ def first_handler(image, page, span=0x200):
 
 
 def handler_kind(handler):
-    """'ftrace', 'kprobe via ftrace' or 'BPF trampoline' from the handler's name, or None."""
-    return next((kind for prefix, kind in HANDLER_KINDS if handler.startswith(prefix)), None)
+    """'ftrace', 'kprobe via ftrace' or 'BPF trampoline' from the handler's name, 'module callback' for a module's
+    function (module.symbol, into_module), or None: a core-kernel function that is not ftrace, kprobe or BPF plumbing
+    (_printk, kfree, a retpoline thunk) is a helper the hook code uses, not a handler (judge s160 finding 5)."""
+    kind = next((kind for prefix, kind in HANDLER_KINDS if handler.startswith(prefix)), None)
+    return kind or (MODULE_CALLBACK if into_module("", handler) else None)
 
 
 def hook_label(image, target):
@@ -380,20 +384,23 @@ def scan(blob, image=None):
 # The hook chain: patched entry -> hook page -> handler. These functions decide what the IDA layer links and renames,
 # so they can be tested without IDA; memlens_entry only applies their result.
 
-# Role names for copied hook pages, by the kind of handler they call (HANDLER_KINDS). The exporter labels such a page
-# memlens_target_<address>; MemLens in IDA renames it, for example to ftrace_tramp_vfs_getattr, and keeps the old
-# label in a comment there.
-ROLE_PREFIXES = {"ftrace": "ftrace_tramp", "kprobe via ftrace": "kprobe_ftrace_tramp", "BPF trampoline": "bpf_tramp"}
+# Role names for copied hook pages, by the kind of handler they call (handler_kind). The exporter labels such a page
+# memlens_target_<address>; MemLens in IDA renames it, for example to ftrace_tramp_vfs_getattr or, when its first named
+# call is a module's function, module_hook___x64_sys_kill, and keeps the old label in a comment there.
+ROLE_PREFIXES = {"ftrace": "ftrace_tramp", "kprobe via ftrace": "kprobe_ftrace_tramp", "BPF trampoline": "bpf_tramp",
+                 MODULE_CALLBACK: "module_hook"}
 LONGEST_ROLE_NAME = 200  # longer than any kernel name we have seen; a longer one falls back to the address form
 
 
-# One patched function entry and where it leads. handler_site, handler, handler_name and kind are None when the target is
-# not a copied hook page or no named call was found in it; owner (an Owner) is None when page_owner found none.
+# One patched function entry and where it leads. handler_site, handler and handler_name are the copied hook page's first
+# named call, None when the target is not a copied hook page or no named call was found in it; kind is handler_kind's,
+# None also when that call goes into the core kernel and is no handler (_printk); owner (an Owner) is None when
+# page_owner found none.
 Link = collections.namedtuple("Link", "entry function site flow target page handler_site handler handler_name kind owner",
                               defaults=(None,))
 
 # Who put a hook page there, as far as the ELF tells: text for the list, the owner's address when it is in the ELF (else
-# None), how it was found ("ftrace_ops", "BPF program" or "first named call") and the references that lead there, as
+# None), how it was found ("ftrace_ops", "BPF program" or "module callback") and the references that lead there, as
 # (from, to, "data") for a pointer in memory and (from, to, "call") for a call instruction.
 Owner = collections.namedtuple("Owner", "text address how refs")
 
@@ -518,12 +525,12 @@ def bpf_owner(image, page, span=0x1000):
 
 def page_owner(image, page, handler_site, handler, handler_name, kind):
     """The Owner of a copied hook page: the program(s) a BPF trampoline runs, ftrace_ops->func for an ftrace trampoline;
-    else, when the page's first named call is a module's function with no known role, that call; else None (known
-    plumbing, or a first call into the core kernel: on a hidden module's page that is _printk or a retpoline thunk,
-    not the hook's owner; review s166 M1)."""
+    else, when the page is a module callback (its first named call is a module's function), that callback, under the
+    Handler column's label; else None (known plumbing, or a first call into the core kernel: on a hidden module's page
+    that is _printk or a retpoline thunk, not the hook's owner; review s166 M1)."""
     owner = bpf_owner(image, page) if kind == "BPF trampoline" else ftrace_owner(image, page)
-    if owner is None and handler_name and kind is None and into_module("", handler_name):
-        owner = Owner("%s (first named call)" % handler_name, handler, "first named call", [])
+    if owner is None and kind == MODULE_CALLBACK:
+        owner = Owner("%s (%s)" % (handler_name, MODULE_CALLBACK), handler, MODULE_CALLBACK, [])
     return owner
 
 
@@ -591,9 +598,12 @@ def copied_targets(image, findings):
 
 def hook_xrefs(links):
     """(from, to, 'call', 'jmp' or 'data') cross-references for the links, sorted and without repeats: each transfer
-    instruction to its target, each copied page's handler call to the handler (once, however many entries share the
-    page), and the references that lead to each page's owner (Owner.refs: a BPF program's call; for an ftrace
-    trampoline the data references slot -> ftrace_ops -> callback), where they are in the ELF."""
+    instruction to its target, each copied page's first named call to that function (once, however many entries share
+    the page), and the references that lead to each page's owner (Owner.refs: a BPF program's call; for an ftrace
+    trampoline the data references slot -> ftrace_ops -> callback), where they are in the ELF.
+
+    The first named call is linked also on a page with no known role (kind None, a call to _printk say): the xref only
+    repeats a real call instruction, so it claims no role; the list does not offer that function as the handler."""
     xrefs = set()
     for link in links:
         xrefs.add((link.site, link.target, link.flow))
@@ -615,7 +625,8 @@ def ida_safe(text):
 
 
 def role_names(image, links):
-    """{page address: new name} for copied hook pages whose handler has a known role (ROLE_PREFIXES).
+    """{page address: new name} for copied hook pages whose handler has a known role (ROLE_PREFIXES): ftrace, kprobe via
+    ftrace, BPF trampoline, or a module callback (the page's first named call is a module's function: module_hook_).
 
     A page that exactly one patched entry leads to is named after that function (ftrace_tramp_vfs_getattr); a page
     that several entries share, like one ftrace trampoline serving many functions, by role and address
@@ -658,22 +669,29 @@ def page_comments(links):
             TARGET_PREFIX, page, ", ".join(callers[:5]) + (" and %d more" % (len(callers) - 5) if len(callers) > 5 else ""))
         if link.handler_name:
             text += "; first named call: %s%s" % (link.handler_name, " (%s)" % link.kind if link.kind else "")
-        if link.owner is not None and link.owner.how != "first named call":  # that one is in the comment already
+        if link.owner is not None and link.owner.how != MODULE_CALLBACK:  # that one is in the comment already
             text += "; owner: %s" % link.owner.text
         comments[page] = text
     return comments
 
 
 def handler_text(link):
-    """The Handler column for a link: 'function_trace_call (ftrace)', or '' when no handler is known."""
+    """The Handler column for a link: 'function_trace_call (ftrace)', 'evilmod.fh_sys_kill (module callback)', or '' when
+    the page has no named call. On a page with no known role the first named call goes into the core kernel (_printk,
+    kfree, a retpoline thunk): a helper the hook code uses, so it is not shown as the handler but as
+    '(hook code; first call: _printk)'."""
     if link is None or link.handler_name is None:
         return ""
-    return link.handler_name + (" (%s)" % link.kind if link.kind else "")
+    if link.kind is None:
+        return "(hook code; first call: %s)" % link.handler_name
+    return "%s (%s)" % (link.handler_name, link.kind)
 
 
 def list_rows(image, findings, links, names):
     """Rows of the IDA list: (address, function, what, target, handler, handler address or None, owner, owner address or
-    None); the owner is page_owner's text, '' when none is known, and its address None when it is not in the ELF.
+    None); the handler is handler_text, its address None when no handler is known (also on a page with no known role,
+    whose first named call is not a handler: Jump to handler must not go there); the owner is page_owner's text, ''
+    when none is known, and its address None when it is not in the ELF.
 
     names maps a hook page to the name the database gives it now (after renaming). For an entry linked to a copied hook
     page the target is that name, else the ELF's name for it (any other link keeps the scan's label); the handler has its own column. A syscall slot is never linked, but when it points
@@ -692,7 +710,7 @@ def list_rows(image, findings, links, names):
             continue
         shown = (names.get(link.target) or describe(image, link.target)) if link.page else label
         owner = link.owner if link.page else None
-        rows.append((address, function, what, shown, handler_text(link), link.handler,
+        rows.append((address, function, what, shown, handler_text(link), link.handler if link.kind else None,
                      owner.text if owner else "", owner.address if owner else None))
     return rows
 

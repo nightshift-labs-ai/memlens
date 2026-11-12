@@ -319,7 +319,15 @@ def export_failure_text(stdout, stderr, isf_given):
     Volatility prints its own explanation of a missing symbol table on stdout, not stderr."""
     out, err = stdout.decode("utf-8", "replace"), stderr.decode("utf-8", "replace")
     lines = ["Volatility failed."]
-    if "symbol_table_name" in err or "symbol table requirement" in out:
+    if "invalid choice" in out + err and "kernel2elf" in out + err:
+        # The exporter was not loaded, so argparse lists every other plugin. Usually an older Volatility whose Linux
+        # module API the exporter cannot import (seen with 2.11.0).
+        version = re.search(r"Volatility 3 Framework ([0-9][0-9.]*)", out + err)
+        lines.append("This Volatility%s could not load MemLens' exporter (linux.kernel2elf), usually because it is older "
+                     "than the Linux module API the exporter uses. MemLens is tested with Volatility 2.28.2: "
+                     "pipx install volatility3==2.28.2 (or a venv, see the README), then make sure IDA finds that vol "
+                     "first on PATH." % (" (%s)" % version.group(1).rstrip(".") if version else ""))
+    elif "symbol_table_name" in err or "symbol table requirement" in out:
         if isf_given:
             lines.append("It found no symbols matching this image's kernel: the ISF you chose was probably built for another "
                          "kernel (its linux_banner must match the image's).")

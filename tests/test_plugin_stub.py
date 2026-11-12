@@ -194,6 +194,15 @@ with tempfile.TemporaryDirectory() as t:
     assert "built for another kernel" in ftext and "fresh pip install" not in ftext, ftext
     ftext = m.export_failure_text(b"", b"Traceback ... OSError: disk full", True)
     assert "no symbols" not in ftext and "disk full" in ftext, ftext
+    # An old Volatility (seen with 2.11.0) cannot load the exporter: argparse says "invalid choice" and lists the rest.
+    old_out = b"Volatility 3 Framework 2.11.0\n"
+    old_err = (b"usage: vol [-h] ... plugin ...\nvol: error: argument plugin: invalid choice linux.kernel2elf.Kernel2Elf "
+               b"(choose from banners.Banners, ..., windows.registry.hivescan.HiveScan)\n")
+    ftext = m.export_failure_text(old_out, old_err, True)
+    assert "This Volatility (2.11.0) could not load MemLens' exporter" in ftext and "volatility3==2.28.2" in ftext, ftext
+    assert "built for another kernel" not in ftext, ftext
+    ftext = m.export_failure_text(b"", old_err, False)
+    assert "This Volatility could not load" in ftext and "fresh pip install" not in ftext, ftext
     table = m.PatchList([(0x10, "fn", "what", "tgt", 0x20)])
     assert table.OnGetSize() == 1 and table.OnGetLine(0) == ["10", "fn", "what", "tgt"]
     assert table.OnSelectLine(0) == (0,) and ("jump", 0x10) in calls

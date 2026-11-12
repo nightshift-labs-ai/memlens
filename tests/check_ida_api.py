@@ -59,6 +59,9 @@ def known_api(idapython):
 def main():
     with open(os.path.join(ROOT, "memlens_entry.py")) as handle:
         tree = ast.parse(handle.read())
+    if len(sys.argv) != 2 or not os.path.isdir(sys.argv[1]):
+        sys.exit("usage: python3 tests/check_ida_api.py <ida-sdk>/src/plugins/idapython\n"
+                 "(a checkout of https://github.com/HexRaysSA/ida-sdk; only that folder is read)")
     known = known_api(sys.argv[1])
     used = used_names(tree)
     # Methods called on instances of IDA classes, which the module walk above cannot see.

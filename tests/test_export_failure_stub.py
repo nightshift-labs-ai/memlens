@@ -371,10 +371,10 @@ finally:
 assert flags == [0x08000000] and (code, out.strip()) == (0, b"157"), (flags, code, out)
 
 # The real demo ISF, when present, carries exactly the line the recorded scan of trace.elf put first.
-demo_isf = os.environ.get("MEMLENS_ISF", "/home/agent/tools/memlens-demo/x/debian-6.12.115+deb13.1-amd64.json.xz")
-if os.path.isfile(demo_isf):
+demo_isf = os.environ.get("MEMLENS_ISF", "")  # the demo zip's debian-6.12.115+deb13.1-amd64.json.xz
+if demo_isf and os.path.isfile(demo_isf):
     assert m.isf_banner(demo_isf) == (D13_LINE, base64.b64decode(D13), None), m.isf_banner(demo_isf)
     print("demo ISF %s: its linux_banner is the recorded image's first line" % demo_isf)
 else:
-    print("SKIP: demo ISF not found (set MEMLENS_ISF)")
+    print("SKIP: demo ISF check (set MEMLENS_ISF to the demo zip's debian-6.12.115+deb13.1-amd64.json.xz)")
 print("export failure stub test OK (fake IDA modules, recorded Volatility 2.28.2 output)")

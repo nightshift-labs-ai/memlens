@@ -246,10 +246,10 @@ python3 patchscan.py [--links] [--isf <isf.json.xz>] kernel.elf
 
 ### Headless, with idalib
 
-IDA 9.0 or newer; set up the `idapro` module as Hex-Rays describes:
+IDA 9.0 or newer; set up the `idapro` module as Hex-Rays describes. After `hcli plugin install memlens` the script is in the plugin's folder, `$IDAUSR/plugins/memlens` (by default `~/.idapro/plugins/memlens` on Linux and macOS, `%APPDATA%\Hex-Rays\IDA Pro\plugins\memlens` on Windows):
 
 ```
-python3 tools/memlens_headless.py kernel.elf <isf.json.xz> [--no-analysis] [--any-kernel]
+python3 ~/.idapro/plugins/memlens/tools/memlens_headless.py kernel.elf <isf.json.xz> [--no-analysis] [--any-kernel]
 ```
 
 It opens `kernel.elf` as a database, applies the types (the per-CPU copies too), comments every patched entry, links the hook chain as the menu action does, prints the same report and patch list and saves the database. It calls the plugin's own functions; like the rest of the IDA layer it has only been run against fake modules (`tests/test_headless_stub.py`), not a real idalib.

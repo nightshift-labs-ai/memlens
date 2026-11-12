@@ -8,11 +8,11 @@ A memory image holds the live kernel: its modules and its patched code. MemLens 
 - **Every kernel type**: all structs, unions and enums from a Volatility 3 ISF, generated as one C header with exact layouts.
 - **Typed globals**: kernel data symbols get their real type, so `init_task` becomes a `struct task_struct` (the declarations compile with gcc; applying them in IDA is part of the untested layer).
 - **Per-CPU variables, one copy per CPU**: the kernel keeps a private copy of variables such as `runqueues` and the current task for every CPU. `kernel.elf` holds each CPU's live copy as section `.percpu.cpu<N>` (`.percpu.cpu<N>.0`, `.1`, ... if part of that area is missing from the image; a CPU whose area is missing entirely is left out), with symbols `cpu<N>.<name>` (`cpu0.runqueues`, `cpu1.pcpu_hot`, ...), and **Apply kernel types** types every copy. In the demo, `cpu0.pcpu_hot` (Linux 6.12; `cpu0.current_task` on 6.1 and 7.0) points to `init_task`, CPU 0's idle task, each CPU's `this_cpu_off` holds that CPU's own offset, and `cpu0.fixed_percpu_data` holds the stack canary. These areas sit below the kernel image, so Ghidra shows the lowest per-CPU address as the image base; IDA may do the same (not tried). `--no-percpu` on the command line writes the old layout, byte for byte.
-- **A list of patched kernel functions**: named functions whose entry (or the instruction after `endbr64` or the NOP the kernel seals it with) was rewritten to a 5-byte `call`/`jmp` (ftrace and BPF trampolines, ftrace-based kprobes, calls into unmapped memory or from the kernel into a module) or to an `int3` breakpoint, or to an absolute-address hook (`jmp [rip+0]` + address, `movabs` + `jmp`/`call reg`, `push imm32; ret`; these also after the ftrace NOP), a `call`/`jmp` after the ftrace NOP or through a pointer in memory (`[rip+disp32]`) that lands in memory with no symbol or goes from the kernel into a module, plus syscall table slots that leave the handlers. Patches deeper inside a function are not found, and functions without a symbol are not checked. Enter should jump to the function. Hook code in memory that belongs to no module is copied into the ELF, so you can read it, and the list names the handler each copied hook page calls (ftrace, kprobe via ftrace, BPF trampoline).
+- **A list of patched kernel functions**: named functions whose entry (or the instruction after `endbr64` or the NOP the kernel seals it with) was rewritten to a 5-byte `call`/`jmp` (ftrace and BPF trampolines, ftrace-based kprobes, calls into unmapped memory or from the kernel into a module) or to an `int3` breakpoint, or to an absolute-address hook (`jmp [rip+0]` + address, `movabs` + `jmp`/`call reg`, `push imm32; ret`; these also after the ftrace NOP), a `call`/`jmp` after the ftrace NOP or through a pointer in memory (`[rip+disp32]`) that lands in memory with no symbol or goes from the kernel into a module, plus syscall table slots that leave the handlers. Patches deeper inside a function are not found, and functions without a symbol are not checked. Enter should jump to the function. Hook code in memory that belongs to no module is copied into the ELF, so you can read it, and the list names the handler each copied hook page calls (ftrace, kprobe via ftrace, BPF trampoline). In IDA, MemLens also links the hook chain: a code cross-reference from each hooked entry to its hook page and from the page to its handler, a name for each copied hook page by its role (`ftrace_tramp_vfs_getattr`), a Handler column in the list and Ctrl+E to jump to the handler (written against the IDAPython API, checked with fake IDA modules only).
 
 ## Status: read this first
 
-**MemLens has not yet been run inside real IDA.** It was built without access to an IDA installation. What was verified, and how, is listed below: the ELF and the type header are checked with independent tools, including a real disassembler (Ghidra), but that is not IDA. The IDA-specific layer (`memlens_entry.py`) is small and was written against the official IDAPython sources, but it has only been exercised with fake `ida_*` modules; its 40 `ida_*` / `idc` names also exist in the stubs of IDA 9.1, 9.2, 9.3 and 9.4 (`tests/check_ida_names.py` on the PyPI `idapro` packages 0.0.5, 0.0.7, 0.0.9 and 0.0.11). Bug reports are very welcome.
+**MemLens has not yet been run inside real IDA.** It was built without access to an IDA installation. What was verified, and how, is listed below: the ELF and the type header are checked with independent tools, including a real disassembler (Ghidra), but that is not IDA. The IDA-specific layer (`memlens_entry.py`) is small and was written against the official IDAPython sources, but it has only been exercised with fake `ida_*` modules; its 50 `ida_*` / `idc` names also exist in the stubs of IDA 9.1, 9.2, 9.3 and 9.4 (`tests/check_ida_names.py` on the PyPI `idapro` packages 0.0.5, 0.0.7, 0.0.9 and 0.0.11). Bug reports are very welcome.
 
 
 MemLens was built by an AI agent (Claude, operated by Nightshift Labs).
@@ -34,7 +34,7 @@ No memory image or Volatility needed for steps 1-3. Download `memlens-demo-debia
 
 1. Unzip it, then open `kernel.elf` in IDA.
 2. **MemLens: Apply kernel types from ISF** and pick the `.json.xz` file.
-3. **MemLens: Show patched kernel functions**. The lab VM's script set an ftrace filter on `vfs_getattr` and a kprobe on `do_sys_openat2`; a third patched entry, `bpf_lsm_file_open`, was not set by the script: its hook page calls `__bpf_tramp_enter`, so it is a BPF trampoline that something else in the VM attached (what, was not investigated). All three should be listed as `call to memory with no symbol` (each entry calls a trampoline page that no module owns, copied in as `memlens_target_<address>`), and each label names the handler that page calls: `function_trace_call` (ftrace), `kprobe_ftrace_handler` (kprobe via ftrace) and `__bpf_tramp_enter` (a BPF trampoline), as in `expected-patched-functions.txt`. Enter should jump to the function.
+3. **MemLens: Show patched kernel functions**. The lab VM's script set an ftrace filter on `vfs_getattr` and a kprobe on `do_sys_openat2`; a third patched entry, `bpf_lsm_file_open`, was not set by the script: its hook page calls `__bpf_tramp_enter`, so it is a BPF trampoline that something else in the VM attached (what, was not investigated). All three should be listed as `call to memory with no symbol` (each entry calls a trampoline page that no module owns, copied in as `memlens_target_<address>`), and each label names the handler that page calls: `function_trace_call` (ftrace), `kprobe_ftrace_handler` (kprobe via ftrace) and `__bpf_tramp_enter` (a BPF trampoline), as in `expected-patched-functions.txt`. In the list, the Target column should show each hook page under its new name (`ftrace_tramp_vfs_getattr`, `kprobe_ftrace_tramp_do_sys_openat2`, `bpf_tramp_bpf_lsm_file_open`) and the Handler column the function it calls. Enter should jump to the function, Ctrl+E to the handler.
 
 ### Export it yourself
 
@@ -95,6 +95,42 @@ ffffffffc0b2d0d9:  call   ffffffff8e294ed0 <kprobe_ftrace_handler>
 
 So the `vfs_getattr` page is an ftrace trampoline and the `do_sys_openat2` page leads to the kprobe handler, readable at their live addresses.
 
+The hook chain that **Show patched kernel functions** adds to the IDA database, as `python3 patchscan.py --links kernel.elf` prints it for the demo after the rows above (tab-separated, aligned here). The decisions are made in `patchscan.py`, so this is the same code the plugin runs:
+
+```
+xref    0xffffffff8e4f9254  0xffffffffc0004940  call  bpf_lsm_file_open+0x4 -> memlens_target_ffffffffc0004940
+xref    0xffffffff8e642210  0xffffffffc0b2d000  call  do_sys_openat2 -> memlens_target_ffffffffc0b2d000
+xref    0xffffffff8e64e374  0xffffffffc0b2b000  call  vfs_getattr+0x4 -> memlens_target_ffffffffc0b2b000
+xref    0xffffffffc0004963  0xffffffff8e4cea70  call  memlens_target_ffffffffc0004940+0x23 -> __bpf_tramp_enter
+xref    0xffffffffc0b2b094  0xffffffff8e434a40  call  memlens_target_ffffffffc0b2b000+0x94 -> function_trace_call
+xref    0xffffffffc0b2d0d9  0xffffffff8e294ed0  call  memlens_target_ffffffffc0b2d000+0xd9 -> kprobe_ftrace_handler
+rename  0xffffffffc0004940  memlens_target_ffffffffc0004940  bpf_tramp_bpf_lsm_file_open
+rename  0xffffffffc0b2b000  memlens_target_ffffffffc0b2b000  ftrace_tramp_vfs_getattr
+rename  0xffffffffc0b2d000  memlens_target_ffffffffc0b2d000  kprobe_ftrace_tramp_do_sys_openat2
+```
+
+Each `xref` line becomes a code cross-reference (`ida_xref.add_cref` with `fl_CN` for a call, `fl_JN` for a jump, marked `XREF_USER`, which IDA's reanalysis does not delete), from the hooking instruction to the hook page and from the page's first named call to that function; each `rename` line renames the page, and a comment there keeps the exporter's label: `MemLens: hook page no module owns, copied from memory (exporter label memlens_target_ffffffffc0b2b000); reached from vfs_getattr; first named call: function_trace_call (ftrace)`. These three hooks are `call rel32`, so IDA's own analysis should find the same calls; the user xrefs matter most for absolute hooks (`movabs` + `jmp reg`, `push imm32; ret`, `jmp [rip+0]`), whose target IDA cannot see. The handler is the first named function the page calls: for a BPF trampoline that is `__bpf_tramp_enter`, not the BPF program, which the trampoline calls later (in the demo at `0xffffffffc0004664`, inside the same copied pages, with no symbol).
+
+The list before and after, as the plugin code builds it for the demo (run with fake IDA modules by `tests/test_hookchain_stub.py`, not in IDA; columns separated by `|` and aligned here). Before this change:
+
+```
+Address          | Where             | What                          | Target
+FFFFFFFF8E4F9250 | bpf_lsm_file_open | call to memory with no symbol | memlens_target_ffffffffc0004940 (calls __bpf_tramp_enter, BPF trampoline)
+FFFFFFFF8E642210 | do_sys_openat2    | call to memory with no symbol | memlens_target_ffffffffc0b2d000 (calls kprobe_ftrace_handler, kprobe via ftrace)
+FFFFFFFF8E64E370 | vfs_getattr       | call to memory with no symbol | memlens_target_ffffffffc0b2b000 (calls function_trace_call, ftrace)
+```
+
+After:
+
+```
+Address          | Where             | What                          | Target                             | Handler
+FFFFFFFF8E4F9250 | bpf_lsm_file_open | call to memory with no symbol | bpf_tramp_bpf_lsm_file_open        | __bpf_tramp_enter (BPF trampoline)
+FFFFFFFF8E642210 | do_sys_openat2    | call to memory with no symbol | kprobe_ftrace_tramp_do_sys_openat2 | kprobe_ftrace_handler (kprobe via ftrace)
+FFFFFFFF8E64E370 | vfs_getattr       | call to memory with no symbol | ftrace_tramp_vfs_getattr           | function_trace_call (ftrace)
+```
+
+The Output window line from the same run: `[MemLens] hook chain: 3 patched entries lead into this database, 3 to a hook page MemLens copied; 6 code xrefs added; 3 hook pages renamed by role`. Run a second time, it made no `add_cref` and no `set_name` call. The Debian 13 hooks capture (the same three hooks at other KASLR addresses) gives the same counts and names; on an Ubuntu 24.04 capture `patchscan.py --links` gives 1 entry, 2 xrefs and `bpf_tramp___hid_bpf_tail_call`. None of our captures has a hook page that several functions share (one ftrace trampoline for many filters); MemLens then names the page by role and address (`ftrace_tramp_<address>`), which is tested on hand-made ELFs only.
+
 Types, an excerpt of the header the plugin imports (`python3 isf2c.py debian-6.12.115+deb13.1-amd64.json.xz kernel_types.h`), with explicit padding so every offset matches the ISF:
 
 ```c
@@ -118,7 +154,7 @@ In IDA, with any database open (plugin menu entries need one), under **Edit > Pl
 1. **MemLens: Export kernel from memory image**: choose the image. `kernel.elf` is written next to it (`kernel-1.elf` if one is already there; the message names the file). MemLens asks for the ISF and hands it to Volatility (Cancel uses Volatility's own symbols path, which has no Linux ISFs after a plain pip install; the error dialog then says so).
 2. Open `kernel.elf` in IDA.
 3. **MemLens: Apply kernel types from ISF**: choose the ISF. If its kernel banner differs from the one in the database, MemLens asks before importing anything. The Output window then says how many types IDA rejected, how many are missing and how many differ in size from the ISF.
-4. **MemLens: Show patched kernel functions**: opens the list and adds a comment at each entry.
+4. **MemLens: Show patched kernel functions**: opens the list, adds a comment at each entry and links the hook chain: a code cross-reference from each hooked entry to its hook page and from the page to its handler, and a name by role for each copied hook page (`ftrace_tramp_`, `kprobe_ftrace_tramp_` or `bpf_tramp_` plus the function, or plus the page's address when several functions share it). It renames a page only while it still has its `memlens_target_<address>` label or no real name, so a name you gave it is kept; the old label stays in a comment at the page. What it added is recorded in the database (netnode `$ memlens.hooks`), so running it again adds nothing twice. Enter jumps to the entry; the list's Edit command, captioned **Jump to handler** in its context menu (Ctrl+E, IDA's default key for a list's Edit), jumps to the handler. Not yet tried in IDA.
 
 ### An ISF for your own image
 
@@ -133,8 +169,10 @@ The ISF must come from exactly the kernel that was running when the image was ta
 ```
 vol -p vol_plugins -s <symbols> -o <outdir> -f <image> linux.kernel2elf.Kernel2Elf [--no-percpu] [--no-modules]
 python3 isf2c.py <isf.json.xz> kernel_types.h
-python3 patchscan.py kernel.elf
+python3 patchscan.py [--links] kernel.elf
 ```
+
+`--links` also prints the cross-references and hook page names that **Show patched kernel functions** adds in IDA.
 
 ### Headless, with idalib
 
@@ -144,7 +182,7 @@ IDA 9.0 or newer; set up the `idapro` module as Hex-Rays describes:
 python3 tools/memlens_headless.py kernel.elf <isf.json.xz> [--no-analysis] [--any-kernel]
 ```
 
-It opens `kernel.elf` as a database, applies the types (the per-CPU copies too), comments every patched entry, prints the same report and patch list as the menu actions and saves the database. It calls the plugin's own functions; like the rest of the IDA layer it has only been run against fake modules (`tests/test_headless_stub.py`), not a real idalib.
+It opens `kernel.elf` as a database, applies the types (the per-CPU copies too), comments every patched entry, links the hook chain as the menu action does, prints the same report and patch list and saves the database. It calls the plugin's own functions; like the rest of the IDA layer it has only been run against fake modules (`tests/test_headless_stub.py`), not a real idalib.
 
 ## What was verified
 
@@ -183,7 +221,7 @@ Ghidra's C parser was run over the same header (`tests/ghidra/MemLensCheck.java`
 
 Neither gcc nor Ghidra accepting the header proves IDA's parser will; that is part of the untested layer. If IDA rejects a declaration, MemLens is written to bisect its batches, keep the rest, and report the rejected ones in the Output window; that relies on IDA ignoring a redeclaration when a batch is parsed again, which we have not been able to observe in IDA.
 
-The patch scan is tested without IDA: `python3 tests/test_patchscan.py` builds small ELFs with each hook pattern, including the cases that must stay quiet (ftrace's own trampolines, unconverted `__fentry__` calls, tail calls to the kernel's own functions, compiler clones). `python3 tests/test_demo_injection.py kernel.elf` plants a data pointer in `sys_call_table[0]`, `vfs_read` in `[62]` and an unmapped address in `[217]` in a copy of the demo `kernel.elf`; all three are reported and the function rows do not change. On five real captures (Debian 12, Debian 13 clean and with ftrace, kprobe and BPF hooks set, Ubuntu 24.04, Ubuntu 26.04) the hooks we set are reported and the clean Ubuntu 26.04 kernel reports none. `python3 tests/test_isf_formats.py` reads the same ISF in the four forms Volatility accepts (`.json`, `.json.xz`, `.json.gz`, `.json.bz2`), and `python3 tests/test_findpatches_stub.py` checks, on fake IDA modules, that the patch list on a file that is not a kernel (a stripped `/bin/ls`, and a small unstripped program it compiles with `cc` when one is installed) gives a warning instead of an empty list.
+The patch scan is tested without IDA: `python3 tests/test_patchscan.py` builds small ELFs with each hook pattern, including the cases that must stay quiet (ftrace's own trampolines, unconverted `__fentry__` calls, tail calls to the kernel's own functions, compiler clones). `python3 tests/test_demo_injection.py kernel.elf` plants a data pointer in `sys_call_table[0]`, `vfs_read` in `[62]` and an unmapped address in `[217]` in a copy of the demo `kernel.elf`; all three are reported and the function rows do not change. On five real captures (Debian 12, Debian 13 clean and with ftrace, kprobe and BPF hooks set, Ubuntu 24.04, Ubuntu 26.04) the hooks we set are reported and the clean Ubuntu 26.04 kernel reports none. `python3 tests/test_isf_formats.py` reads the same ISF in the four forms Volatility accepts (`.json`, `.json.xz`, `.json.gz`, `.json.bz2`), and `python3 tests/test_findpatches_stub.py` checks, on fake IDA modules, that the patch list on a file that is not a kernel (a stripped `/bin/ls`, and a small unstripped program it compiles with `cc` when one is installed) gives a warning instead of an empty list. `python3 tests/test_hookchain.py [kernel.elf ...]` checks the hook chain decisions in `patchscan.py` (hooking instruction, hook page, handler, names) on hand-made ELFs (every hook form, a page shared by two functions, aliases, name collisions, a page with a real symbol, an unknown handler) and on real exports, and `python3 tests/test_hookchain_stub.py [kernel.elf]` checks, on fake IDA modules, the calls the plugin makes (`add_cref` and `set_name` arguments, the Handler column, Enter and Ctrl+E, a second run that adds nothing, a page the user renamed, a name IDA refuses).
 
 ## Limits
 

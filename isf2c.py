@@ -56,8 +56,14 @@ def load_isf(path):
         opener = lzma.open
         errors += (lzma.LZMAError,)
     elif kind == "gz":
-        import gzip
+        try:
+            import gzip
+            import zlib
+        except ImportError:
+            raise ISFError("this Python has no zlib module: decompress the ISF first "
+                             "(gunzip -k %s) and choose the .json file" % os.path.basename(path))
         opener = gzip.open
+        errors += (zlib.error,)
     elif kind == "bz2":
         try:
             import bz2
@@ -68,7 +74,7 @@ def load_isf(path):
     try:
         with opener(path, "rt", encoding="utf-8") as handle:
             isf = json.load(handle)
-    except errors as error:  # ValueError covers bad JSON, bad UTF-8 and a damaged gzip/bz2 stream
+    except errors as error:  # ValueError: bad JSON or UTF-8; OSError/EOFError/zlib.error/LZMAError: damaged streams
         raise ISFError("%s is not a readable Volatility ISF %s: %s" % (os.path.basename(path), ISF_KINDS, error))
     if not isinstance(isf, dict) or not ({"user_types", "symbols"} & set(isf)):
         raise ISFError("%s is JSON but not a Volatility ISF (no user_types or symbols)" % os.path.basename(path))

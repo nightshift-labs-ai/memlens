@@ -48,6 +48,9 @@ def refused(name, data, words):
 refused("cut.json.gz", gzip.compress(raw)[:40], ["not a readable Volatility ISF", ".json.gz"])
 refused("cut.json.bz2", bz2.compress(raw)[:40], ["not a readable Volatility ISF"])
 refused("cut.json.xz", lzma.compress(raw)[:40], ["not a readable Volatility ISF"])
+bad = bytearray(gzip.compress(json.dumps({"user_types": {"s%d" % i: {"size": i} for i in range(400)}}).encode()))
+bad[10] = 0xFF  # damaged deflate block: zlib.error, not OSError/ValueError
+refused("damaged.json.gz", bytes(bad), ["not a readable Volatility ISF"])
 refused("other.json.gz", gzip.compress(b'{"a": 1}'), ["not a Volatility ISF"])
 refused("binary.json", b"\x7fELF\x02\x01\x01" + b"\0" * 64, ["not a readable Volatility ISF"])
 print("ISF format test OK (.json, .json.xz, .json.gz, .json.bz2 by magic bytes; damaged and non-ISF files refused)")

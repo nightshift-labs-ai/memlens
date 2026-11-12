@@ -111,6 +111,10 @@ rows = {row[1]: row for row in ps.list_rows(image, findings, list(links.values()
 assert rows["traced_a"][3:] == ("ftrace_tramp_%x" % P["F"], "function_trace_call (ftrace)", FTRACE), rows["traced_a"]
 assert rows["pushret"][3:] == ("memlens_target_%x" % P["U"], "some_helper", OTHER), rows["pushret"]
 assert rows["ripjmp"][3:] == ("real_tramp", "", None), rows["ripjmp"]
+# A link that is not a hook page keeps the scan's label even if the database calls its target something else now (IDA
+# may give a module function's middle a dummy loc_ name once an xref lands there).
+dummy = dict(names); dummy[P["X"]] = "loc_%X" % P["X"]
+assert {row[1]: row for row in ps.list_rows(image, findings, list(links.values()), dummy)}["ripjmp"][3] == "real_tramp"
 # A syscall slot is never linked, but its target page F was renamed: the row shows the page's name now and its handler.
 assert rows["sys_call_table[0]"][3:] == ("ftrace_tramp_%x" % P["F"], "function_trace_call (ftrace)", FTRACE), rows["sys_call_table[0]"]
 assert ps.copied_targets(image, findings) == {link.target for link in links.values() if link.page}, ps.copied_targets(image, findings)

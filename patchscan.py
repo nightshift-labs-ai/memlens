@@ -504,8 +504,8 @@ def handler_text(link):
 def list_rows(image, findings, links, names):
     """Rows of the IDA list: (address, function, what, target, handler, handler address or None).
 
-    names maps a hook page to the name the database gives it now (after renaming). For a linked entry the target is that
-    name, else the ELF's name for it; the handler has its own column. A syscall slot is never linked, but when it points
+    names maps a hook page to the name the database gives it now (after renaming). For an entry linked to a copied hook
+    page the target is that name, else the ELF's name for it (any other link keeps the scan's label); the handler has its own column. A syscall slot is never linked, but when it points
     at a copied hook page it gets the same: that page's name now and its handler. Other rows keep the scan's target
     label.
     """
@@ -518,7 +518,7 @@ def list_rows(image, findings, links, names):
         if link is None:
             rows.append((address, function, what, label, "", None))
             continue
-        shown = names.get(link.target) or describe(image, link.target)
+        shown = (names.get(link.target) or describe(image, link.target)) if link.page else label
         rows.append((address, function, what, shown, handler_text(link), link.handler))
     return rows
 

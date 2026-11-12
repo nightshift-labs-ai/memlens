@@ -1,0 +1,16 @@
+Volatility 3 Framework 2.28.2
+
+Unsatisfied requirement plugins.Kernel2Elf.kernel.layer_name: 
+Unsatisfied requirement plugins.Kernel2Elf.kernel.symbol_table_name: 
+
+A translation layer requirement was not fulfilled.  Please verify that:
+	A file was provided to create this layer (by -f, --single-location or by config)
+	The file exists and is readable
+	The file is a valid memory image and was acquired cleanly
+
+A symbol table requirement was not fulfilled.  Please verify that:
+	The associated translation layer requirement was fulfilled
+	You have the correct symbol file for the requirement
+	The symbol file is under the correct directory or zip file
+	The symbol file is named appropriately or contains the correct banner
+

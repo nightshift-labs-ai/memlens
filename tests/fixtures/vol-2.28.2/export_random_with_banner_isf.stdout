@@ -1,0 +1,9 @@
+Volatility 3 Framework 2.28.2
+
+Item	Name	Address	Count
+
+section	.text	0xffffffff81000000	0
+section	.rodata	0xffffffff82000000	0
+section	.data	0xffffffff82b8e000	0
+symbols	kernel	0xffffffff81000000	242147
+written	kernel.elf	0x0	0

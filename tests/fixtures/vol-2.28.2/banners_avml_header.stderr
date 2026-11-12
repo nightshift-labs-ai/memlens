@@ -1,0 +1,2 @@
+WARNING  volatility3.framework.layers.avml: AVML file detected, but snappy library could not be found
+Please install the snappy from your distribution or https://google.github.io/snappy/.

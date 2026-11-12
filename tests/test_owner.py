@@ -76,7 +76,7 @@ def trampoline(page, handler, ops, ret=b"\xc3\xcc\x00\x00\x00", load=0x74, call=
 
 PAGES = {name: HOOKS + 0x400 * index for index, name in enumerate(
     ("vfs_getattr", "__x64_sys_getdents64", "__x64_sys_kill", "__x64_sys_read", "__x64_sys_write", "far_load", "thunked",
-     "direct_cb", "plumbing_only", "retthunk", "sls", "offset8", "noret"))}
+     "direct_cb", "plumbing_only", "retthunk", "sls", "offset8", "noret", "bare_ret"))}
 SLOTS = {}
 SLOTS["vfs_getattr"] = trampoline(PAGES["vfs_getattr"], FTRACE, GLOBAL_OPS)                        # tracefs function tracer
 SLOTS["__x64_sys_getdents64"] = trampoline(PAGES["__x64_sys_getdents64"], ASSIST, HOOK_ARRAY + 0x20)  # ftrace-hook rootkit
@@ -94,6 +94,7 @@ page = PAGES["plumbing_only"]
 put(hooks, HOOKS, page + 0x40, rel32(page + 0x40, FTRACE))                                        # ftrace plumbing, no ops load
 SLOTS["retthunk"] = trampoline(PAGES["retthunk"], FTRACE, GLOBAL_OPS, ret=rel32(PAGES["retthunk"] + 0xd8, KTEXT + 0x1300, 0xE9))
 SLOTS["sls"] = trampoline(PAGES["sls"], FTRACE, GLOBAL_OPS, ret=b"\xc3\xcc")
+SLOTS["bare_ret"] = trampoline(PAGES["bare_ret"], FTRACE, GLOBAL_OPS, ret=b"\xc3")  # no RETPOLINE/SLS: RET_SIZE 1 (claims s165 N5)
 SLOTS["offset8"] = trampoline(PAGES["offset8"], FTRACE, OTHER_OPS)
 SLOTS["noret"] = trampoline(PAGES["noret"], FTRACE, GLOBAL_OPS, ret=b"\x90" * 5)  # slot in the page, no ret before it
 put(kdata, KDATA, GLOBAL_OPS, struct.pack("<Q", FTRACE))
@@ -141,7 +142,8 @@ assert owners["thunked"].text == "evilmod.fh_ftrace_thunk (ftrace_ops evilmod.ho
 assert owners["plumbing_only"] is None, owners["plumbing_only"]
 assert owners["noret"] is None, owners["noret"]  # a pointer in the page but no ret before it: not the ops slot
 # The ret before the slot may be a jmp to the return thunk (RET_SIZE 5) or ret; int3 (SLS).
-assert owners["retthunk"].text == owners["sls"].text == "function_trace_call (ftrace_ops global_ops)", (owners["retthunk"], owners["sls"])
+assert owners["retthunk"].text == owners["sls"].text == owners["bare_ret"].text == "function_trace_call (ftrace_ops global_ops)", (
+    owners["retthunk"], owners["sls"], owners["bare_ret"])
 # The offset of func in struct ftrace_ops: 0 unless told otherwise (an ISF says so); here a layout with func at 8.
 assert owners["offset8"].text == "0xdead (ftrace_ops other_ops)" and owners["offset8"].address is None, owners["offset8"]
 assert ps.ftrace_ops_func_offset({"user_types": {"ftrace_ops": {"fields": {"func": {"offset": 8}}}}}) == 8
@@ -187,7 +189,7 @@ with tempfile.TemporaryDirectory() as work:
     lines, out = owner_lines(path)
     expected = [["%#x" % link.target, "%#x" % link.owner.address if link.owner.address is not None else "-", link.owner.text]
                 for link in sorted(links.values(), key=lambda link: link.target) if link.owner]
-    assert lines == expected and len(lines) == 11, (lines, expected)
+    assert lines == expected and len(lines) == 12, (lines, expected)
     assert "owner\t%#x\t-\tftrace_ops at 0xffff888003c41a00 (no symbol: heap)" % PAGES["__x64_sys_kill"] in out, out
     assert "xref\t%#x\t%#x\tdata\tevilmod.hooks+0x20 -> evilmod.fh_ftrace_thunk" % (HOOK_ARRAY + 0x20, THUNK) in out, out
     # --isf: the offset of ftrace_ops.func from the ISF (here 8, for the offset8 page).

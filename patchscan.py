@@ -110,10 +110,15 @@ HANDLER_KINDS = (("function_trace_call", "ftrace"), ("ftrace_ops_list_func", "ft
 
 def handler_call(image, page, span=0x200):
     """(call address, handler address, handler name) for the first rel32 call in a copied hook page that lands exactly
-    on a symbol start (not on another memlens_target_ label), or None. The bytes are searched, not disassembled."""
+    on a symbol start (not on another memlens_target_ label), or None. The bytes are searched, not disassembled, and
+    only up to the next symbol after page: trampolines packed next to each other each have their own label, and a page
+    must not get its neighbour's handler."""
     segment = image.segment(page)
     if segment is None:
         return None
+    following = bisect.bisect_right(image.addresses, page)
+    if following < len(image.addresses):
+        span = min(span, image.addresses[following] - page)
     code = image.read(page, min(span, segment[1] - page))
     if not code:
         return None

@@ -131,7 +131,26 @@ assert [line.split("\t")[1:] for line in extra if line.startswith("rename")] == 
 assert len(extra) == len(xrefs) + len(names), extra
 assert "xref\t%#x\t%#x\tcall\ttraced_a+0x4 -> memlens_target_%x" % (BASE + 4, P["F"], P["F"]) in extra, extra
 assert "xref\t%#x\t%#x\tcall\tmemlens_target_%x+0x40 -> function_trace_call" % (P["F"] + 0x40, FTRACE, P["F"]) in extra, extra
-print("hook chain tests OK (hand-made ELFs: %d links, %d xrefs, %d pages renamed; patchscan.py --links)" % (len(links), len(xrefs), len(names)))
+
+# Two trampolines packed into one copied region (BPF prog_pack, execmem caches): P1's own call goes to memory with no
+# symbol (a hidden module's callback), P2 at +0x100 is an ordinary ftrace trampoline. P1's handler search stops at P2's
+# label, so P1 does not get P2's handler, role, xref or name.
+packed = bytearray(b"\x90" * TEXT)
+P1, P2, HIDDEN = BASE + 0x2000, BASE + 0x2100, BASE + 0x3800
+packed[P1 - BASE + 0x94:P1 - BASE + 0x99] = call(P1 + 0x94, HIDDEN)
+packed[P2 - BASE + 0x94:P2 - BASE + 0x99] = call(P2 + 0x94, FTRACE)
+packed[0x000:0x005] = call(BASE, P1)
+packed[0x100:0x105] = call(BASE + 0x100, P2)
+pimage = ps.Image(elf(packed, [("evil_target", BASE, 0x100), ("traced", BASE + 0x100, 0x100), ("function_trace_call", FTRACE, 0x100)]
+                      + [("%s%x" % (ps.TARGET_PREFIX, page), page, 0) for page in (P1, P2)]))
+plinks = {link.function: link for link in ps.hook_links(pimage, ps.scan(None, pimage))}
+assert (plinks["evil_target"].handler_site, plinks["evil_target"].handler_name) == (None, None), plinks["evil_target"]
+assert (plinks["traced"].handler_site, plinks["traced"].kind) == (P2 + 0x94, "ftrace"), plinks["traced"]
+assert ps.role_names(pimage, list(plinks.values())) == {P2: "ftrace_tramp_traced"}
+assert (P1 + 0x94, FTRACE, "call") not in ps.hook_xrefs(list(plinks.values()))
+assert ps.handler_call(pimage, P2) == (P2 + 0x94, FTRACE, "function_trace_call")  # the last symbol: up to span or segment end
+print("hook chain tests OK (hand-made ELFs: %d links, %d xrefs, %d pages renamed; packed trampolines; patchscan.py --links)" % (
+    len(links), len(xrefs), len(names)))
 
 # Real exports. Offsets from the entry and from the page, as seen in objdump on the demo (README "What you get").
 EXPECTED = {

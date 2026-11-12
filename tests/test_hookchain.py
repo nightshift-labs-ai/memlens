@@ -111,9 +111,10 @@ rows = {row[1]: row for row in ps.list_rows(image, findings, list(links.values()
 assert rows["traced_a"][3:6] == ("ftrace_tramp_%x" % P["F"], "function_trace_call (ftrace)", FTRACE), rows["traced_a"]
 assert rows["pushret"][3:6] == ("memlens_target_%x" % P["U"], "some_helper", OTHER), rows["pushret"]
 assert rows["ripjmp"][3:6] == ("real_tramp", "", None), rows["ripjmp"]
-# Owner (tests/test_owner.py has the ftrace_ops and BPF cases): known plumbing with no ftrace_ops gives none; a first named
-# call with no known role is the owner, marked as such.
-assert rows["traced_a"][6:] == ("", None) and rows["pushret"][6:] == ("some_helper (first named call)", OTHER), rows
+# Owner (tests/test_owner.py has the ftrace_ops and BPF cases, and a module's function as the first named call): known
+# plumbing with no ftrace_ops gives none; a first named call into the core kernel (some_helper: _printk, kfree, a retpoline
+# thunk on a real hidden-module page) is not an owner either (review s166 M1).
+assert rows["traced_a"][6:] == ("", None) and rows["pushret"][6:] == ("", None), rows
 assert rows["ripjmp"][6:] == ("", None) and len(rows["ripjmp"]) == 8, rows["ripjmp"]
 # A link that is not a hook page keeps the scan's label even if the database calls its target something else now (IDA
 # may give a module function's middle a dummy loc_ name once an xref lands there).
@@ -139,8 +140,8 @@ assert linked.stdout.startswith(plain.stdout) and not any(line.startswith(("xref
 assert [line.split("\t")[1:4] for line in extra if line.startswith("xref")] == [["%#x" % a, "%#x" % b, f] for a, b, f in xrefs], extra
 assert [line.split("\t")[1:] for line in extra if line.startswith("rename")] == [
     ["%#x" % page, "%s%x" % (ps.TARGET_PREFIX, page), name] for page, name in sorted(names.items())], extra
-assert [line.split("\t")[1:] for line in extra if line.startswith("owner")] == [["%#x" % P["U"], "%#x" % OTHER, "some_helper (first named call)"]], extra
-assert len(extra) == len(xrefs) + len(names) + 1, extra
+assert [line for line in extra if line.startswith("owner")] == [], extra   # s166 M1: a core-kernel first call is no owner
+assert len(extra) == len(xrefs) + len(names), extra
 assert "xref\t%#x\t%#x\tcall\ttraced_a+0x4 -> memlens_target_%x" % (BASE + 4, P["F"], P["F"]) in extra, extra
 assert "xref\t%#x\t%#x\tcall\tmemlens_target_%x+0x40 -> function_trace_call" % (P["F"] + 0x40, FTRACE, P["F"]) in extra, extra
 

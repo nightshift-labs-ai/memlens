@@ -48,6 +48,12 @@ assert k.page_runs([(PROG, PROG + 306), (TRAMP, TRAMP + 238), (DISPATCH, DISPATC
 assert k.page_runs([(PROG, PROG + 306), (DISPATCH, DISPATCH + 0x10)], lambda page: page == 0xffffffffc0004000) == [
     (0xffffffffc0009000, 0xffffffffc000a000)]
 assert k.page_runs([(0xffffffffc0001000, 0xffffffffc0001000)], lambda page: False) == [(0xffffffffc0001000, 0xffffffffc0002000)]
+# A torn bpf_ksym (smeared capture, stale list node: end < start, or a huge span) is dropped before naming and paging, so
+# it cannot crash the ELF writer (negative size) or make page_runs walk terabytes (review s166 m2).
+torn = [KAS("bpf_prog_neg", "t", PROG & MASK, -0x40, "bpf"), KAS("bpf_prog_huge", "t", PROG2 & MASK, 1 << 40, "bpf"), ksyms[0], ksyms[2]]
+kept, dropped = k.sane_ksyms(torn)
+assert kept == [ksyms[0], ksyms[2]] and dropped == 2, (kept, dropped)
+assert k.sane_ksyms(ksyms) == (ksyms, 0) and k.sane_ksyms([KAS("z", "t", PROG & MASK, 0, "bpf")])[1] == 0
 
 
 class Layer:
@@ -85,4 +91,11 @@ assert image.segment(DISPATCH) and image.segment(PROG2) and not image.segment(PR
 assert image.segment(DISPATCH)[3] and image.segment(PROG2)[3], "BPF pages must be executable"
 # No BPF symbols (no Kallsyms API, or a kernel without them): nothing added, one row that says 0.
 assert list(plugin._bpf(k.Elf(), layer, [], set())) == [(0, ("bpf symbols", "bpf", 0, 0))]
+# Torn entries through the plugin path (s166 m2): left out, the rest is exported, and the ELF still writes.
+elf2 = k.Elf()
+rows2 = list(plugin._bpf(elf2, layer, torn, set()))
+assert rows2 == [(0, ("bpf pages", ".bpf.ffffffffc0004000", 0xffffffffc0004000, 0x1000)),
+                 (0, ("bpf pages", ".bpf.ffffffffc0009000", 0xffffffffc0009000, 0x1000)),
+                 (0, ("bpf symbols", "bpf", 0, 2))], rows2
+elf2.write(io.BytesIO())
 print("kernel2elf BPF test OK (fake volatility3 modules and memory layer)")

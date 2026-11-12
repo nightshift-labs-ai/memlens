@@ -8,6 +8,7 @@ of a function, or one made by something that leaves the entry bytes alone, is no
 import bisect
 import collections
 import os
+import re
 import struct
 import sys
 
@@ -474,6 +475,26 @@ def program_call(code, offset):
     return None
 
 
+BPF_ENTER_LSM_CGROUP = "__bpf_prog_enter_lsm_cgroup"
+BPF_PROG_NAME = re.compile(r"(bpf\.)?bpf_prog_[0-9a-f]{16}(_|$)")
+
+
+def bpf_program_label(name, program, enter):
+    """The Owner text for what a BPF trampoline calls after enter (the __bpf_prog_enter* it called). Only a BPF name
+    (the export's bpf.bpf_prog_<tag>_<name>, or the kernel's own without "bpf.") or no symbol is called a BPF program; a
+    kernel function there is the interpreter (a program that is not JIT-compiled) or, after the cgroup LSM enter, the
+    kernel's shim, whose programs hang off each cgroup (review s166 m1)."""
+    if not name:
+        return "BPF program at %#x" % program
+    if BPF_PROG_NAME.match(name):
+        return "%s (BPF program)" % name
+    if enter.startswith(BPF_ENTER_LSM_CGROUP):
+        return "%s (cgroup LSM shim: the programs are per cgroup)" % name
+    if name.lstrip("_").startswith("bpf_prog_run"):
+        return "%s (BPF interpreter: the program is not JIT-compiled)" % name
+    return "%s (called by the BPF trampoline)" % name
+
+
 def bpf_owner(image, page, span=0x1000):
     """An Owner naming the program(s) a BPF trampoline page runs, or None when none is found."""
     code = page_code(image, page, span)
@@ -484,24 +505,22 @@ def bpf_owner(image, page, span=0x1000):
         offset = program_call(code, site - page + 5)
         if offset is not None:
             program = (page + offset + 5 + struct.unpack_from("<i", code, offset + 1)[0]) & 0xFFFFFFFFFFFFFFFF
-            programs.append((page + offset, program))
+            programs.append((page + offset, program, name))
     if not programs:
         return None
-    names = []
-    for _, program in programs:
-        name = symbol_start(image, program)
-        names.append("%s (BPF program)" % name if name else "BPF program at %#x" % program)
+    names = [bpf_program_label(symbol_start(image, program), program, enter) for _, program, enter in programs]
     first = programs[0][1]
-    refs = [(site, program, "call") for site, program in programs if image.segment(program)]
+    refs = [(site, program, "call") for site, program, _ in programs if image.segment(program)]
     return Owner(", ".join(names), first if image.segment(first) else None, "BPF program", refs)
 
 
 def page_owner(image, page, handler_site, handler, handler_name, kind):
     """The Owner of a copied hook page: the program(s) a BPF trampoline runs, ftrace_ops->func for an ftrace trampoline;
-    else, when the page's first named call has no known role (a module's callback, say), that call; else None (known
-    plumbing only)."""
+    else, when the page's first named call is a module's function with no known role, that call; else None (known
+    plumbing, or a first call into the core kernel: on a hidden module's page that is _printk or a retpoline thunk,
+    not the hook's owner; review s166 M1)."""
     owner = bpf_owner(image, page) if kind == "BPF trampoline" else ftrace_owner(image, page)
-    if owner is None and handler_name and kind is None:
+    if owner is None and handler_name and kind is None and into_module("", handler_name):
         owner = Owner("%s (first named call)" % handler_name, handler, "first named call", [])
     return owner
 

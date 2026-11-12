@@ -164,7 +164,8 @@ assert owner8 == ps.Owner("kprobe_ftrace_handler (ftrace_ops other_ops)", KPROBE
                           [(SLOTS["offset8"], OTHER_OPS, D), (OTHER_OPS + 8, KPROBE, D)]), owner8
 assert ps.Image(blob).ftrace_ops_func == ps.FTRACE_OPS_FUNC == 0
 lp = links["livepatched"]
-assert (lp.handler_name, lp.kind) == ("klp_ftrace_handler", "ftrace") and owners["livepatched"].text == "klp_ftrace_handler (ftrace_ops global_ops)", (lp, owners["livepatched"])
+assert (lp.handler_name, lp.kind) == ("klp_ftrace_handler", "ftrace") and owners["livepatched"].how == "ftrace_ops", (lp, owners["livepatched"])
+assert owners["livepatched"].text.endswith("(ftrace_ops global_ops)"), owners["livepatched"]  # the owner is the ops' func, read from the ops
 assert ps.role_names(image, [lp]) == {PAGES["livepatched"]: "ftrace_tramp_livepatched"}, ps.role_names(image, [lp])
 print("owner tests OK (hand-made ELF: %d hooked entries, %d with an ftrace_ops owner)" % (
     len(links), sum(1 for owner in owners.values() if owner and owner.how == "ftrace_ops")))

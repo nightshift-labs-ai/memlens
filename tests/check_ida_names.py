@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Name-only check for older IDA versions: every ida_*/idc name the plugin's code uses exists in a folder of IDAPython
-stubs (ida_*.pyi), for example those of the idapro package of an older IDA (PyPI idapro 0.0.5, 0.0.7, 0.0.9 and
-0.0.11 carry the stubs of IDA SDK 9.1, 9.2, 9.3 and 9.4). tests/check_ida_api.py checks the names against the IDAPython sources;
+stubs (ida_*.pyi), for example those of the idapro package of an older IDA (PyPI idapro 0.0.5, 0.0.7, 0.0.9,
+0.0.11 and 0.0.12 carry the stubs of IDA SDK 9.1, 9.2, 9.3, 9.4 and 9.5). tests/check_ida_api.py checks the names against the IDAPython sources;
 this one only asks whether each name is in a given set of stubs.
 
     python3 tests/check_ida_names.py <dir containing ida_*.pyi> [more dirs...]

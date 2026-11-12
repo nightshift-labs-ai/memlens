@@ -283,6 +283,8 @@ assert bowners["lsm_cgroup"] == ps.Owner("__cgroup_bpf_run_lsm_current (cgroup L
 assert ps.bpf_program_label("bpf_prog_e8932b6bae2b9745_restrict_filesystems", NAMED_PROG, "__bpf_prog_enter") == (
     "bpf_prog_e8932b6bae2b9745_restrict_filesystems (BPF program)")  # a kernel BPF name without the export's "bpf."
 assert ps.bpf_program_label("evilmod.cb", PROG, "__bpf_prog_enter") == "evilmod.cb (called by the BPF trampoline)"
+assert ps.bpf_program_label("bpf.bpf_prog_0123456789abcdef", PROG, "__bpf_prog_enter").endswith("(BPF program)")  # no name
+assert ps.bpf_program_label("bpf.restrict_filesy", PROG, "__bpf_prog_enter").endswith("(BPF program)")  # 5.5-5.7 export name
 assert bowners["two"] == ps.Owner("BPF program at %#x, BPF program at %#x" % (PROG, PROG2), PROG, B,
                                   [(BSITES["two"][0], PROG, C), (BSITES["two"][1], PROG2, C)]), bowners["two"]
 assert bowners["unpatched"] == bowners["bpf_lsm_file_open"]._replace(refs=[(BSITES["unpatched"][0], PROG, C)]), bowners

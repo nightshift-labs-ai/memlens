@@ -486,7 +486,7 @@ def bpf_program_label(name, program, enter):
     programs hang off each cgroup), or else just a function the trampoline calls (review s166 m1, claims s170 F1)."""
     if not name:
         return "BPF program at %#x" % program
-    if BPF_PROG_NAME.match(name):
+    if name.startswith("bpf.") or BPF_PROG_NAME.match(name):  # bpf. = the exporter's BPF list (5.5-5.7: bpf.<aux name>)
         return "%s (BPF program)" % name
     if name.startswith("__cgroup_bpf_run_lsm_") or enter.startswith(BPF_ENTER_LSM_CGROUP):
         # cgroup_shim_alloc makes the shim BPF_LSM_MAC, so the trampoline enters it through plain __bpf_prog_enter: the

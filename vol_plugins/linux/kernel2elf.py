@@ -49,11 +49,11 @@ def canonical(address: int) -> int:
     return address | 0xFFFF000000000000 if address & (1 << 47) else address
 
 
-MAX_BPF_SPAN = 0x200000  # a JIT image is a few pages (bpf_prog_pack chunks are 2 MB): anything larger is a torn entry
+MAX_BPF_SPAN = 0x4000000  # 64 MB: far above any JIT image (1M instructions); larger is a torn entry (16K pages to walk at most)
 
 
 def sane_ksyms(ksyms):
-    """(kept, dropped): BPF kallsyms whose size (Volatility: end - start) is 0..MAX_BPF_SPAN. A torn entry (smeared or
+    """(kept, dropped): BPF kallsyms whose size (Volatility: end - start) is 0..MAX_BPF_SPAN (64 MB). A torn entry (smeared or
     live capture, a stale list node) can give a negative or huge size, which would crash the ELF writer or make
     page_runs walk terabytes; the export must not fail because of the BPF list (review s166 m2)."""
     kept = [ksym for ksym in ksyms if 0 <= int(ksym.size) <= MAX_BPF_SPAN]
@@ -67,7 +67,7 @@ def bpf_symbols(ksyms, skip) -> List[Tuple[str, int, int]]:
     named = []
     for ksym in ksyms:
         address = canonical(int(ksym.address))
-        if address not in skip:
+        if address not in skip and ksym.name:  # Volatility gives None for a pre-5.8 program without a name: no 'bpf.None'
             named.append(("bpf.%s" % ksym.name, address, int(ksym.size)))
     return named
 
@@ -383,7 +383,7 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
         them, where the ELF does not have those pages yet (a hook page copied before keeps its section)."""
         ksyms, dropped = sane_ksyms(list(ksyms))
         if dropped:
-            logging.getLogger(__name__).warning("kernel2elf: %d BPF symbol(s) with an impossible size left out", dropped)
+            vollog.warning("kernel2elf: %d BPF symbol(s) with an implausible size left out", dropped)
         named = bpf_symbols(ksyms, hook_targets)
         for name, address, size in named:
             elf.add_symbol(name, address, size, STT_FUNC)

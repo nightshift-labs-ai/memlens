@@ -115,6 +115,8 @@ assert rows["ripjmp"][3:6] == ("real_tramp", "", None), rows["ripjmp"]
 # plumbing with no ftrace_ops gives none; a first named call into the core kernel (some_helper: _printk, kfree, a retpoline
 # thunk on a real hidden-module page) is not an owner either (review s166 M1).
 assert rows["traced_a"][6:] == ("", None) and rows["pushret"][6:] == ("", None), rows
+# The rule behind it: a compiler clone of a core function (kfree.part.0) is not a module symbol (code review s170 n-3).
+assert not ps.into_module("", "kfree.part.0") and not ps.into_module("", "_printk") and ps.into_module("", "evilmod.fh_sys_kill")
 assert rows["ripjmp"][6:] == ("", None) and len(rows["ripjmp"]) == 8, rows["ripjmp"]
 # A link that is not a hook page keeps the scan's label even if the database calls its target something else now (IDA
 # may give a module function's middle a dummy loc_ name once an xref lands there).

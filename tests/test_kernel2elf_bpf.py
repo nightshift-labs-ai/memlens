@@ -56,7 +56,7 @@ assert kept == [ksyms[0], ksyms[2]] and dropped == 2, (kept, dropped)
 assert k.sane_ksyms(ksyms) == (ksyms, 0) and k.sane_ksyms([KAS("z", "t", PROG & MASK, 0, "bpf")])[1] == 0
 # The bound itself (claims s170): a 2 MB span is kept, one byte more is dropped.
 edge = [KAS("at_max", "t", PROG & MASK, k.MAX_BPF_SPAN, "bpf"), KAS("over_max", "t", PROG2 & MASK, k.MAX_BPF_SPAN + 1, "bpf")]
-assert k.MAX_BPF_SPAN == 0x200000 and k.sane_ksyms(edge) == ([edge[0]], 1), k.sane_ksyms(edge)
+assert k.MAX_BPF_SPAN == 0x4000000 and k.sane_ksyms(edge) == ([edge[0]], 1), k.sane_ksyms(edge)
 
 
 class Layer:
@@ -101,9 +101,13 @@ seen = []
 handler = logging.Handler()
 handler.emit = lambda record: seen.append(record.getMessage())
 logging.getLogger(k.__name__).addHandler(handler)
-rows2 = list(plugin._bpf(elf2, layer, torn, set()))
+# On the plugin path the huge entry stays walkable (64 MB + a page): if _bpf ever stopped filtering, page_runs would walk
+# 16K pages and the rows check below fails, instead of 2^28 pages exhausting the VM's memory (code review s170 m-2).
+bounded = [torn[0], KAS("bpf_prog_huge", "t", PROG2 & MASK, k.MAX_BPF_SPAN + 0x1000, "bpf"), ksyms[0], ksyms[2]]
+rows2 = list(plugin._bpf(elf2, layer, bounded, set()))
 logging.getLogger(k.__name__).removeHandler(handler)
-assert seen == ["kernel2elf: 2 BPF symbol(s) with an impossible size left out"], seen
+assert seen == ["kernel2elf: 2 BPF symbol(s) with an implausible size left out"], seen
+assert k.bpf_symbols([KAS(None, "t", PROG & MASK, 0x40, "bpf")], set()) == [], "a program without a name gets no bpf.None symbol"
 assert rows2 == [(0, ("bpf pages", ".bpf.ffffffffc0004000", 0xffffffffc0004000, 0x1000)),
                  (0, ("bpf pages", ".bpf.ffffffffc0009000", 0xffffffffc0009000, 0x1000)),
                  (0, ("bpf symbols", "bpf", 0, 2))], rows2

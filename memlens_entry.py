@@ -49,14 +49,19 @@ def check_sizes(expected):
     return missing, wrong
 
 
+def isf_linux_banner(isf):
+    """The ISF's own kernel version line (its linux_banner constant, up to the NUL), or None if it has none."""
+    data = (isf.get("symbols", {}).get("linux_banner") or {}).get("constant_data")
+    return base64.b64decode(data).split(b"\0")[0] if data else None
+
+
 def banner_mismatch(isf):
     """(ISF banner, database banner) if the ISF was built for another kernel, or (ISF banner, b"") if the database has
     no linux_banner at all (so it may not be a kernel); None if they agree or the ISF has no banner to compare."""
-    data = (isf.get("symbols", {}).get("linux_banner") or {}).get("constant_data")
-    if not data:
+    expected = isf_linux_banner(isf)
+    if expected is None:
         return None
     address = idc.get_name_ea_simple("linux_banner")
-    expected = base64.b64decode(data).split(b"\0")[0]
     if address == idc.BADADDR:
         return (expected, b"")
     actual = ida_bytes.get_bytes(address, len(expected)) or b""
@@ -353,12 +358,124 @@ def export_problems(stdout):
     return problems
 
 
-def export_failure_text(stdout, stderr, isf_given):
+def exporter_not_loaded(out, err):
+    """Volatility could not load kernel2elf at all, so argparse rejected the plugin name (out, err: decoded text)."""
+    return "invalid choice" in out + err and "kernel2elf" in out + err
+
+
+def kernel_not_found(out, err):
+    """Volatility built no kernel layer or symbol table (out, err: decoded text). Version 2.28.2 prints exactly the same
+    text for a wrong ISF, for no ISF and for a file that is not a memory image (tests/fixtures/vol-2.28.2)."""
+    return ("symbol_table_name" in err or "symbol table requirement" in out
+            or "kernel.layer_name" in err or "translation layer requirement" in out)
+
+
+ISF_README = "README, \"An ISF for your own image\""
+SHOWN_BANNERS = 3
+
+
+def banner_command(vol, image):
+    return [vol, "-q", "-f", image, "banners.Banners"]
+
+
+def image_banners(stdout):
+    """The distinct "Linux version ..." lines in banners.Banners' output, most frequent first (ties in file order).
+    An image can hold several: the kernel's own, a copy in the log buffer, leftovers and lines of older kernels."""
+    counts = {}
+    for line in stdout.decode("utf-8", "replace").splitlines():
+        cells = line.split("\t", 1)
+        if len(cells) == 2 and cells[1].strip().startswith("Linux version "):
+            banner = cells[1].strip()
+            counts[banner] = counts.get(banner, 0) + 1
+    return sorted(counts, key=lambda banner: -counts[banner])  # dicts keep file order and sorted() is stable
+
+
+def isf_banner(isf_path):
+    """(the ISF's kernel version line, None), or (None, why there is none). Read with isf2c, no Volatility call."""
+    try:
+        banner = isf_linux_banner(isf2c.load_isf(isf_path))
+    except isf2c.ISFError as error:
+        return None, str(error)
+    except (ValueError, TypeError, AttributeError) as error:  # a damaged linux_banner entry (not base64, not text)
+        return None, "its linux_banner is not readable (%s)" % error
+    if not banner:
+        return None, "it has no linux_banner"
+    return banner.decode("ascii", "replace").strip(), None
+
+
+def kernel_check_wanted(stdout, stderr):
+    """After a failed export: is banners.Banners worth running? Only when no kernel was found."""
+    return kernel_not_found(stdout.decode("utf-8", "replace"), stderr.decode("utf-8", "replace"))
+
+
+def check_kernel(vol, image, isf_path):
+    """Which kernel the image holds (Volatility's banners.Banners, cancellable) and which one the ISF was built for.
+    Called only after Volatility found no kernel layer or symbol table; the dict goes to export_failure_text."""
+    ida_kernwin.show_wait_box("MemLens: export failed, Volatility is looking for the image's kernel version")
+    try:
+        code, stdout, stderr = run_cancellable(banner_command(vol, image))
+        if code is None:
+            return {"cancelled": True}
+        ida_kernwin.msg("[MemLens] banners.Banners (exit %s):\n%s\n%s\n" % (
+            code, stdout.decode("utf-8", "replace"), stderr.decode("utf-8", "replace")))
+        if code:
+            return {"failed": code}
+        check = {"banners": image_banners(stdout)}
+        if isf_path and check["banners"]:
+            ida_kernwin.replace_wait_box("MemLens: reading the ISF's kernel version")  # about 1.5 s for the demo ISF
+            check["isf_banner"], check["isf_problem"] = isf_banner(isf_path)
+        return check
+    finally:
+        ida_kernwin.hide_wait_box()
+
+
+def banner_lines(banners, isf_line=None):
+    """Up to SHOWN_BANNERS "Image: ..." lines; the one equal to the ISF's line is marked."""
+    lines = ["Image: %s%s" % (banner, " (the ISF's)" if banner == isf_line else "") for banner in banners[:SHOWN_BANNERS]]
+    if len(banners) > SHOWN_BANNERS:
+        lines.append("... and %d more" % (len(banners) - SHOWN_BANNERS))
+    if len(banners) > 1:
+        lines.append("(%d different \"Linux version\" lines in the image, most frequent first. An image can hold more "
+                     "than the running kernel's: copies in logs, lines of older kernels and damaged ones.)" % len(banners))
+    return "\n".join(lines)
+
+
+def kernel_hint(check, isf_given):
+    """The paragraphs that explain a failed export from what check_kernel found, or None if it found nothing to go by."""
+    if not check or "banners" not in check:
+        return None
+    banners = check["banners"]
+    if not banners:
+        return ["Volatility found no Linux kernel in this file: banners.Banners found no \"Linux version\" line in it, "
+                "so it is probably not a Linux memory image, or one in a format Volatility cannot read. Volatility 2.28.2 "
+                "reads raw images, LiME, 64-bit ELF core dumps, VMware .vmem (with its .vmss or .vmsn file next to it), "
+                "QEMU suspend images and Xen core dumps; AVML images need the snappy library."]
+    if not isf_given:
+        return ["It found no symbols for this image's kernel. Without an ISF it only uses the Linux symbol files it already "
+                "has, and a fresh pip install has none. Get the ISF built for this image's kernel: its linux_banner must be "
+                "one of the lines below (%s). Then run Export again with it." % ISF_README, banner_lines(banners)]
+    isf_line, problem = check.get("isf_banner"), check.get("isf_problem")
+    if isf_line is None:
+        return ["The file you chose as the ISF cannot be compared with the image: %s. Volatility picks a Linux ISF by "
+                "finding the ISF's kernel version line (linux_banner) in the image. Use the ISF built for the image's "
+                "kernel (%s)." % (problem, ISF_README), banner_lines(banners)]
+    if isf_line in banners:
+        return ["This image holds the ISF's kernel version line, so the ISF fits a kernel in this image; Volatility still "
+                "failed, so the cause is something else (see its output below).",
+                "ISF: %s\n%s" % (isf_line, banner_lines(banners, isf_line))]
+    return ["The ISF you chose was built for another kernel: its kernel version line (linux_banner) is not in this image, "
+            "and Volatility picks a Linux ISF by finding that exact line. Use the ISF built for the image's kernel (%s)."
+            % ISF_README, "ISF: %s\n%s" % (isf_line, banner_lines(banners))]
+
+
+def export_failure_text(stdout, stderr, isf_given, check=None):
     """The dialog text for a failed export: a plain hint for the common cause, then the tail of what Volatility said.
-    Volatility prints its own explanation of a missing symbol table on stdout, not stderr."""
+    Volatility prints its own explanation of a missing symbol table on stdout, not stderr. check is what
+    check_kernel found (None when it did not run)."""
     out, err = stdout.decode("utf-8", "replace"), stderr.decode("utf-8", "replace")
     lines = ["Volatility failed."]
-    if "invalid choice" in out + err and "kernel2elf" in out + err:
+    hint = kernel_hint(check, isf_given) if kernel_not_found(out, err) else None
+    if exporter_not_loaded(out, err):
         # The exporter was not loaded, so argparse lists every other plugin. Usually an older Volatility whose Linux
         # module API the exporter cannot import (seen with 2.11.0).
         version = re.search(r"Volatility 3 Framework ([0-9][0-9.]*)", out + err)
@@ -374,14 +491,23 @@ def export_failure_text(stdout, stderr, isf_given):
                          "than the Linux module API the exporter uses. MemLens is tested with Volatility 2.28.2: "
                          "pipx install volatility3==2.28.2 (or a venv, see the README), then make sure IDA finds that vol "
                          "first on PATH." % (" (%s)" % number if number else ""))
-    elif "symbol_table_name" in err or "symbol table requirement" in out:
+    elif hint:
+        lines += hint
+    elif kernel_not_found(out, err):
+        # No kernel check, or it did not finish: Volatility's text alone cannot tell a wrong ISF from a file that is
+        # not a memory image (2.28.2 prints the same for both).
         if isf_given:
-            lines.append("It found no symbols matching this image's kernel: the ISF you chose was probably built for another "
-                         "kernel (its linux_banner must match the image's).")
+            lines.append("It found no symbols matching this image's kernel: either the ISF you chose was built for another "
+                         "kernel (its linux_banner must match the image's), or the file is not a Linux memory image.")
         else:
             lines.append("It found no symbols for this image's kernel. Without an ISF it only uses the Linux symbol files it "
                          "already has, and a fresh pip install has none: run Export again and choose the ISF built for this "
-                         "kernel (dwarf2json, see the README).")
+                         "kernel (%s)." % ISF_README)
+        if check and check.get("cancelled"):
+            lines.append("(You cancelled the check for the image's kernel version.)")
+        elif check and check.get("failed"):
+            lines.append("(The check for the image's kernel version failed too: banners.Banners exited with %s, its output "
+                         "is in the Output window.)" % check["failed"])
     lines.append("Full output is in the Output window. Volatility said:")
     if out.strip():
         lines.append(tail(out, 700))
@@ -478,7 +604,8 @@ class ExportKernel(ida_kernwin.action_handler_t):
         if code:
             ida_kernwin.msg("[MemLens] Volatility failed (exit %s).\n[MemLens] its stdout:\n%s\n[MemLens] its stderr:\n%s\n"
                             % (code, stdout.decode("utf-8", "replace"), stderr.decode("utf-8", "replace")))
-            ida_kernwin.warning(export_failure_text(stdout, stderr, bool(isf)))
+            check = check_kernel(vol, image, isf) if kernel_check_wanted(stdout, stderr) else None
+            ida_kernwin.warning(export_failure_text(stdout, stderr, bool(isf), check))
             return 0
         problems = export_problems(stdout)
         if problems:

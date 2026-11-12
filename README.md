@@ -115,10 +115,27 @@ Typed globals come from the same ISF, for example `struct task_struct init_task`
 
 In IDA, with any database open (plugin menu entries need one), under **Edit > Plugins**:
 
-1. **MemLens: Export kernel from memory image**: choose the image. `kernel.elf` is written next to it (`kernel-1.elf` if one is already there; the message names the file). MemLens asks for the ISF and hands it to Volatility (Cancel uses Volatility's own symbols path, which has no Linux ISFs after a plain pip install; the error dialog then says so).
+1. **MemLens: Export kernel from memory image**: choose the image. `kernel.elf` is written next to it (`kernel-1.elf` if one is already there; the message names the file). MemLens asks for the ISF and hands it to Volatility (Cancel uses Volatility's own symbols path, which has no Linux ISFs after a plain pip install). If Volatility finds no kernel, the error dialog says which kernel the image holds, or that it holds none (see "When the export fails").
 2. Open `kernel.elf` in IDA.
 3. **MemLens: Apply kernel types from ISF**: choose the ISF. If its kernel banner differs from the one in the database, MemLens asks before importing anything. The Output window then says how many types IDA rejected, how many are missing and how many differ in size from the ISF.
 4. **MemLens: Show patched kernel functions**: opens the list and adds a comment at each entry.
+
+### When the export fails
+
+Volatility 2.28.2 prints the same error, byte for byte, for a wrong ISF, for no ISF and for a file that is not a memory image ("A translation layer requirement was not fulfilled ... A symbol table requirement was not fulfilled"). After that error MemLens runs `vol -q -f <image> banners.Banners` (Cancel stops it; it took 14 to 20 s on the 1 GB demo image on our machine), reads the ISF's own `linux_banner`, and the dialog says which case it is:
+
+- No `Linux version` line in the file: Volatility found no Linux kernel in it, so it is probably not a Linux memory image. The dialog lists what Volatility 2.28.2 reads (from its layer list): raw images, LiME, 64-bit ELF core dumps, VMware `.vmem` (with its `.vmss` or `.vmsn` next to it), QEMU suspend images and Xen core dumps; AVML needs the snappy library.
+- The ISF's line is not among the image's: the ISF was built for another kernel. Both are shown; with the Debian 12 ISF on the demo `trace.elf` (lines shortened here):
+  ```
+  ISF: Linux version 6.1.0-54-amd64 (debian-kernel@lists.debian.org) ... Debian 6.1.190-1 (2026-10-16)
+  Image: Linux version 6.12.115+deb13.1-amd64 (...) #1 SMP PREEMPT_DYNAMIC Debian 6.12.115-2 (2026-11-01)
+  Image: Linux version 6.12.115+deb13.1-amd64 (...) # SMP PREEMPT_DYNAMIC Debian 6.12.115-2 (2026-11-01)
+  Image: Linux version 6.12.115+deb13.1-amd64 (...) #1 SMP PREEMPT_DYNAMIC Debian 6.12.115-2 (2026-11-01)1)
+  ```
+  An image can hold several such lines (the demo image has 4, 3 of them different), so up to 3 are shown, most frequent first. MemLens does not say which one is the running kernel.
+- No ISF chosen: the image's lines, so you know which ISF to get (next section).
+
+These cases were run with real Volatility 2.28.2 (the demo `trace.elf` with a Debian 12 ISF and with none, and 50 MiB of random bytes with and without the right ISF) through the plugin's export code on fake IDA modules, not in real IDA.
 
 ### An ISF for your own image
 
@@ -183,7 +200,7 @@ Ghidra's C parser was run over the same header (`tests/ghidra/MemLensCheck.java`
 
 Neither gcc nor Ghidra accepting the header proves IDA's parser will; that is part of the untested layer. If IDA rejects a declaration, MemLens is written to bisect its batches, keep the rest, and report the rejected ones in the Output window; that relies on IDA ignoring a redeclaration when a batch is parsed again, which we have not been able to observe in IDA.
 
-The patch scan is tested without IDA: `python3 tests/test_patchscan.py` builds small ELFs with each hook pattern, including the cases that must stay quiet (ftrace's own trampolines, unconverted `__fentry__` calls, tail calls to the kernel's own functions, compiler clones). `python3 tests/test_demo_injection.py kernel.elf` plants a data pointer in `sys_call_table[0]`, `vfs_read` in `[62]` and an unmapped address in `[217]` in a copy of the demo `kernel.elf`; all three are reported and the function rows do not change. On five real captures (Debian 12, Debian 13 clean and with ftrace, kprobe and BPF hooks set, Ubuntu 24.04, Ubuntu 26.04) the hooks we set are reported and the clean Ubuntu 26.04 kernel reports none. `python3 tests/test_isf_formats.py` reads the same ISF in the four forms Volatility accepts (`.json`, `.json.xz`, `.json.gz`, `.json.bz2`), and `python3 tests/test_findpatches_stub.py` checks, on fake IDA modules, that the patch list on a file that is not a kernel (a stripped `/bin/ls`, and a small unstripped program it compiles with `cc` when one is installed) gives a warning instead of an empty list.
+The patch scan is tested without IDA: `python3 tests/test_patchscan.py` builds small ELFs with each hook pattern, including the cases that must stay quiet (ftrace's own trampolines, unconverted `__fentry__` calls, tail calls to the kernel's own functions, compiler clones). `python3 tests/test_demo_injection.py kernel.elf` plants a data pointer in `sys_call_table[0]`, `vfs_read` in `[62]` and an unmapped address in `[217]` in a copy of the demo `kernel.elf`; all three are reported and the function rows do not change. On five real captures (Debian 12, Debian 13 clean and with ftrace, kprobe and BPF hooks set, Ubuntu 24.04, Ubuntu 26.04) the hooks we set are reported and the clean Ubuntu 26.04 kernel reports none. `python3 tests/test_isf_formats.py` reads the same ISF in the four forms Volatility accepts (`.json`, `.json.xz`, `.json.gz`, `.json.bz2`), `python3 tests/test_findpatches_stub.py` checks, on fake IDA modules, that the patch list on a file that is not a kernel (a stripped `/bin/ls`, and a small unstripped program it compiles with `cc` when one is installed) gives a warning instead of an empty list, and `python3 tests/test_export_failure_stub.py` replays real Volatility 2.28.2 output (`tests/fixtures/vol-2.28.2`) through the export action on fake IDA modules with a fake `vol`: the dialog for each failure above, Cancel during the export (no banner scan) and during the banner scan.
 
 ## Limits
 

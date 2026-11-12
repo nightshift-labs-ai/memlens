@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""A failed export names the image's kernel. Drives Export kernel from memory image on FAKE ida_* modules with a fake
+`vol` that replays real Volatility 2.28.2 output recorded in tests/fixtures/vol-2.28.2 (see its README.txt), through
+the plugin's own run_cancellable. Checks our logic only; this is not a test in real IDA or with a real Volatility run."""
+import base64, json, os, runpy, stat, sys, tempfile, time
+HERE = os.path.dirname(os.path.abspath(__file__))
+FIX = os.path.join(HERE, "fixtures", "vol-2.28.2")
+
+g = runpy.run_path(os.path.join(HERE, "test_plugin_stub.py"))
+m, calls, kw = g["m"], g["calls"], g["kw"]
+
+
+def fixture(name):
+    with open(os.path.join(FIX, name), "rb") as handle:
+        return handle.read()
+
+
+# The ISFs' linux_banner constants, copied from the real Debian 13 (demo) and Debian 12 ISFs.
+D13 = ("TGludXggdmVyc2lvbiA2LjEyLjExNStkZWIxMy4xLWFtZDY0IChkZWJpYW4ta2VybmVsQGxpc3RzLmRlYmlhbi5vcmcpICh4ODZfNjQtbGludXgtZ251"
+       "LWdjYy0xNCAoRGViaWFuIDE0LjIuMC0xOSkgMTQuMi4wLCBHTlUgbGQgKEdOVSBCaW51dGlscyBmb3IgRGViaWFuKSAyLjQ0KSAjMSBTTVAgUFJFRU1Q"
+       "VF9EWU5BTUlDIERlYmlhbiA2LjEyLjExNS0yICgyMDI2LTExLTAxKQoA")
+D12 = ("TGludXggdmVyc2lvbiA2LjEuMC01NC1hbWQ2NCAoZGViaWFuLWtlcm5lbEBsaXN0cy5kZWJpYW4ub3JnKSAoZ2NjLTEyIChEZWJpYW4gMTIuMi4w"
+       "LTE0K2RlYjEydTEpIDEyLjIuMCwgR05VIGxkIChHTlUgQmludXRpbHMgZm9yIERlYmlhbikgMi40MCkgIzEgU01QIFBSRUVNUFRfRFlOQU1JQyBEZWJp"
+       "YW4gNi4xLjE5MC0xICgyMDI2LTEwLTE2KQoA")
+D13_LINE = base64.b64decode(D13).split(b"\0")[0].decode().strip()
+D12_LINE = base64.b64decode(D12).split(b"\0")[0].decode().strip()
+assert D13_LINE.startswith("Linux version 6.12.115+deb13.1-amd64 ") and D12_LINE.startswith("Linux version 6.1.0-54-amd64 ")
+
+# --- What the recordings show -------------------------------------------------------------------------------------
+# Volatility's text is the same for a wrong ISF, no ISF and a file that is not a memory image: only banners can tell.
+failed = ["export_trace_wrong_isf", "export_kernel_file_wrong_isf", "export_random_isf", "export_trace_no_isf",
+          "export_random_no_isf"]
+for name in failed:
+    assert fixture(name + ".stdout") == fixture(failed[0] + ".stdout"), name
+    assert fixture(name + ".stderr") == fixture(failed[0] + ".stderr"), name
+    assert m.kernel_check_wanted(fixture(name + ".stdout"), fixture(name + ".stderr")), name
+# Random bytes holding only the ISF's banner: Volatility exits 0 with an empty ELF (already warned about, not a failure).
+assert any(".text: 0 bytes" in p for p in m.export_problems(fixture("export_random_with_banner_isf.stdout")))
+
+trace = m.image_banners(fixture("banners_trace.stdout"))
+assert len(trace) == 3 and trace[0] == D13_LINE, trace  # 4 rows, 3 distinct; the ISF's line is found twice
+assert [b for b in trace[1:] if b.endswith(") # SMP PREEMPT_DYNAMIC Debian 6.12.115-2 (2026-11-01)")]
+assert [b for b in trace[1:] if b.endswith("(2026-11-01)1)")]
+kernel_file = m.image_banners(fixture("banners_kernel_file.stdout"))
+assert len(kernel_file) == 3 and set(kernel_file) == set(trace), kernel_file
+assert m.image_banners(fixture("banners_random.stdout")) == [] and m.image_banners(fixture("banners_avml_header.stdout")) == []
+assert m.image_banners(b"0x10\tDarwin Kernel Version 1.2.3\n0x20\tLinux version\n") == []
+assert m.banner_command("/v/vol", "/x/img") == ["/v/vol", "-q", "-f", "/x/img", "banners.Banners"]
+
+lines = m.banner_lines(["Linux version %d.0.0" % n for n in range(5)])
+assert lines.count("Image: ") == 3 and "... and 2 more" in lines and "5 different" in lines, lines
+one = m.banner_lines([D13_LINE])
+assert one == "Image: " + D13_LINE, one
+
+# --- The plugin, end to end, with a fake vol ---------------------------------------------------------------------
+FAKE_VOL = '''#!%s
+import json, os, sys, time
+here = os.path.dirname(os.path.abspath(__file__))
+plan = json.load(open(os.path.join(here, "plan.json")))
+kind = "banners" if "banners.Banners" in sys.argv else "export"
+with open(os.path.join(here, "calls.log"), "a") as log:
+    log.write(json.dumps([kind] + sys.argv[1:]) + "\\n")
+step = plan[kind]
+time.sleep(step.get("sleep", 0))
+sys.stdout.buffer.write(open(step["path"] + ".stdout", "rb").read())
+sys.stderr.buffer.write(open(step["path"] + ".stderr", "rb").read())
+sys.exit(step["exit"])
+''' % sys.executable
+
+with tempfile.TemporaryDirectory() as work:
+    bindir = os.path.join(work, "bin")
+    os.mkdir(bindir)
+    vol = os.path.join(bindir, "vol")
+    with open(vol, "w") as handle:
+        handle.write(FAKE_VOL)
+    os.chmod(vol, os.stat(vol).st_mode | stat.S_IXUSR)
+    os.environ["PATH"] = bindir + os.pathsep + os.environ.get("PATH", "")
+    image = os.path.join(work, "trace.elf")
+    open(image, "wb").close()
+
+    def isf_file(name, banner=None, text=None):
+        path = os.path.join(work, name)
+        data = {"base_types": {}, "user_types": {}, "enums": {}, "symbols": {}}
+        if banner:
+            data["symbols"]["linux_banner"] = {"address": 1, "constant_data": banner}
+        with open(path, "w") as handle:
+            handle.write(text if text is not None else json.dumps(data))
+        return path
+
+    d13, d12 = isf_file("d13.json", D13), isf_file("d12.json", D12)
+    no_banner, not_isf = isf_file("plain.json"), isf_file("notes.json", text="not an ISF")
+    waits, started = [], []
+    kw.show_wait_box = lambda text: waits.append(text)
+    real_run_cancellable = m.run_cancellable
+    m.run_cancellable = lambda command: started.append(command) or real_run_cancellable(command)
+
+    def run(export, banners=None, isf=None, cancel=lambda: False, export_sleep=0, banners_sleep=0, banners_exit=0):
+        """Export with the recorded export output, then (if the plugin asks) the recorded banners output."""
+        plan = {"export": {"path": os.path.join(FIX, export), "exit": 1, "sleep": export_sleep},
+                "banners": {"path": os.path.join(FIX, banners or "banners_random"), "exit": banners_exit,
+                            "sleep": banners_sleep}}
+        with open(os.path.join(bindir, "plan.json"), "w") as handle:
+            json.dump(plan, handle)
+        if os.path.exists(os.path.join(bindir, "calls.log")):
+            os.remove(os.path.join(bindir, "calls.log"))
+        kw.ask_file = lambda save, default, prompt: image if prompt == "Linux memory image" else isf
+        kw.user_cancelled = cancel
+        del calls[:], waits[:], started[:]
+        t0 = time.time()
+        assert m.ExportKernel().activate(None) == 0
+        log = [json.loads(line) for line in open(os.path.join(bindir, "calls.log"))] if os.path.exists(
+            os.path.join(bindir, "calls.log")) else []
+        dialogs = [c[1] for c in calls if c[0] == "ui"]
+        return dialogs, log, time.time() - t0
+
+    def ran_banners(log):
+        """The banner scans the plugin started (also checked against what the fake vol logged when it got that far)."""
+        scans = [command[1:] for command in started if "banners.Banners" in command]
+        assert [entry[1:] for entry in log if entry[0] == "banners"] in ([], scans), (log, scans)
+        return [["banners"] + scan for scan in scans]
+
+    # A Debian 12 ISF on the Debian 13 image (the judge's case): the ISF is named as another kernel, both lines shown.
+    dialogs, log, _ = run("export_trace_wrong_isf", "banners_trace", d12)
+    assert len(dialogs) == 1, dialogs
+    text = dialogs[0]
+    assert ran_banners(log) == [["banners", "-q", "-f", image, "banners.Banners"]], log
+    assert "The ISF you chose was built for another kernel" in text and "\nISF: " + D12_LINE + "\n" in text, text
+    assert "\nImage: " + D13_LINE + "\n" in text and text.count("\nImage: ") == 3 and "3 different" in text, text
+    assert text.index("ISF: ") < text.index("Image: ") and "An ISF for your own image" in text, text
+    assert "(the ISF's)" not in text and "is the running kernel" not in text, text
+    assert "\nUnsatisfied requirement" in text and "\n2.28.2" not in text, text  # Volatility's tail from a line start
+    assert any("looking for the image's kernel version" in w for w in waits), waits
+    assert any(c[0] == "msg" and c[1].startswith("[MemLens] banners.Banners (exit 0):") and D13_LINE in c[1] for c in calls)
+    # The same for the kernel file given as the image with the wrong ISF (recorded too).
+    text = run("export_kernel_file_wrong_isf", "banners_kernel_file", d12)[0][0]
+    assert "built for another kernel" in text and text.count("\nImage: ") == 3, text
+
+    # Random bytes with the right ISF (the judge's case): no kernel in the file, the ISF is not blamed.
+    for isf in (d13, None):
+        dialogs, log, _ = run("export_random_isf" if isf else "export_random_no_isf", "banners_random", isf)
+        text = dialogs[0]
+        assert len(ran_banners(log)) == 1, log
+        assert "Volatility found no Linux kernel in this file" in text and "LiME" in text and "AVML" in text, text
+        assert "another kernel" not in text and "Image:" not in text and "ISF:" not in text, text
+        assert "fresh pip install" not in text, text
+
+    # No ISF (Volatility's own symbol folders): the image's lines, so the user knows which ISF to get.
+    text = run("export_trace_no_isf", "banners_trace", None)[0][0]
+    assert "fresh pip install has none" in text and "An ISF for your own image" in text, text
+    assert text.count("\nImage: ") == 3 and "\nImage: " + D13_LINE + "\n" in text and "ISF:" not in text, text
+    assert "is the running kernel" not in text, text
+
+    # The ISF's line is in the image yet Volatility failed (not recorded: the real export with this ISF succeeds).
+    text = run("export_trace_wrong_isf", "banners_trace", d13)[0][0]
+    assert "holds the ISF's kernel version line" in text and "another kernel" not in text, text
+    assert "\nImage: " + D13_LINE + " (the ISF's)\n" in text and text.count("(the ISF's)") == 1, text
+    # An ISF without linux_banner, and a file that is not an ISF: said so, the image's lines still shown.
+    text = run("export_trace_wrong_isf", "banners_trace", no_banner)[0][0]
+    assert "cannot be compared with the image: it has no linux_banner" in text and "\nImage: " + D13_LINE in text, text
+    text = run("export_trace_wrong_isf", "banners_trace", not_isf)[0][0]
+    assert "cannot be compared with the image: notes.json is not a readable Volatility ISF" in text, text
+    for damaged in ("!!!x", 7):  # not base64, not text: said so instead of an unexpected error
+        line, problem = m.isf_banner(isf_file("damaged.json", damaged))
+        assert line is None and problem.startswith("its linux_banner is not readable"), problem
+
+
+    # Cancel during the export: no banner scan, no dialog.
+    dialogs, log, took = run("export_trace_wrong_isf", "banners_trace", d12, cancel=lambda: True, export_sleep=5)
+    assert dialogs == [] and ran_banners(log) == [] and took < 4, (dialogs, log, took)
+    assert not any("kernel version" in w for w in waits), waits
+    # Cancel during the banner scan: it is killed, and the dialog says the check was cancelled (no guess either way).
+    dialogs, log, took = run("export_trace_wrong_isf", "banners_trace", d12, banners_sleep=5,
+                             cancel=lambda: bool(waits) and "kernel version" in waits[-1])
+    text = dialogs[0]
+    assert len(ran_banners(log)) == 1 and took < 4, (log, took)
+    assert "You cancelled the check" in text and "Image:" not in text and "ISF:" not in text, text
+    assert "either the ISF you chose was built for another kernel" in text and "not a Linux memory image" in text, text
+    # The banner scan fails too: said so, and no claim about the kernel.
+    text = run("export_trace_no_isf", "banners_trace", None, banners_exit=1)[0][0]
+    assert "banners.Banners exited with 1" in text and "Image:" not in text and "fresh pip install" in text, text
+
+    # Not a kernel-not-found failure (an old Volatility without the exporter): no banner scan.
+    old = os.path.join(work, "old_volatility")  # the message shape seen with 2.11.0 (an absolute path wins in join)
+    open(old + ".stdout", "wb").write(b"Volatility 3 Framework 2.11.0\n")
+    open(old + ".stderr", "wb").write(b"vol: error: argument plugin: invalid choice linux.kernel2elf.Kernel2Elf "
+                                      b"(choose from banners.Banners)\n")
+    dialogs, log, _ = run(old, "banners_trace", d12)
+    assert ran_banners(log) == [] and "could not load MemLens' exporter" in dialogs[0], (log, dialogs)
+
+# The real demo ISF, when present, carries exactly the line the recorded scan of trace.elf put first.
+demo_isf = os.environ.get("MEMLENS_ISF", "/home/agent/tools/memlens-demo/x/debian-6.12.115+deb13.1-amd64.json.xz")
+if os.path.isfile(demo_isf):
+    assert m.isf_banner(demo_isf) == (D13_LINE, None), m.isf_banner(demo_isf)
+    print("demo ISF %s: its linux_banner is the recorded image's first line" % demo_isf)
+else:
+    print("SKIP: demo ISF not found (set MEMLENS_ISF)")
+print("export failure stub test OK (fake IDA modules, recorded Volatility 2.28.2 output)")

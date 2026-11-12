@@ -14,7 +14,8 @@ import re
 import sys
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-MODULES = ("ida_kernwin", "ida_idaapi", "ida_typeinf", "ida_nalt", "ida_bytes", "idc", "idautils")
+MODULES = ("ida_kernwin", "ida_idaapi", "ida_typeinf", "ida_nalt", "ida_bytes", "ida_name", "ida_netnode", "ida_xref", "idc",
+           "idautils")
 
 
 def dotted(node):
@@ -63,8 +64,9 @@ def main():
     # Methods called on instances of IDA classes, which the module walk above cannot see.
     used |= {"ida_typeinf.tinfo_t.get_named_type", "ida_typeinf.tinfo_t.get_size"}
     used |= {"ida_idaapi.plugin_t.run", "ida_idaapi.plugin_t.term"}
+    used |= {"ida_netnode.netnode.getblob", "ida_netnode.netnode.setblob"}
     used |= {"ida_kernwin.Choose.Show", "ida_kernwin.Choose.OnGetSize", "ida_kernwin.Choose.OnGetLine",
-             "ida_kernwin.Choose.OnSelectLine", "ida_kernwin.action_handler_t.activate",
+             "ida_kernwin.Choose.OnSelectLine", "ida_kernwin.Choose.OnEditLine", "ida_kernwin.action_handler_t.activate",
              "ida_kernwin.action_handler_t.update"}
     missing = sorted(used - known)
     for name in missing:

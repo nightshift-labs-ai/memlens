@@ -3,10 +3,13 @@
 Three actions under Edit > Plugins:
   * Export kernel from memory image: runs Volatility 3 and writes a symbolled ELF to open in IDA.
   * Apply kernel types from ISF: imports every struct, union and enum of that kernel.
-  * Show patched kernel functions: lists hooked entries and odd syscall slots, Enter jumps there.
+  * Show patched kernel functions: lists hooked entries and odd syscall slots, Enter jumps there; links each hooked
+    entry to its hook page and the page to its handler (code xrefs) and names the hook pages by role.
 """
 import base64
+import hashlib
 import itertools
+import json
 import traceback
 import os
 import re
@@ -21,7 +24,10 @@ import ida_bytes
 import ida_idaapi
 import ida_kernwin
 import ida_nalt
+import ida_name
+import ida_netnode
 import ida_typeinf
+import ida_xref
 import idc
 
 ISF_FILTER = "FILTER Volatility ISF|*.json;*.xz;*.gz;*.bz2|All files|*\n"
@@ -786,34 +792,48 @@ class ExportKernel(ida_kernwin.action_handler_t):
 
 
 class PatchList(ida_kernwin.Choose):
-    """Patched entries and odd syscall slots; Enter jumps to one."""
+    """Patched entries and odd syscall slots. Enter jumps to the entry; Ctrl+E (the chooser's Edit command, captioned
+    "Jump to handler" in its context menu) jumps to the handler the hook page calls."""
 
-    def __init__(self, findings):
-        columns = [["Address", 18 | ida_kernwin.Choose.CHCOL_HEX], ["Where", 34], ["What", 34], ["Target", 40]]
-        ida_kernwin.Choose.__init__(self, "MemLens: patched kernel functions", columns)
-        self.findings = findings
+    def __init__(self, rows):
+        columns = [["Address", 18 | ida_kernwin.Choose.CHCOL_HEX], ["Where", 34], ["What", 34], ["Target", 40], ["Handler", 36]]
+        ida_kernwin.Choose.__init__(self, "MemLens: patched kernel functions", columns, ida_kernwin.Choose.CH_CAN_EDIT,
+                                    popup_names=["Insert", "Delete", "Jump to handler", "Refresh"])
+        self.rows = rows
 
     def OnGetSize(self):
-        return len(self.findings)
+        return len(self.rows)
 
     def OnGetLine(self, n):
-        address, name, what, target, _ = self.findings[n]
-        return ["%X" % address, name, what, target]
+        address, name, what, target, handler, _ = self.rows[n]
+        return ["%X" % address, name, what, target, handler]
 
     def OnSelectLine(self, n):
-        ida_kernwin.jumpto(self.findings[n][0])
+        ida_kernwin.jumpto(self.rows[n][0])
+        return (ida_kernwin.Choose.NOTHING_CHANGED,)
+
+    def OnEditLine(self, n):
+        handler = self.rows[n][5]
+        if handler is None:
+            ida_kernwin.msg("[MemLens] no handler is known for %s (only hook pages that MemLens copied have one)\n" % self.rows[n][1])
+        else:
+            ida_kernwin.jumpto(handler)
         return (ida_kernwin.Choose.NOTHING_CHANGED,)
 
 
 def scan_current_input():
-    """Findings for the ELF open in IDA, which is plain data: the database is only annotated."""
+    """(image, findings) for the ELF open in IDA, which is plain data: the database is only annotated. None if there
+    is nothing to show."""
     path = ida_nalt.get_input_file_path()
-    if not path or not os.path.isfile(path):
+    picked = not path or not os.path.isfile(path)
+    if picked:
         path = ida_kernwin.ask_file(False, "*.elf", "kernel.elf exported by MemLens")
         if not path:
             return None
     with open(path, "rb") as handle:
         blob = handle.read()
+    if picked and not same_as_database(path, blob):
+        return None
     try:
         if patchscan.on_disk_kernel(blob):
             raise ValueError("this is a kernel file from disk, whose entry bytes are not what ran")
@@ -825,10 +845,24 @@ def scan_current_input():
                                 "mean clean. This works on the kernel.elf that MemLens exported from a memory image."
                                 % (os.path.basename(path), reason))
             return None
-        return patchscan.scan(blob, image)
+        return image, patchscan.scan(blob, image)
     except patchscan.BAD_ELF as error:
         ida_kernwin.warning("MemLens needs the kernel.elf it exported: %s" % error)
         return None
+
+
+def same_as_database(path, blob):
+    """True when blob is the file the database was made from (its SHA-256 as the database stored it), or when the user
+    says to go on anyway. Comments, xrefs and names from another file would land on the wrong addresses."""
+    stored = ida_nalt.retrieve_input_file_sha256()
+    if not stored:
+        return True  # nothing to compare with
+    digest = hashlib.sha256(blob)
+    if bytes(stored) in (digest.digest(), digest.hexdigest().encode()):
+        return True
+    text = ("%s is not the file this database was made from (its SHA-256 differs), so comments, xrefs and names "
+            "would go to the wrong addresses. Use it anyway?" % os.path.basename(path))
+    return ida_kernwin.ask_yn(ida_kernwin.ASKBTN_NO, text.replace("%", "%%")) == ida_kernwin.ASKBTN_YES
 
 
 def add_comment(address, text):
@@ -838,17 +872,95 @@ def add_comment(address, text):
         idc.set_cmt(address, old + "\n" + text if old else text, False)
 
 
+HOOK_RECORD = "$ memlens.hooks"  # netnode: what MemLens linked and renamed, so running it again adds nothing twice
+HOOK_RECORD_TAG = "B"
+
+
+def load_hook_record():
+    """(netnode, record) with record = {"xrefs": [[from, to, flow], ...], "names": [[page, old name, new name], ...]}."""
+    node = ida_netnode.netnode(HOOK_RECORD, 0, True)
+    blob = node.getblob(0, HOOK_RECORD_TAG)
+    try:
+        record = json.loads(blob.decode("utf-8")) if blob else {}
+    except ValueError:
+        record = {}
+    return node, {"xrefs": list(record.get("xrefs", [])), "names": list(record.get("names", []))}
+
+
+def link_hooks(image, findings):
+    """Apply the hook chain that patchscan decides: a user code xref from each hooking instruction to its target and
+    from each copied hook page's handler call to the handler, a role name for each such page (once, and only while it
+    still has the exporter's memlens_target_ label or no name but IDA's dummy one), and a comment there with the old
+    label. What was added is kept in the HOOK_RECORD netnode, so a second run adds no xref and renames nothing again,
+    and an xref or name the user removed since is not put back. Returns (links, counts)."""
+    links = patchscan.hook_links(image, findings)
+    flow_types = {"call": ida_xref.fl_CN, "jmp": ida_xref.fl_JN}  # near call or near jump, as the hooking instruction is
+    node, record = load_hook_record()
+    done = {tuple(xref) for xref in record["xrefs"]}
+    counts = dict.fromkeys(("xrefs", "xrefs_before", "xrefs_failed", "renamed", "named_before", "kept", "rename_failed"), 0)
+    for source, target, flow in patchscan.hook_xrefs(links):
+        if (source, target, flow) in done:
+            counts["xrefs_before"] += 1
+        elif ida_xref.add_cref(source, target, flow_types[flow] | ida_xref.XREF_USER):
+            record["xrefs"].append([source, target, flow])
+            done.add((source, target, flow))
+            counts["xrefs"] += 1
+        else:
+            counts["xrefs_failed"] += 1
+    renamed = {page for page, _, _ in record["names"]}
+    for page, name in sorted(patchscan.role_names(image, links).items()):
+        label = "%s%x" % (patchscan.TARGET_PREFIX, page)
+        current = ida_name.get_name(page)
+        if current == name:
+            counts["named_before"] += 1
+        elif page in renamed or (current != label and ida_bytes.has_user_name(ida_bytes.get_flags(page))):
+            counts["kept"] += 1  # renamed or unnamed by the user since MemLens named it, or a real name: leave it
+        elif ida_name.set_name(page, name, ida_name.SN_NOWARN | ida_name.SN_NON_AUTO):  # SN_NON_AUTO: not an auto name
+            record["names"].append([page, label, name])
+            counts["renamed"] += 1
+        else:
+            counts["rename_failed"] += 1  # IDA refused it, for example because the name is used elsewhere
+    for page, text in patchscan.page_comments(links).items():
+        add_comment(page, text)
+    node.setblob(json.dumps(record).encode("utf-8"), 0, HOOK_RECORD_TAG)
+    return links, counts
+
+
+def link_report(links, counts):
+    """One Output-window line on what link_hooks did."""
+    line = ("[MemLens] hook chain: %d patched entries lead into this database, %d to a hook page MemLens copied; "
+            "%d code xrefs added" % (len(links), sum(1 for link in links if link.page), counts["xrefs"]))
+    extra = [("%d already added by an earlier run" % counts["xrefs_before"]) if counts["xrefs_before"] else "",
+             ("%d refused by IDA" % counts["xrefs_failed"]) if counts["xrefs_failed"] else ""]
+    line += "".join(" (%s)" % text for text in extra if text)
+    line += "; %d hook pages renamed by role" % counts["renamed"]
+    for key, text in (("named_before", "%d already named by an earlier run"), ("kept", "%d left alone, they have another name now"),
+                      ("rename_failed", "%d refused by IDA")):
+        if counts[key]:
+            line += ", " + text % counts[key]
+    return line + "\n"
+
+
 class FindPatches(ida_kernwin.action_handler_t):
     @guarded
     def activate(self, ctx):
-        findings = scan_current_input()
-        if findings is None:
+        scanned = scan_current_input()
+        if scanned is None:
             return 0
+        image, findings = scanned
         for address, _, what, target, _ in findings:
             add_comment(address, "MemLens: %s %s" % (what, target))
         ida_kernwin.msg("[MemLens] %d patched entries or odd syscall slots\n" % len(findings))
+        try:
+            links, counts = link_hooks(image, findings)
+            ida_kernwin.msg(link_report(links, counts))
+        except Exception:  # the list is still worth showing, with the names the database has
+            links = []
+            ida_kernwin.msg("[MemLens] hook chain stopped by this error (xrefs or names added before it are not "
+                            "recorded in the database):\n%s\n" % traceback.format_exc())
+        names = {page: ida_name.get_name(page) for page in patchscan.copied_targets(image, findings)}
         global _open_list  # a non-modal chooser must outlive this call
-        _open_list = PatchList(findings)
+        _open_list = PatchList(patchscan.list_rows(image, findings, links, names))
         _open_list.Show()
         return 1
 

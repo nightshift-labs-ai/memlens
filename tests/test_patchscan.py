@@ -108,11 +108,19 @@ code = bytearray(b"\x90" * TEXT)
 put(0x200, call(BASE + 0x200, BASE + 0xc00))                                    # entry calls the copied page
 put(0xc00 + 0x40, call(BASE + 0xc40, BASE + 0xd00))                             # page calls the handler
 put(0x300, call(BASE + 0x300, BASE + 0xe00))                                    # page that calls nothing named
+put(0x400, call(BASE + 0x400, BASE + 0x600))                                    # page that calls a module's function first
+put(0x600 + 0x40, call(BASE + 0x640, BASE + 0x800))
+put(0x500, call(BASE + 0x500, BASE + 0xa00))                                    # page that calls a core-kernel helper first
+put(0xa00 + 0x40, call(BASE + 0xa40, BASE + 0xb00))
 symbols = [("hooked", BASE + 0x200, 0x100), ("other", BASE + 0x300, 0x100), ("memlens_target_ffffffff81000c00", BASE + 0xc00, 0x100),
-           ("kprobe_ftrace_handler", BASE + 0xd00, 0x100), ("memlens_target_ffffffff81000e00", BASE + 0xe00, 0x100)]
+           ("kprobe_ftrace_handler", BASE + 0xd00, 0x100), ("memlens_target_ffffffff81000e00", BASE + 0xe00, 0x100),
+           ("modhooked", BASE + 0x400, 0x100), ("memlens_target_ffffffff81000600", BASE + 0x600, 0x100), ("evil.cb", BASE + 0x800, 0x100),
+           ("helperhooked", BASE + 0x500, 0x100), ("memlens_target_ffffffff81000a00", BASE + 0xa00, 0x100), ("_printk", BASE + 0xb00, 0x100)]
 found = {row[1]: row for row in ps.scan_functions(ps.Image(elf(code, symbols)))}
 assert found["hooked"][3] == "memlens_target_ffffffff81000c00 (calls kprobe_ftrace_handler, kprobe via ftrace)", found
 assert found["other"][3] == "memlens_target_ffffffff81000e00", found
+assert found["modhooked"][3] == "memlens_target_ffffffff81000600 (calls evil.cb, module callback)", found  # judge s160 finding 5
+assert found["helperhooked"][3] == "memlens_target_ffffffff81000a00 (calls _printk)", found
 # Sealed ENDBR: the kernel replaced endbr64 with a 4-byte NOP, and hooks still sit at +4 (both poison encodings).
 for poison in (b"\x66\x0f\x1f\x00", b"\x0f\x1f\x40\xd6"):
     code = bytearray(b"\x90" * TEXT)

@@ -290,6 +290,12 @@ with tempfile.TemporaryDirectory() as t:
     assert table.OnInsertLine(1) == (0,) and calls[-1][0] == "msg" and "no owner is known for sys_call_table[1]" in calls[-1][1], calls[-1]
     assert table.OnInsertLine(2) == (0,) and calls[-1][0] == "msg" and "(no symbol: heap)" in calls[-1][1] and "not in this database" in calls[-1][1], calls[-1]
     assert table.OnInsertLine(-1) == (0,) and calls[-1][0] == "msg", calls[-1]  # nothing selected
+    # A hook page with no known role: its first named call is not the handler, so Ctrl+E says so and jumps nowhere.
+    hook_code = m.PatchList([(0x80, "vfs_read", "push+ret to memory with no symbol", "memlens_target_ffffffffc0b00000",
+                              "(hook code; first call: _printk)", None, "", None)])
+    del calls[:]
+    assert hook_code.OnEditLine(0) == (0,) and len(calls) == 1 and calls[-1][0] == "msg", calls
+    assert "no handler is known for vfs_read (hook code; first call: _printk)" in calls[-1][1], calls[-1]
     # Apply kernel types keeps the ISF's offset of ftrace_ops.func for the patch list (Show patched kernel functions).
     layout_isf = dict(isf, user_types=dict(isf["user_types"], ftrace_ops={"kind": "struct", "size": 16, "fields": {
         "func": {"offset": 8, "type": {"kind": "base", "name": "unsigned int"}}}}))

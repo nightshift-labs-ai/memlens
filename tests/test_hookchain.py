@@ -141,6 +141,8 @@ assert rows["ripjmp"][3:6] == ("real_tramp", "", None), rows["ripjmp"]
 assert rows["traced_a"][6:] == ("", None) and rows["pushret"][6:] == ("", None), rows
 # The rule behind it: a compiler clone of a core function (kfree.part.0) is not a module symbol (code review s170 n-3).
 assert not ps.into_module("", "kfree.part.0") and not ps.into_module("", "_printk") and ps.into_module("", "evilmod.fh_sys_kill")
+assert ps.handler_kind("bpf.bpf_prog_0123456789abcdef_x") is None and ps.handler_kind(".E_copy") is None
+assert ps.handler_kind("evilmod.fh_sys_kill") == ps.MODULE_CALLBACK and ps.handler_kind("evilmod.fh_cb.isra.0") == ps.MODULE_CALLBACK
 assert rows["ripjmp"][6:] == ("", None) and len(rows["ripjmp"]) == 8, rows["ripjmp"]
 # A link that is not a hook page keeps the scan's label even if the database calls its target something else now (IDA
 # may give a module function's middle a dummy loc_ name once an xref lands there).

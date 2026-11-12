@@ -54,7 +54,7 @@ torn = [KAS("bpf_prog_neg", "t", PROG & MASK, -0x40, "bpf"), KAS("bpf_prog_huge"
 kept, dropped = k.sane_ksyms(torn)
 assert kept == [ksyms[0], ksyms[2]] and dropped == 2, (kept, dropped)
 assert k.sane_ksyms(ksyms) == (ksyms, 0) and k.sane_ksyms([KAS("z", "t", PROG & MASK, 0, "bpf")])[1] == 0
-# The bound itself (claims s170): a 2 MB span is kept, one byte more is dropped.
+# The bound itself (claims s170): a 64 MB span (MAX_BPF_SPAN) is kept, one byte more is dropped.
 edge = [KAS("at_max", "t", PROG & MASK, k.MAX_BPF_SPAN, "bpf"), KAS("over_max", "t", PROG2 & MASK, k.MAX_BPF_SPAN + 1, "bpf")]
 assert k.MAX_BPF_SPAN == 0x4000000 and k.sane_ksyms(edge) == ([edge[0]], 1), k.sane_ksyms(edge)
 

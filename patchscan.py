@@ -170,7 +170,8 @@ def handler_kind(handler):
     function (module.symbol, into_module), or None: a core-kernel function that is not ftrace, kprobe or BPF plumbing
     (_printk, kfree, a retpoline thunk) is a helper the hook code uses, not a handler (judge s160 finding 5)."""
     kind = next((kind for prefix, kind in HANDLER_KINDS if handler.startswith(prefix)), None)
-    return kind or (MODULE_CALLBACK if into_module("", handler) else None)
+    # bpf.* (the exporter's BPF names) and dot-prefixed core labels (.E_copy, .slowpath) are not module functions (code review s170 n-1)
+    return kind or (MODULE_CALLBACK if into_module("", handler) and not handler.startswith(("bpf.", ".")) else None)
 
 
 def page_kind(image, page, handler):

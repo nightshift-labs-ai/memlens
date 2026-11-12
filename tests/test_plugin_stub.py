@@ -285,7 +285,7 @@ with tempfile.TemporaryDirectory() as t:
     assert table.OnGetSize() == 3 and table.OnGetLine(0) == ["10", "fn", "what", "tgt", "handler_fn (ftrace)", "evil.cb (ftrace_ops evil.ops)"]
     assert table.OnSelectLine(0) == (0,) and calls[-1] == ("jump", 0x10)
     assert table.OnEditLine(0) == (0,) and calls[-1] == ("jump", 0x30)  # Ctrl+E: the handler
-    assert table.OnEditLine(1) == (0,) and calls[-1][0] == "msg" and "no handler is known for sys_call_table[1]" in calls[-1][1], calls[-1]
+    assert table.OnEditLine(1) == (0,) and calls[-1][0] == "msg" and "no handler is known for sys_call_table[1] (only hook pages that MemLens copied have one)" in calls[-1][1], calls[-1]  # code review s170 n-3 e07
     assert table.OnInsertLine(0) == (0,) and calls[-1] == ("jump", 0x50)  # Insert: the owner
     assert table.OnInsertLine(1) == (0,) and calls[-1][0] == "msg" and "no owner is known for sys_call_table[1]" in calls[-1][1], calls[-1]
     assert table.OnInsertLine(2) == (0,) and calls[-1][0] == "msg" and "(no symbol: heap)" in calls[-1][1] and "not in this database" in calls[-1][1], calls[-1]
@@ -346,5 +346,9 @@ with tempfile.TemporaryDirectory() as t:
     keep_dir = tempfile.mkdtemp(); open(os.path.join(keep_dir, "kernel.elf"), "wb").close()
     assert "left it in place" in m.remove_unusable(keep_dir, "kernel.elf", None) and os.path.exists(os.path.join(keep_dir, "kernel.elf"))
     assert m.written_file(b"", missing, None) == "kernel.elf" and m.written_file(b"", missing, set()) == "kernel.elf"
+    # code review s170 n-3 e03/e04: removing the new export fails (its name is a directory: IsADirectoryError, an OSError) -> the dialog says so
+    odd_dir = tempfile.mkdtemp(); before_odd = m.elf_files(odd_dir); os.mkdir(os.path.join(odd_dir, "kernel.elf"))
+    said = m.remove_unusable(odd_dir, "kernel.elf", before_odd)
+    assert said.startswith("MemLens could not remove it (") and said.endswith("); do not open it.") and os.path.isdir(os.path.join(odd_dir, "kernel.elf")), said
     plugin.term(); assert sum(c[0] == "unreg" for c in calls) == 3
 print("stub test OK (fake IDA modules)")

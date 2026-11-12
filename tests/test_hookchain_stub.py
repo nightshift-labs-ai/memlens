@@ -159,9 +159,22 @@ with tempfile.TemporaryDirectory() as work:
         crefs, renames, out = run()
     finally:
         netnode.getblob = good_getblob
-    assert crefs == [] and renames == [] and "getblob broke" in out and "hook chain not added" in out, out
+    assert crefs == [] and renames == [] and "getblob broke" in out and "hook chain stopped by this error" in out, out
     lines = {line[1]: line for line in (m._open_list.OnGetLine(n) for n in range(m._open_list.OnGetSize()))}
     assert lines["traced_a"][3:] == ["memlens_target_%x" % F, "function_trace_call (ftrace)"] and len(lines) == 6, lines
+    # A late failure (the record cannot be saved) after xrefs and names were added: the Output window must not claim
+    # that nothing was added.
+    database(blob)
+    good_setblob = netnode.setblob
+    def broken_set(self, data, start, tag): raise TypeError("setblob broke")
+    netnode.setblob = broken_set
+    try:
+        crefs, renames, out = run()
+    finally:
+        netnode.setblob = good_setblob
+    assert len(crefs) == 7 and len(renames) == 3 and "setblob broke" in out, (crefs, renames, out)
+    assert "hook chain stopped by this error (xrefs or names added before it are not recorded" in out, out
+    assert "no xrefs or renames" not in out, out
     # The input file is missing and the user picks a kernel.elf: if its SHA-256 is not the database's, MemLens asks
     # before writing anything (default No); the same file goes ahead without a question.
     import hashlib

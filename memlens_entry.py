@@ -657,8 +657,8 @@ class FindPatches(ida_kernwin.action_handler_t):
             ida_kernwin.msg(link_report(links, counts))
         except Exception:  # the list is still worth showing, with the names the database has
             links = []
-            ida_kernwin.msg("[MemLens] hook chain not added (no xrefs or renames) because of this error:\n%s\n"
-                            % traceback.format_exc())
+            ida_kernwin.msg("[MemLens] hook chain stopped by this error (xrefs or names added before it are not "
+                            "recorded in the database):\n%s\n" % traceback.format_exc())
         names = {page: ida_name.get_name(page) for page in patchscan.copied_targets(image, findings)}
         global _open_list  # a non-modal chooser must outlive this call
         _open_list = PatchList(patchscan.list_rows(image, findings, links, names))

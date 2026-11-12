@@ -190,6 +190,13 @@ with tempfile.TemporaryDirectory() as t:
     code, out, err = m.run_cancellable([sys.executable, "-c", "import sys; print('written\\tkernel-1.elf\\t0x0\\t5'); sys.stderr.write('boom'); sys.exit(3)"])
     assert code == 3 and err == b"boom" and m.written_file(out) == "kernel-1.elf", (code, out, err)
     assert m.written_file(b"") == "kernel.elf"
+    # IDA 9.5 sets PYTHONHOME to its own Python's prefix; Volatility (another Python) must not inherit it.
+    os.environ["PYTHONHOME"] = os.path.join(tempfile.gettempdir(), "no-such-ida-python-prefix")
+    try:
+        code2, out2, err2 = m.run_cancellable([sys.executable, "-c", "print('ok')"])
+    finally:
+        del os.environ["PYTHONHOME"]
+    assert code2 == 0 and out2.strip() == b"ok", err2
     # Export failure text: Volatility's own explanation (stdout) is shown, plus a hint for the missing-symbols case
     vol_out = b"A symbol table requirement was not fulfilled.  Please verify that:\n\tYou have the correct symbol file\n"
     vol_err = b"Unable to validate the plugin requirements: ['plugins.Kernel2Elf.kernel.symbol_table_name']\n"

@@ -398,10 +398,20 @@ def export_failure_text(stdout, stderr, isf_given):
     return "\n\n".join(lines)
 
 
+def child_environment():
+    """IDA's environment for Volatility, minus PYTHONHOME. IDAPython in IDA 9.5 sets PYTHONHOME to the prefix of
+    IDA's own Python when it is not set (SDK idapython.cpp, before Py_Initialize), and child processes inherit it.
+    Volatility runs on its own Python: with another Python's PYTHONHOME it cannot find its standard library
+    ("No module named 'encodings'") or its venv. PYTHONPATH is kept, since a user may need it to find volatility3."""
+    env = dict(os.environ)
+    env.pop("PYTHONHOME", None)
+    return env
+
+
 def run_cancellable(command):
     """Run without freezing IDA. Returns (exit code, stdout, stderr); exit code None means cancelled."""
     with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
-        process = subprocess.Popen(command, stdout=output, stderr=errors)
+        process = subprocess.Popen(command, stdout=output, stderr=errors, env=child_environment())
         while process.poll() is None:
             if ida_kernwin.user_cancelled():
                 process.kill()

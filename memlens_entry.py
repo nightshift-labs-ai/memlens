@@ -370,6 +370,8 @@ def kernel_not_found(out, err):
             or "kernel.layer_name" in err or "translation layer requirement" in out)
 
 
+# Volatility's own warning for an AVML image when it cannot load the snappy library (volatility3/framework/layers/avml.py).
+AVML_WITHOUT_SNAPPY = "AVML file detected, but snappy library could not be found"
 ISF_README = "README, \"An ISF for your own image\""
 SHOWN_BANNERS = 3
 
@@ -404,8 +406,10 @@ def isf_banner(isf_path):
 
 
 def kernel_check_wanted(stdout, stderr):
-    """After a failed export: is banners.Banners worth running? Only when no kernel was found."""
-    return kernel_not_found(stdout.decode("utf-8", "replace"), stderr.decode("utf-8", "replace"))
+    """After a failed export: is banners.Banners worth running? Only when no kernel was found, and not for an AVML
+    image Volatility cannot decompress (it would scan compressed bytes)."""
+    out, err = stdout.decode("utf-8", "replace"), stderr.decode("utf-8", "replace")
+    return kernel_not_found(out, err) and AVML_WITHOUT_SNAPPY not in out + err
 
 
 def check_kernel(vol, image, isf_path):
@@ -491,6 +495,10 @@ def export_failure_text(stdout, stderr, isf_given, check=None):
                          "than the Linux module API the exporter uses. MemLens is tested with Volatility 2.28.2: "
                          "pipx install volatility3==2.28.2 (or a venv, see the README), then make sure IDA finds that vol "
                          "first on PATH." % (" (%s)" % number if number else ""))
+    elif AVML_WITHOUT_SNAPPY in out + err:
+        lines.append("This is an AVML image, which Volatility reads only with the snappy library, and it could not load "
+                     "that library. Install snappy and export again (Volatility loads libsnappy.so.1 on Linux, "
+                     "libsnappy.1.dylib on macOS and snappy64 on 64-bit Windows).")
     elif hint:
         lines += hint
     elif kernel_not_found(out, err):

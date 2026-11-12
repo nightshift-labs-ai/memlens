@@ -134,8 +134,9 @@ Volatility 2.28.2 prints the same error, byte for byte, for a wrong ISF, for no 
   ```
   An image can hold several such lines (the demo image has 4, 3 of them different), so up to 3 are shown, most frequent first. MemLens does not say which one is the running kernel.
 - No ISF chosen: the image's lines, so you know which ISF to get (next section).
+- An AVML image that Volatility cannot read because the snappy library is missing: the dialog says so (Volatility's own warning).
 
-These cases were run with real Volatility 2.28.2 (the demo `trace.elf` with a Debian 12 ISF and with none, and 50 MiB of random bytes with and without the right ISF) through the plugin's export code on fake IDA modules, not in real IDA.
+These cases were run with real Volatility 2.28.2 (the demo `trace.elf` with a Debian 12 ISF and with none, 50 MiB of random bytes with and without the right ISF, an AVML header without snappy) through the plugin's export code on fake IDA modules, not in real IDA.
 
 ### An ISF for your own image
 

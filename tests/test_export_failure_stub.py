@@ -34,6 +34,8 @@ for name in failed:
     assert fixture(name + ".stdout") == fixture(failed[0] + ".stdout"), name
     assert fixture(name + ".stderr") == fixture(failed[0] + ".stderr"), name
     assert m.kernel_check_wanted(fixture(name + ".stdout"), fixture(name + ".stderr")), name
+avml_out, avml_err = fixture("export_avml_header_isf.stdout"), fixture("export_avml_header_isf.stderr")
+assert m.kernel_not_found(avml_out.decode(), avml_err.decode()) and not m.kernel_check_wanted(avml_out, avml_err)
 # Random bytes holding only the ISF's banner: Volatility exits 0 with an empty ELF (already warned about, not a failure).
 assert any(".text: 0 bytes" in p for p in m.export_problems(fixture("export_random_with_banner_isf.stdout")))
 
@@ -163,6 +165,10 @@ with tempfile.TemporaryDirectory() as work:
         line, problem = m.isf_banner(isf_file("damaged.json", damaged))
         assert line is None and problem.startswith("its linux_banner is not readable"), problem
 
+    # AVML without libsnappy: Volatility's own warning names it; no banner scan of compressed bytes.
+    dialogs, log, _ = run("export_avml_header_isf", "banners_avml_header", d13)
+    assert ran_banners(log) == [] and "This is an AVML image" in dialogs[0] and "libsnappy.so.1" in dialogs[0], (log, dialogs)
+    assert "another kernel" not in dialogs[0], dialogs[0]
 
     # Cancel during the export: no banner scan, no dialog.
     dialogs, log, took = run("export_trace_wrong_isf", "banners_trace", d12, cancel=lambda: True, export_sleep=5)

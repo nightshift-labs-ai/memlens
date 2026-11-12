@@ -6,6 +6,7 @@ run and tested on its own. It only looks at code that is at a function entry: a 
 of a function, or one made by something that leaves the entry bytes alone, is not found.
 """
 import bisect
+import collections
 import struct
 import sys
 
@@ -107,8 +108,9 @@ HANDLER_KINDS = (("function_trace_call", "ftrace"), ("ftrace_ops_list_func", "ft
                  ("__bpf_tramp_enter", "BPF trampoline"), ("arch_ftrace_ops_list_func", "ftrace"))
 
 
-def first_handler(image, page, span=0x200):
-    """The first named function a copied hook page calls (rel32 call landing exactly on a symbol start)."""
+def handler_call(image, page, span=0x200):
+    """(call address, handler address, handler name) for the first rel32 call in a copied hook page that lands exactly
+    on a symbol start (not on another memlens_target_ label), or None. The bytes are searched, not disassembled."""
     segment = image.segment(page)
     if segment is None:
         return None
@@ -123,8 +125,19 @@ def first_handler(image, page, span=0x200):
         if index < len(image.addresses) and image.addresses[index] == dest:
             name = image.symbols[index][2]
             if not name.startswith(TARGET_PREFIX):
-                return name
+                return page + offset, dest, name
     return None
+
+
+def first_handler(image, page, span=0x200):
+    """The first named function a copied hook page calls (rel32 call landing exactly on a symbol start)."""
+    call = handler_call(image, page, span)
+    return call[2] if call else None
+
+
+def handler_kind(handler):
+    """'ftrace', 'kprobe via ftrace' or 'BPF trampoline' from the handler's name, or None."""
+    return next((kind for prefix, kind in HANDLER_KINDS if handler.startswith(prefix)), None)
 
 
 def hook_label(image, target):
@@ -134,7 +147,7 @@ def hook_label(image, target):
     if symbol and symbol.startswith(TARGET_PREFIX):
         handler = first_handler(image, target)
         if handler:
-            kind = next((k for prefix, k in HANDLER_KINDS if handler.startswith(prefix)), None)
+            kind = handler_kind(handler)
             label += " (calls %s%s)" % (handler, ", %s" % kind if kind else "")
     return label
 
@@ -335,9 +348,188 @@ def scan(blob, image=None):
     return scan_functions(image) + scan_syscalls(image)
 
 
+# The hook chain: patched entry -> hook page -> handler. These functions decide what the IDA layer links and renames,
+# so they can be tested without IDA; memlens_entry only applies their result.
+
+# Role names for copied hook pages, by the kind of handler they call (HANDLER_KINDS). The exporter labels such a page
+# memlens_target_<address>; MemLens in IDA renames it, for example to ftrace_tramp_vfs_getattr, and keeps the old
+# label in a comment there.
+ROLE_PREFIXES = {"ftrace": "ftrace_tramp", "kprobe via ftrace": "kprobe_ftrace_tramp", "BPF trampoline": "bpf_tramp"}
+LONGEST_ROLE_NAME = 200  # longer than any kernel name we have seen; a longer one falls back to the address form
+
+
+# One patched function entry and where it leads. handler_site, handler, handler_name and kind are None when the target is
+# not a copied hook page or no named call was found in it.
+Link = collections.namedtuple("Link", "entry function site flow target page handler_site handler handler_name kind")
+
+
+def transfer_site(image, entry, target):
+    """(address, 'call' or 'jmp') of the instruction at a patched entry that sends control to target, or None.
+
+    The places classify_entry looks: the entry, after endbr64 or its sealed NOP, and after the 5-byte ftrace NOP.
+    movabs + jmp/call reg transfers at its jmp/call, 10 bytes in; push imm32; ret at its ret, which is a jump.
+    """
+    code = image.read(entry, 32) or image.read(entry, 16)
+    if not code:
+        return None
+    first = 4 if code[:4] in ENDBR_FORMS else 0
+    for start in (first, first + 5) if code[first:first + 5] == FENTRY_NOP else (first,):
+        if len(code) >= start + 5 and code[start] in (0xE8, 0xE9):
+            dest = (entry + start + 5 + struct.unpack_from("<i", code, start + 1)[0]) & 0xFFFFFFFFFFFFFFFF
+            if dest == target:
+                return entry + start, "call" if code[start] == 0xE8 else "jmp"
+        hook = absolute_hook(code, start)
+        if hook and hook[1] == target:
+            if hook[0].startswith("movabs"):
+                return entry + start + 10, "call" if hook[0].endswith("call reg") else "jmp"
+            return entry + start + (5 if hook[0] == "push+ret" else 0), "jmp"
+        hook = memory_hook(image, code, entry + start, start)
+        if hook and hook[1] == target:
+            return entry + start, hook[0].split()[0]
+    return None
+
+
+def copied_page(image, address):
+    """True when the only symbols at address are the exporter's memlens_target_ labels: hook code that no module owns,
+    copied into the ELF. Any other symbol there is a real name, and such an address is never treated as a hook page."""
+    low, high = bisect.bisect_left(image.addresses, address), bisect.bisect_right(image.addresses, address)
+    names = [image.symbols[index][2] for index in range(low, high)]
+    return bool(names) and all(name.startswith(TARGET_PREFIX) for name in names)
+
+
+def hook_links(image, findings):
+    """A Link for every patched function entry whose target is in the ELF (IDA can only cross-reference what it has)
+    and whose transfer instruction is found at the entry. Syscall-table rows and int3 rows have none."""
+    links = []
+    for entry, name, _, _, target in findings:
+        if not target or not image.segment(target):
+            continue
+        site = transfer_site(image, entry, target)  # None for a syscall slot: its bytes are a pointer, not a jump
+        if not site:
+            continue
+        page = copied_page(image, target)
+        call = handler_call(image, target) if page else None
+        handler = (call[0], call[1], call[2], handler_kind(call[2])) if call else (None, None, None, None)
+        links.append(Link(entry, name, site[0], site[1], target, page, *handler))
+    return links
+
+
+def hook_xrefs(links):
+    """(from, to, 'call' or 'jmp') code cross-references for the links, sorted and without repeats: each transfer
+    instruction to its target, and each copied page's handler call to the handler (once, however many entries share
+    the page)."""
+    xrefs = set()
+    for link in links:
+        xrefs.add((link.site, link.target, link.flow))
+        if link.handler is not None:
+            xrefs.add((link.handler_site, link.handler, "call"))
+    return sorted(xrefs)
+
+
+def ida_safe(text):
+    """text with every character other than A-Z, a-z, 0-9 and _ replaced by _ (module.symbol -> module_symbol)."""
+    return "".join(c if c.isascii() and (c.isalnum() or c == "_") else "_" for c in text)
+
+
+def role_names(image, links):
+    """{page address: new name} for copied hook pages whose handler has a known role (ROLE_PREFIXES).
+
+    A page that exactly one patched entry leads to is named after that function (ftrace_tramp_vfs_getattr); a page
+    that several entries share, like one ftrace trampoline serving many functions, by role and address
+    (ftrace_tramp_ffffffffc0b2b000). A page with any real symbol at its address is not a copied page (copied_page),
+    so it is never renamed, and neither is a page whose role is unknown. Names use A-Z, a-z, 0-9 and _ only, start with
+    the role, and are unique: never a symbol name in the ELF or another page's new name (the address form is used
+    instead, or the page keeps its label).
+    """
+    users = {}
+    for link in links:
+        if link.page and link.kind in ROLE_PREFIXES:
+            users.setdefault(link.target, (link.kind, {}))[1].setdefault(link.entry, []).append(link.function)
+    taken = set(image.by_name)
+    names = {}
+    for page in sorted(users):
+        kind, entries = users[page]
+        role = ROLE_PREFIXES[kind]
+        fallback = "%s_%x" % (role, page)
+        name = "%s_%s" % (role, ida_safe(min(next(iter(entries.values()))))) if len(entries) == 1 else fallback
+        if name in taken or len(name) > LONGEST_ROLE_NAME:
+            name = fallback
+        if name in taken:
+            continue
+        names[page] = name
+        taken.add(name)
+    return names
+
+
+def page_comments(links):
+    """{page address: comment} for every copied hook page with a link: its exporter label (memlens_target_<address>,
+    kept findable after a rename), the functions that lead to it (up to five) and its first named call."""
+    pages = {}
+    for link in links:
+        if link.page:
+            pages.setdefault(link.target, (link, set()))[1].add(link.function)
+    comments = {}
+    for page, (link, functions) in sorted(pages.items()):
+        callers = sorted(functions)
+        text = "MemLens: hook page no module owns, copied from memory (exporter label %s%x); reached from %s" % (
+            TARGET_PREFIX, page, ", ".join(callers[:5]) + (" and %d more" % (len(callers) - 5) if len(callers) > 5 else ""))
+        if link.handler_name:
+            text += "; first named call: %s%s" % (link.handler_name, " (%s)" % link.kind if link.kind else "")
+        comments[page] = text
+    return comments
+
+
+def handler_text(link):
+    """The Handler column for a link: 'function_trace_call (ftrace)', or '' when no handler is known."""
+    if link is None or link.handler_name is None:
+        return ""
+    return link.handler_name + (" (%s)" % link.kind if link.kind else "")
+
+
+def list_rows(image, findings, links, names):
+    """Rows of the IDA list: (address, function, what, target, handler, handler address or None).
+
+    names maps a hook page to the name the database gives it now (after renaming). For a linked entry the target is that
+    name, else the ELF's name for it; the handler has its own column. Other rows keep the scan's target label.
+    """
+    by_entry = {(link.entry, link.function): link for link in links}
+    rows = []
+    for address, function, what, label, target in findings:
+        link = by_entry.get((address, function))
+        if link is None:
+            rows.append((address, function, what, label, "", None))
+            continue
+        shown = names.get(link.target) or describe(image, link.target)
+        rows.append((address, function, what, shown, handler_text(link), link.handler))
+    return rows
+
+
+def at(image, address):
+    """name+0x<offset> for an address, as a disassembler prints it, or the plain address with no symbol."""
+    index = bisect.bisect_right(image.addresses, address) - 1
+    name = image.symbol_at(address)
+    if name is None:
+        return "%#x" % address
+    offset = address - image.symbols[index][0]
+    return "%s+%#x" % (name, offset) if offset else name
+
+
+def print_links(image, findings):
+    """The hook chain that MemLens adds in IDA, as tab-separated lines: xref <from> <to> <call|jmp> <where -> where>
+    and rename <page> <exporter label> <new name>."""
+    links = hook_links(image, findings)
+    for source, target, flow in hook_xrefs(links):
+        print("xref\t%#x\t%#x\t%s\t%s -> %s" % (source, target, flow, at(image, source), at(image, target)))
+    for page, name in sorted(role_names(image, links).items()):
+        print("rename\t%#x\t%s\t%s" % (page, describe(image, page), name))
+
+
 def main(argv):
+    links = "--links" in argv[1:]
+    argv = [argv[0]] + [arg for arg in argv[1:] if arg != "--links"]
     if len(argv) != 2:
-        sys.exit("usage: python3 patchscan.py kernel.elf   (the ELF that MemLens/kernel2elf exported)")
+        sys.exit("usage: python3 patchscan.py [--links] kernel.elf   (the ELF that MemLens/kernel2elf exported; --links also "
+                 "prints the cross-references and hook page names that MemLens adds in IDA)")
     try:
         with open(argv[1], "rb") as handle:
             blob = handle.read()
@@ -357,6 +549,8 @@ def main(argv):
         sys.exit("patchscan: not a usable 64-bit ELF: %s" % error)
     for address, name, kind, target, _ in findings:
         print("%#x\t%s\t%s\t%s" % (address, name, kind, target))
+    if links:
+        print_links(image, findings)
 
 
 if __name__ == "__main__":

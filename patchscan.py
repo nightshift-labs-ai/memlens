@@ -30,6 +30,9 @@ FTRACE_OWN = {"ftrace_caller", "ftrace_regs_caller", "ftrace_call", "ftrace_regs
 
 
 TARGET_PREFIX = "memlens_target_"  # labels the exporter gives to hook targets it copied in
+# Offset of func in struct ftrace_ops: 0 in the ISFs of Linux 6.1, 6.8, 6.12 and 7.0 we checked. Set
+# Image.ftrace_ops_func from an ISF (ftrace_ops_func_offset) when one is at hand.
+FTRACE_OPS_FUNC = 0
 
 
 class Image:
@@ -66,6 +69,7 @@ class Image:
         self.symbols.sort()
         self.addresses = [symbol[0] for symbol in self.symbols]
         self.by_name = {symbol[2]: symbol for symbol in self.symbols}
+        self.ftrace_ops_func = FTRACE_OPS_FUNC  # where ops->func is read (page_owner)
 
     def segment(self, address):
         index = bisect.bisect_right(self.starts, address) - 1
@@ -108,30 +112,47 @@ HANDLER_KINDS = (("function_trace_call", "ftrace"), ("ftrace_ops_list_func", "ft
                  ("__bpf_tramp_enter", "BPF trampoline"), ("arch_ftrace_ops_list_func", "ftrace"))
 
 
-def handler_call(image, page, span=0x200):
-    """(call address, handler address, handler name) for the first rel32 call in a copied hook page that lands exactly
-    on a symbol start (not on another memlens_target_ label), or None. The bytes are searched, not disassembled, and
-    only up to the next symbol after page: trampolines packed next to each other each have their own label, and a page
-    must not get its neighbour's handler."""
+def page_code(image, page, span=0x200):
+    """The bytes of a copied hook page, up to span and only up to the next symbol after page: trampolines packed next
+    to each other each have their own label, and a page must not be read into its neighbour. None outside the ELF."""
     segment = image.segment(page)
     if segment is None:
         return None
     following = bisect.bisect_right(image.addresses, page)
     if following < len(image.addresses):
         span = min(span, image.addresses[following] - page)
-    code = image.read(page, min(span, segment[1] - page))
-    if not code:
-        return None
-    for offset in range(len(code) - 4):
+    return image.read(page, min(span, segment[1] - page)) or None
+
+
+def symbol_start(image, address):
+    """The name of the (first) symbol that starts exactly at address, or None; None as well when that is one of the
+    exporter's memlens_target_ labels."""
+    index = bisect.bisect_left(image.addresses, address)
+    if index < len(image.addresses) and image.addresses[index] == address:
+        name = image.symbols[index][2]
+        if not name.startswith(TARGET_PREFIX):
+            return name
+    return None
+
+
+def named_calls(image, page, span=0x200):
+    """(call address, destination, name) for each rel32 call in a copied hook page that lands exactly on a symbol start
+    (not on a memlens_target_ label), in order. The bytes are searched, not disassembled (page_code limits the span)."""
+    code = page_code(image, page, span)
+    for offset in range(len(code) - 4 if code else 0):
         if code[offset] != 0xE8:
             continue
         dest = (page + offset + 5 + struct.unpack_from("<i", code, offset + 1)[0]) & 0xFFFFFFFFFFFFFFFF
-        index = bisect.bisect_left(image.addresses, dest)
-        if index < len(image.addresses) and image.addresses[index] == dest:
-            name = image.symbols[index][2]
-            if not name.startswith(TARGET_PREFIX):
-                return page + offset, dest, name
-    return None
+        name = symbol_start(image, dest)
+        if name:
+            yield page + offset, dest, name
+
+
+def handler_call(image, page, span=0x200):
+    """(call address, handler address, handler name) for the first rel32 call in a copied hook page that lands exactly
+    on a symbol start (not on another memlens_target_ label), or None. Only up to the next symbol after page, so a page
+    does not get its neighbour's handler."""
+    return next(named_calls(image, page, span), None)
 
 
 def first_handler(image, page, span=0x200):
@@ -364,8 +385,79 @@ LONGEST_ROLE_NAME = 200  # longer than any kernel name we have seen; a longer on
 
 
 # One patched function entry and where it leads. handler_site, handler, handler_name and kind are None when the target is
-# not a copied hook page or no named call was found in it.
-Link = collections.namedtuple("Link", "entry function site flow target page handler_site handler handler_name kind")
+# not a copied hook page or no named call was found in it; owner (an Owner) is None when page_owner found none.
+Link = collections.namedtuple("Link", "entry function site flow target page handler_site handler handler_name kind owner",
+                              defaults=(None,))
+
+# Who put a hook page there, as far as the ELF tells: text for the list, the owner's address when it is in the ELF (else
+# None), how it was found ("ftrace_ops" or "first named call") and the references that lead there, as
+# (from, to, "data") for a pointer in memory.
+Owner = collections.namedtuple("Owner", "text address how refs")
+
+# An x86 ftrace trampoline (arch/x86/kernel/ftrace.c, create_trampoline) is a copy of ftrace_caller or ftrace_regs_caller,
+# then its ret (ret, ret; int3, or a 5-byte jmp to the return thunk), then a pointer to the ftrace_ops it serves, which
+# its mov rdx, [rip+disp32] loads as the callback's third argument. ops->func is the callback the ops registered, also
+# when the trampoline calls ftrace_ops_assist_func instead (ops flagged RECURSION or RCU, as ftrace-hook helpers do).
+OPS_LOAD = b"\x48\x8b\x15"
+KERNEL_MAP = 0xffffffff80000000  # x86-64: the kernel image and module space (modules, trampolines, BPF) are above this
+
+
+def ftrace_ops_func_offset(isf):
+    """The offset of func in struct ftrace_ops from a loaded ISF (a dict), or None when the ISF does not have it."""
+    try:
+        return int(isf["user_types"]["ftrace_ops"]["fields"]["func"]["offset"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def ftrace_ops_slot(image, page, span=0x200):
+    """(slot address, ftrace_ops address) for the ops pointer an ftrace trampoline page loads, or None.
+
+    The slot must lie after the load, inside the page's span, right after a ret: a page that loads some other global
+    rip-relative is not taken for a trampoline."""
+    code = page_code(image, page, span)
+    offset = code.find(OPS_LOAD) if code else -1
+    while offset >= 0 and offset + 7 <= len(code):
+        slot = page + offset + 7 + struct.unpack_from("<i", code, offset + 3)[0]
+        before = slot - page
+        if offset + 7 <= before and before + 8 <= len(code) and before >= 5:
+            tail = code[before - 5:before]
+            if tail[4] == 0xC3 or tail[3] == 0xC3 or tail[0] in (0xC3, 0xE9):
+                ops = struct.unpack_from("<Q", code, before)[0]
+                if ops >= 0xffff800000000000:
+                    return slot, ops
+        offset = code.find(OPS_LOAD, offset + 1)
+    return None
+
+
+def ftrace_owner(image, page):
+    """An Owner from the ftrace_ops an ftrace trampoline page loads (its func read at image.ftrace_ops_func), or None."""
+    found = ftrace_ops_slot(image, page)
+    if found is None:
+        return None
+    slot, ops = found
+    if image.segment(ops) is None:
+        where = "heap" if ops < KERNEL_MAP else "module memory MemLens did not export"
+        return Owner("ftrace_ops at %#x (no symbol: %s)" % (ops, where), None, "ftrace_ops", [])
+    refs = [(slot, ops, "data")]
+    field = ops + image.ftrace_ops_func
+    raw = image.read(field, 8)
+    if raw is None:
+        return Owner("ftrace_ops %s (its func is not in the ELF)" % at(image, ops), None, "ftrace_ops", refs)
+    func = struct.unpack("<Q", raw)[0]
+    address = func if image.segment(func) else None
+    if address is not None:
+        refs.append((field, func, "data"))
+    return Owner("%s (ftrace_ops %s)" % (at(image, func), at(image, ops)), address, "ftrace_ops", refs)
+
+
+def page_owner(image, page, handler_site, handler, handler_name, kind):
+    """The Owner of a copied hook page: ftrace_ops->func for an ftrace trampoline; else, when the page's first named call
+    has no known role (a module's callback, say), that call; else None (known plumbing only)."""
+    owner = ftrace_owner(image, page)
+    if owner is None and handler_name and kind is None:
+        owner = Owner("%s (first named call)" % handler_name, handler, "first named call", [])
+    return owner
 
 
 def transfer_site(image, entry, target):
@@ -413,7 +505,8 @@ def hook_links(image, findings):
         if not site:
             continue
         page = copied_page(image, target)
-        links.append(Link(entry, name, site[0], site[1], target, page, *page_handler(image, target if page else None)))
+        handler = page_handler(image, target if page else None)
+        links.append(Link(entry, name, site[0], site[1], target, page, *handler, page_owner(image, target, *handler) if page else None))
     return links
 
 
@@ -514,7 +607,8 @@ def list_rows(image, findings, links, names):
     for address, function, what, label, target in findings:
         link = by_entry.get((address, function))
         if link is None and target and copied_page(image, target):
-            link = Link(address, function, None, None, target, True, *page_handler(image, target))
+            handler = page_handler(image, target)
+            link = Link(address, function, None, None, target, True, *handler, page_owner(image, target, *handler))
         if link is None:
             rows.append((address, function, what, label, "", None))
             continue

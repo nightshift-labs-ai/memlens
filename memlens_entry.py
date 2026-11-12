@@ -662,6 +662,8 @@ def tail(text, size):
     if len(text) <= size:
         return text
     cut = text[-size:]
+    if text[-size - 1] == "\n":
+        return cut.lstrip("\n")  # the cut is already at a line start
     newline = cut.find("\n")
     return cut[newline + 1:].lstrip("\n") if 0 <= newline < len(cut) - 1 else cut
 

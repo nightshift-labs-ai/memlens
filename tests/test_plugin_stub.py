@@ -201,6 +201,8 @@ with tempfile.TemporaryDirectory() as t:
     # Volatility's quoted output starts at a whole line (it began with "2.28.2", the rest of a cut-off line).
     assert m.tail("Volatility 3 Framework 2.28.2\n\nUnsatisfied requirement x\n", 30) == "Unsatisfied requirement x"
     assert m.tail("x" * 50, 10) == "x" * 10 and m.tail("ab\ncd", 10) == "ab\ncd"
+    assert m.tail("aaaa\nbbbb\ncccc", 9) == "bbbb\ncccc" and m.tail("aaaa\nbbbb\ncccc", 8) == "cccc"  # cut at a line start
+    assert m.tail("aaaa\n\nbbbb", 5) == "bbbb" and m.tail("aaaa\nbbbb\ncccc", 10) == "bbbb\ncccc"
     # An old Volatility (seen with 2.11.0) cannot load the exporter: argparse says "invalid choice" and lists the rest.
     old_out = b"Volatility 3 Framework 2.11.0\n"
     old_err = (b"usage: vol [-h] ... plugin ...\nvol: error: argument plugin: invalid choice linux.kernel2elf.Kernel2Elf "

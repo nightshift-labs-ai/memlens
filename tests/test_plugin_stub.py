@@ -48,7 +48,7 @@ nalt = types.ModuleType("ida_nalt"); nalt.get_input_file_path = lambda: ""
 # Hook chain: xrefs and names are recorded; flag values as in the IDA 9.1-9.4 stubs (ida_xref.pyi, ida_name.pyi).
 xref = types.ModuleType("ida_xref"); xref.fl_CN, xref.fl_JN, xref.XREF_USER = 17, 19, 32
 xref.add_cref = lambda frm, to, kind: calls.append(("cref", frm, to, kind)) or True
-iname = types.ModuleType("ida_name"); iname.SN_NOWARN = 256
+iname = types.ModuleType("ida_name"); iname.SN_NOWARN, iname.SN_NON_AUTO = 256, 64
 iname.get_name = lambda ea: next((n for n, a in names.items() if a == ea), "")
 def set_name(ea, name, flags):
     calls.append(("setname", ea, name, flags))

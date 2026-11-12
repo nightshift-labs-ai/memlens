@@ -598,7 +598,7 @@ def link_hooks(image, findings):
             counts["named_before"] += 1
         elif page in renamed or (current != label and ida_bytes.has_user_name(ida_bytes.get_flags(page))):
             counts["kept"] += 1  # renamed or unnamed by the user since MemLens named it, or a real name: leave it
-        elif ida_name.set_name(page, name, ida_name.SN_NOWARN):
+        elif ida_name.set_name(page, name, ida_name.SN_NOWARN | ida_name.SN_NON_AUTO):  # SN_NON_AUTO: not an auto name
             record["names"].append([page, label, name])
             counts["renamed"] += 1
         else:

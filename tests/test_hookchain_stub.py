@@ -19,6 +19,7 @@ m, calls, nalt, names, blobs, comments = g["m"], g["calls"], g["nalt"], g["names
 dummy_names, netnode, xref, iname = g["dummy_names"], g["netnode"], g["xref"], g["iname"]
 elf, call, BASE, TEXT = builder["elf"], builder["call"], builder["BASE"], builder["TEXT"]
 CALL, JUMP = 17 | 32, 19 | 32  # fl_CN | XREF_USER, fl_JN | XREF_USER
+RENAME = 256 | 64  # SN_NOWARN | SN_NON_AUTO: a user name, so IDA does not replace it as it may an auto name
 
 
 def run():
@@ -65,7 +66,7 @@ with tempfile.TemporaryDirectory() as work:
     # Each hooking instruction to its page (call -> fl_CN, jmp -> fl_JN), each page's handler call to the handler, all XREF_USER.
     assert crefs == sorted([(BASE + 4, F, CALL), (BASE + 0x100, F, CALL), (BASE + 0x200, K, CALL), (BASE + 0x30a, B, JUMP),
                             (F + 0x40, FTRACE, CALL), (K + 0x40, KPROBE, CALL), (B + 0x40, BPF, CALL)]), crefs
-    assert renames == sorted([(F, "ftrace_tramp_%x" % F, 256), (K, "kprobe_ftrace_tramp_probed", 256), (B, "bpf_tramp_movjmp", 256)]), renames
+    assert renames == sorted([(F, "ftrace_tramp_%x" % F, RENAME), (K, "kprobe_ftrace_tramp_probed", RENAME), (B, "bpf_tramp_movjmp", RENAME)]), renames
     assert "7 code xrefs added; 3 hook pages renamed by role\n" in out, out
     assert "4 patched entries lead into this database, 4 to a hook page MemLens copied" in out, out
     # The exporter's label stays findable in a comment at the page; the entries keep their own comment.
@@ -113,12 +114,12 @@ with tempfile.TemporaryDirectory() as work:
     del names["%s%x" % (ps.TARGET_PREFIX, F)]
     del names["%s%x" % (ps.TARGET_PREFIX, K)]; names["sub_%X" % K] = K; dummy_names.add(K)
     crefs, renames, out = run()
-    assert len(crefs) == 7 and sorted(renames) == sorted([(B, "bpf_tramp_movjmp", 256), (F, "ftrace_tramp_%x" % F, 256),
-                                                          (K, "kprobe_ftrace_tramp_probed", 256)]), (crefs, renames)
+    assert len(crefs) == 7 and sorted(renames) == sorted([(B, "bpf_tramp_movjmp", RENAME), (F, "ftrace_tramp_%x" % F, RENAME),
+                                                          (K, "kprobe_ftrace_tramp_probed", RENAME)]), (crefs, renames)
     assert "2 hook pages renamed by role, 1 refused by IDA" in out, out
     # The refused name is not recorded, so the next run tries it again (and IDA refuses it again).
     crefs, renames, out = run()
-    assert crefs == [] and renames == [(B, "bpf_tramp_movjmp", 256)], (crefs, renames)
+    assert crefs == [] and renames == [(B, "bpf_tramp_movjmp", RENAME)], (crefs, renames)
     assert "0 hook pages renamed by role, 2 already named by an earlier run, 1 refused by IDA" in out, out
     dummy_names.clear()
     # A damaged record is read as empty (everything added again), not a crash.

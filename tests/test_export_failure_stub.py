@@ -161,8 +161,31 @@ with tempfile.TemporaryDirectory() as work:
 
     d13, d12 = isf_file("d13.json", D13), isf_file("d12.json", D12)
     no_banner, not_isf = isf_file("plain.json"), isf_file("notes.json", text="not an ISF")
-    waits, started = [], []
-    kw.show_wait_box = kw.replace_wait_box = lambda text: waits.append(text)
+    waits, started, boxes, box_errors = [], [], [], []  # boxes: the wait boxes up now (IDA stacks show_wait_box)
+
+    def show_wait_box(text):
+        waits.append(text)
+        if boxes:
+            box_errors.append("show_wait_box over the wait box %r: %s" % (boxes[-1], text))
+        boxes.append(text)
+
+    def replace_wait_box(text):
+        waits.append(text)
+        if not boxes:
+            box_errors.append("replace_wait_box with no wait box up: " + text)
+        boxes[-1:] = [text]
+
+    def hide_wait_box():
+        if not boxes:
+            box_errors.append("hide_wait_box with no wait box up")
+        del boxes[-1:]
+
+    def dialog(text):
+        calls.append(("ui", text))
+        if boxes:
+            box_errors.append("dialog under the wait box %r" % boxes[-1])
+    kw.show_wait_box, kw.replace_wait_box, kw.hide_wait_box = show_wait_box, replace_wait_box, hide_wait_box
+    kw.warning = kw.info = dialog
     real_run_cancellable = m.run_cancellable
     m.run_cancellable = lambda command: started.append(command) or real_run_cancellable(command)
 
@@ -181,9 +204,11 @@ with tempfile.TemporaryDirectory() as work:
             os.remove(os.path.join(bindir, "calls.log"))
         kw.ask_file = lambda save, default, prompt: image if prompt == "Linux memory image" else isf
         kw.user_cancelled = cancel
-        del calls[:], waits[:], started[:]
+        del calls[:], waits[:], started[:], boxes[:], box_errors[:]
         t0 = time.time()
         assert m.ExportKernel().activate(None) == 0
+        # Every wait box shown is hidden again, none is stacked on another, and no dialog appears under one.
+        assert box_errors == [] and boxes == [], (box_errors, boxes)
         log = [json.loads(line) for line in open(os.path.join(bindir, "calls.log"))] if os.path.exists(
             os.path.join(bindir, "calls.log")) else []
         dialogs = [c[1] for c in calls if c[0] == "ui"]

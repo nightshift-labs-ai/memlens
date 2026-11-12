@@ -168,13 +168,24 @@ with tempfile.TemporaryDirectory() as work:
     kw = g["kw"]
     database(blob)
     asked = []
-    kw.ask_file = lambda *a: path
+    picked = os.path.join(work, "k%s.elf")  # a "%" in the name must reach ask_yn (printf-style) as "%%"
+    with open(picked, "wb") as handle:
+        handle.write(blob)
+    kw.ask_file = lambda *a: picked
     kw.ask_yn = lambda default, text: asked.append((default, text)) or kw.ASKBTN_NO
     nalt.get_input_file_path = lambda: "/nonexistent/kernel.elf"
     nalt.retrieve_input_file_sha256 = lambda: hashlib.sha256(b"another file").digest()
     del calls[:]
     assert m.FindPatches().activate(None) == 0 and not [c for c in calls if c[0] in ("cref", "setname", "cmt")], calls
-    assert len(asked) == 1 and asked[0][0] == kw.ASKBTN_NO and "SHA-256" in asked[0][1] and "%" not in asked[0][1], asked
+    assert len(asked) == 1 and asked[0][0] == kw.ASKBTN_NO and "SHA-256" in asked[0][1] and "k%%s.elf" in asked[0][1], asked
+    # Esc on the question (real ask_yn returns ASKBTN_CANCEL, -1) also writes nothing.
+    kw.ASKBTN_CANCEL = -1
+    kw.ask_yn = lambda default, text: asked.append((default, text)) or kw.ASKBTN_CANCEL
+    asked.clear()
+    del calls[:]
+    assert m.FindPatches().activate(None) == 0 and not [c for c in calls if c[0] in ("cref", "setname", "cmt")], calls
+    assert len(asked) == 1, asked
+    kw.ask_yn = lambda default, text: asked.append((default, text)) or kw.ASKBTN_NO
     nalt.retrieve_input_file_sha256 = lambda: hashlib.sha256(blob).digest()
     crefs, renames, out = run()
     assert len(asked) == 1 and len(crefs) == 7, (asked, crefs)

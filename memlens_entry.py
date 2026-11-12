@@ -447,6 +447,22 @@ def kernel_check_wanted(stdout, stderr):
 
 
 LIME_MAGIC = 0x4C694D45  # "EMiL" on disk
+ELF_TYPES = {0: "file of no type (ELF type NONE)", 1: "relocatable file (ELF type REL), such as a kernel module",
+             2: "executable (ELF type EXEC), such as a kernel file", 3: "shared object or PIE program (ELF type DYN)"}
+
+
+def elf_not_core(path):
+    """The ELF type (e_type) of an ELF file that is not a core dump, else None. A memory image in ELF form is a core
+    dump (ET_CORE, 4); an executable, a module or a library is not, whatever banners.Banners finds in it."""
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(18)
+    except OSError:
+        return None
+    if len(head) < 18 or head[:4] != b"\x7fELF" or head[5] not in (1, 2):
+        return None
+    e_type, = struct.unpack_from("<H" if head[5] == 1 else ">H", head, 16)
+    return e_type if e_type != 4 else None
 
 
 def short_file(path):
@@ -494,6 +510,9 @@ def short_file(path):
 def check_kernel(vol, image, isf_path):
     """Which kernel the image holds (Volatility's banners.Banners, cancellable) and which one the ISF was built for.
     Called only after Volatility found no kernel layer or symbol table; the dict goes to export_failure_text."""
+    not_core = elf_not_core(image)
+    if not_core is not None:
+        return {"not_core": not_core}  # a kernel file or a program: the ISF and the banners do not matter
     short = short_file(image)
     if short:
         return {"short": short}  # no banner scan: it would miss lines in the missing part without a word
@@ -534,6 +553,11 @@ def banner_lines(banners, isf_line=None, mark=" (the ISF's)"):
 
 def kernel_hint(check, isf_given):
     """The paragraphs that explain a failed export from what check_kernel found, or None if it found nothing to go by."""
+    if check and check.get("not_core") is not None:
+        return ["This file is not a memory image: it is an ELF %s, while a memory image in ELF form is a core dump (ELF "
+                "type CORE). A kernel file from disk (vmlinux, or a kernel.elf written by MemLens) needs no export: open "
+                "that file in IDA directly and use Apply kernel types." % ELF_TYPES.get(
+                    check["not_core"], "file of type %d" % check["not_core"])]
     if check and check.get("short"):
         size, described, kind = check["short"]
         return ["The image file is shorter than its own %s headers say (%s bytes; they describe at least %s): it is probably an "

@@ -86,7 +86,7 @@ assert len(truncated) == 1 and D13_LINE not in truncated and truncated[0].endswi
                                                                                     "6.12.115-2 (2026-11-01)"), truncated
 
 
-def elf_core(loads, ident=b"\x7fELF\x02\x01\x01", phentsize=56):
+def elf_core(loads, ident=b"\x7fELF\x02\x01\x01", phentsize=56, e_type=4):
     """A 64-bit ELF core: header, one PT_NOTE, then a PT_LOAD per (size) in loads, data right after the headers."""
     phnum = 1 + len(loads)
     offset = 64 + phentsize * phnum
@@ -94,7 +94,7 @@ def elf_core(loads, ident=b"\x7fELF\x02\x01\x01", phentsize=56):
     for size in loads:
         table += struct.pack("<IIQQQQQQ", 1, 7, offset, 0, 0, size, size, 0).ljust(phentsize, b"\0")
         offset += size
-    head = ident.ljust(16, b"\0") + struct.pack("<HHIQQQIHHHHHH", 4, 62, 1, 0, 64, 0, 0, 64, phentsize, phnum, 64, 0, 0)
+    head = ident.ljust(16, b"\0") + struct.pack("<HHIQQQIHHHHHH", e_type, 62, 1, 0, 64, 0, 0, 64, phentsize, phnum, 64, 0, 0)
     return head + table + b"\x5a" * (offset - 64 - phentsize * phnum)
 
 
@@ -207,9 +207,25 @@ with tempfile.TemporaryDirectory() as work:
     assert "\nUnsatisfied requirement" in text and "\n2.28.2" not in text, text  # Volatility's tail from a line start
     assert any("looking for the image's kernel version" in w for w in waits), waits
     assert any(c[0] == "msg" and c[1].startswith("[MemLens] banners.Banners (exit 0):") and D13_LINE in c[1] for c in calls)
-    # The same for the kernel file given as the image with the wrong ISF (recorded too).
-    text = run("export_kernel_file_wrong_isf", "banners_kernel_file", d12)[0][0]
-    assert "built for another kernel" in text and text.count("\nImage: ") == 3, text
+    # The demo kernel.elf (ELF type EXEC) given as the image with the wrong ISF (recorded): not a memory image, said
+    # before any banner scan (banners.Banners finds the kernel's lines in it); also a module, a program, a cut one.
+    for e_type, kind in ((2, "executable (ELF type EXEC)"), (1, "relocatable file (ELF type REL)"),
+                         (3, "shared object or PIE program (ELF type DYN)"), (0, "file of no type"), (9, "file of type 9")):
+        for data in (elf_core([0x30, 0x200], e_type=e_type), elf_core([0x30, 0x200], e_type=e_type)[:-0x100]):
+            dialogs, log, _ = run("export_kernel_file_wrong_isf", "banners_kernel_file", d12, image_bytes=data)
+            text = dialogs[0]
+            assert ran_banners(log) == [] and "This file is not a memory image: it is an ELF " + kind in text, text
+            assert "open that file in IDA directly and use Apply kernel types" in text and "Image:" not in text, text
+            assert "another kernel" not in text and "incomplete copy" not in text, text
+    big_endian = elf_core([0x30], e_type=2)
+    big_endian = big_endian[:5] + b"\x02" + big_endian[6:16] + b"\x00\x02" + big_endian[18:]
+    text = run("export_kernel_file_wrong_isf", "banners_kernel_file", d12, image_bytes=big_endian)[0][0]
+    assert "it is an ELF executable (ELF type EXEC)" in text, text
+    # A core dump, a 9-byte stub of an ELF header, a file that is not ELF: the banner scan decides, as before.
+    for data in (elf_core([0x30, 0x200]), b"\x7fELF\x02\x01\x01\0\0", b"\0" * 64):
+        dialogs, log, _ = run("export_kernel_file_wrong_isf", "banners_kernel_file", d12, image_bytes=data)
+        assert len(ran_banners(log)) == 1 and "built for another kernel" in dialogs[0], dialogs[0]
+        assert dialogs[0].count("\nImage: ") == 3 and "not a memory image" not in dialogs[0], dialogs[0]
 
     # Random bytes with the right ISF (the judge's case): no kernel in the file, the ISF is not blamed.
     for isf in (d13, None):

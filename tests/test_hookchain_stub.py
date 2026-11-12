@@ -178,6 +178,12 @@ with tempfile.TemporaryDirectory() as work:
     nalt.retrieve_input_file_sha256 = lambda: hashlib.sha256(blob).digest()
     crefs, renames, out = run()
     assert len(asked) == 1 and len(crefs) == 7, (asked, crefs)
+    # A picked file on a database with no stored SHA-256: nothing to compare with, so it goes ahead without a question.
+    database(blob)
+    nalt.retrieve_input_file_sha256 = lambda: None
+    asked.clear()
+    crefs, renames, out = run()
+    assert asked == [] and len(crefs) == 7, (asked, crefs)
     nalt.get_input_file_path = lambda: path
 print("hook chain stub test OK (hand-made ELF; fake IDA modules)")
 

@@ -203,6 +203,18 @@ with tempfile.TemporaryDirectory() as t:
     assert "built for another kernel" not in ftext, ftext
     ftext = m.export_failure_text(b"", old_err, False)
     assert "This Volatility could not load" in ftext and "fresh pip install" not in ftext, ftext
+    # Export "succeeded" on a kernel file from disk: recorded Volatility 2.28.2 output for the demo kernel.elf given as
+    # the image (fixtures/export_from_kernel_file.txt) -> 0 bytes of .text -> not reported as a usable export.
+    fixture = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "export_from_kernel_file.txt"), "rb").read()
+    probs = m.export_problems(fixture)
+    assert len(probs) == 1 and ".text: 0 bytes" in probs[0], probs
+    good = (b"Volatility 3 Framework 2.28.2\n\nItem\tName\tAddress\tCount\n\nsection\t.text\t0xffffffff8e200000\t16777216\n"
+            b"percpu\tcpu0\t0xffff88807dc00000\t776\npercpu\tcpu1\t0xffff88807dd00000\t776\nwritten\tkernel.elf\t0x0\t5\n")
+    assert m.export_problems(good) == [], m.export_problems(good)
+    same = good.replace(b"0xffff88807dd00000", b"0xffff88807dc00000")
+    probs = m.export_problems(same)
+    assert len(probs) == 1 and "same address" in probs[0] and "All 2 per-CPU" in probs[0], probs
+    assert m.export_problems(b"") == [], "no rows at all (unknown output) must not be called a failure"
     table = m.PatchList([(0x10, "fn", "what", "tgt", 0x20)])
     assert table.OnGetSize() == 1 and table.OnGetLine(0) == ["10", "fn", "what", "tgt"]
     assert table.OnSelectLine(0) == (0,) and ("jump", 0x10) in calls

@@ -314,6 +314,36 @@ def written_file(stdout, folder=None, before=None):
     return "kernel.elf"
 
 
+def export_rows(stdout):
+    """kernel2elf's rows (kind, name, address, count) from Volatility's tab-separated text output."""
+    rows = []
+    for line in stdout.decode("utf-8", "replace").splitlines():
+        cells = [cell.strip() for cell in line.split("\t")]
+        if len(cells) >= 4:
+            try:
+                rows.append((cells[0], cells[1], cells[2], int(cells[3])))
+            except ValueError:
+                pass  # the header line and anything else that is not a row
+    return rows
+
+
+def export_problems(stdout):
+    """Reasons an export that Volatility finished without an error is still not a usable live kernel."""
+    rows = export_rows(stdout)
+    problems = []
+    text = [count for kind, name, _, count in rows if kind == "section" and name.startswith(".text")]
+    written = [count for kind, _, _, count in rows if kind == "written"]
+    if (text and not sum(text)) or (written and not written[0]):
+        problems.append("Volatility copied no kernel code from this file (.text: 0 bytes), so the ELF it wrote is "
+                        "empty. The file is probably not a memory image of a running Linux kernel: a kernel file from "
+                        "disk (vmlinux, kernel.elf) or another file.")
+    bases = [address for kind, name, address, _ in rows if kind == "percpu" and name.startswith("cpu")]
+    if len(bases) > 1 and len(set(bases)) == 1:
+        problems.append("All %d per-CPU copies sit at the same address (%s), which is the boot-time template of a kernel "
+                        "file, not the per-CPU areas of a running kernel: is this a memory image?" % (len(bases), bases[0]))
+    return problems
+
+
 def export_failure_text(stdout, stderr, isf_given):
     """The dialog text for a failed export: a plain hint for the common cause, then the tail of what Volatility said.
     Volatility prints its own explanation of a missing symbol table on stdout, not stderr."""
@@ -422,6 +452,13 @@ class ExportKernel(ida_kernwin.action_handler_t):
             ida_kernwin.msg("[MemLens] Volatility failed (exit %s).\n[MemLens] its stdout:\n%s\n[MemLens] its stderr:\n%s\n"
                             % (code, stdout.decode("utf-8", "replace"), stderr.decode("utf-8", "replace")))
             ida_kernwin.warning(export_failure_text(stdout, stderr, bool(isf)))
+            return 0
+        problems = export_problems(stdout)
+        if problems:
+            message = "Volatility wrote %s in %s, but it is not a usable kernel export.\n\n%s" % (
+                written_file(stdout, output, before), output, "\n\n".join(problems))
+            ida_kernwin.msg("[MemLens] %s\n[MemLens] Volatility's output:\n%s\n" % (message, stdout.decode("utf-8", "replace")))
+            ida_kernwin.warning(message)
             return 0
         message = "Wrote %s in %s. Open it in IDA, then use Apply kernel types." % (written_file(stdout, output, before), output)
         ida_kernwin.msg("[MemLens] %s\n" % message)  # info() can be silenced for good by its checkbox

@@ -671,7 +671,9 @@ def tail(text, size):
 def run_cancellable(command):
     """Run without freezing IDA. Returns (exit code, stdout, stderr); exit code None means cancelled."""
     with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
-        process = subprocess.Popen(command, stdout=output, stderr=errors)
+        # No console window per vol.exe started from IDA's GUI on Windows (the flag exists only there).
+        process = subprocess.Popen(command, stdout=output, stderr=errors,
+                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         while process.poll() is None:
             if ida_kernwin.user_cancelled():
                 process.kill()

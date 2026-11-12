@@ -353,6 +353,23 @@ with tempfile.TemporaryDirectory() as work:
     dialogs, log, _ = run(old, "banners_trace", d12)
     assert ran_banners(log) == [] and "could not load MemLens' exporter" in dialogs[0], (log, dialogs)
 
+# Windows: vol runs without a console window of its own (CREATE_NO_WINDOW, set here as on Windows; not run on Windows).
+flags, real_popen, had_flag = [], m.subprocess.Popen, hasattr(m.subprocess, "CREATE_NO_WINDOW")
+m.subprocess.CREATE_NO_WINDOW = 0x08000000
+
+
+def popen(*args, **kwargs):
+    flags.append(kwargs.pop("creationflags", None))  # POSIX accepts only 0
+    return real_popen(*args, **kwargs)
+m.subprocess.Popen = popen
+try:
+    code, out, _ = m.run_cancellable([sys.executable, "-c", "print(157)"])
+finally:
+    m.subprocess.Popen = real_popen
+    if not had_flag:
+        del m.subprocess.CREATE_NO_WINDOW
+assert flags == [0x08000000] and (code, out.strip()) == (0, b"157"), (flags, code, out)
+
 # The real demo ISF, when present, carries exactly the line the recorded scan of trace.elf put first.
 demo_isf = os.environ.get("MEMLENS_ISF", "/home/agent/tools/memlens-demo/x/debian-6.12.115+deb13.1-amd64.json.xz")
 if os.path.isfile(demo_isf):

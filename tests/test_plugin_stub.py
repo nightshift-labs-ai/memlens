@@ -68,6 +68,10 @@ with tempfile.TemporaryDirectory() as t:
     assert (st["globals_declared"], st["globals_typed"], st["globals_failed"], st["globals_not_in_database"]) == (2, 1, 0, 1), st
     assert "typed 1 of the 2 globals the ISF declares, plus 0 per-CPU variables in every CPU's copy; 0 failed; 1 have no symbol in this database" in m.report(result)
     assert "CANCELLED" not in m.report(result) and "cancelled" not in result
+    big = dict(result, stats=dict(st, globals_typed=33500, globals_declared=79316, percpu_typed=388,
+                                  globals_not_in_database=45350, globals_skipped_code=1078))
+    assert "typed 33,500 of the 79,316 globals" in m.report(big) and "45,350 have no symbol" in m.report(big), m.report(big)
+    assert "left 1,078 names alone" in m.report(big), m.report(big)
     kw.user_cancelled = lambda: True  # Cancel during the type import: nothing typed, the report says so
     r = m.apply_types(p)
     assert r["cancelled"].startswith("while importing types, after 0 of") and "globals_typed" not in r["stats"], r
@@ -203,11 +207,17 @@ with tempfile.TemporaryDirectory() as t:
     assert "built for another kernel" not in ftext, ftext
     ftext = m.export_failure_text(b"", old_err, False)
     assert "This Volatility could not load" in ftext and "fresh pip install" not in ftext, ftext
+    # The same error from the tested version or a newer one is not the old-API case: no install-2.28.2 advice.
+    for newer in (b"2.28.2", b"2.30.0", b"3.0"):
+        ftext = m.export_failure_text(b"Volatility 3 Framework " + newer + b"\n", old_err, True)
+        assert "not older than 2.28.2" in ftext and "volatility3==2.28.2" not in ftext, (newer, ftext)
+    ftext = m.export_failure_text(b"Volatility 3 Framework 2.28.1\n", old_err, True)
+    assert "volatility3==2.28.2" in ftext and "not older" not in ftext, ftext
     # Export "succeeded" on a kernel file from disk: recorded Volatility 2.28.2 output for the demo kernel.elf given as
     # the image (fixtures/export_from_kernel_file.txt) -> 0 bytes of .text -> not reported as a usable export.
     fixture = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "export_from_kernel_file.txt"), "rb").read()
     probs = m.export_problems(fixture)
-    assert len(probs) == 1 and ".text: 0 bytes" in probs[0], probs
+    assert len(probs) == 1 and ".text: 0 bytes" in probs[0] and "use Apply kernel types" in probs[0], probs
     good = (b"Volatility 3 Framework 2.28.2\n\nItem\tName\tAddress\tCount\n\nsection\t.text\t0xffffffff8e200000\t16777216\n"
             b"percpu\tcpu0\t0xffff88807dc00000\t776\npercpu\tcpu1\t0xffff88807dd00000\t776\nwritten\tkernel.elf\t0x0\t5\n")
     assert m.export_problems(good) == [], m.export_problems(good)

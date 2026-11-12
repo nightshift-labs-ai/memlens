@@ -270,13 +270,13 @@ def report(result):
         parts.append("{:,} resized to the ISF size".format(stats["resized"]))
     lines.append("[MemLens] declarations generated from the ISF: %s" % ", ".join(parts))
     if "globals_declared" in stats:
-        lines.append("[MemLens] typed %d of the %d globals the ISF declares, plus %d per-CPU variables in every CPU's copy; "
-                     "%d failed; %d have no symbol in this database (address 0 in the ISF, or outside exported memory)"
-                     % (stats["globals_typed"], stats["globals_declared"], stats.get("percpu_typed", 0),
-                        stats["globals_failed"], stats["globals_not_in_database"]))
+        lines.append("[MemLens] typed {:,} of the {:,} globals the ISF declares, plus {:,} per-CPU variables in every CPU's copy; "
+                     "{:,} failed; {:,} have no symbol in this database (address 0 in the ISF, or outside exported memory)"
+                     .format(stats["globals_typed"], stats["globals_declared"], stats.get("percpu_typed", 0),
+                             stats["globals_failed"], stats["globals_not_in_database"]))
     if stats.get("globals_skipped_code"):
-        lines.append("[MemLens] left %d names alone that the ISF declares as variables but that are code here (for example a function "
-                     "with the same name as a variable elsewhere)" % stats["globals_skipped_code"])
+        lines.append("[MemLens] left {:,} names alone that the ISF declares as variables but that are code here (for example a function "
+                     "with the same name as a variable elsewhere)".format(stats["globals_skipped_code"]))
     lines += ["[MemLens] rejected by IDA's parser: %d" % len(result["rejected"]),
               "[MemLens] types missing afterwards: %d" % len(result["missing"]),
               "[MemLens] types with a size differing from the ISF: %d" % len(result["wrong_size"])]
@@ -344,7 +344,8 @@ def export_problems(stdout):
     if (text and not sum(text)) or (written and not written[0]):
         problems.append("Volatility copied no kernel code from this file (.text: 0 bytes), so the ELF it wrote is "
                         "empty. The file is probably not a memory image of a running Linux kernel: a kernel file from "
-                        "disk (vmlinux, kernel.elf) or another file.")
+                        "disk (vmlinux, kernel.elf) or another file. To type a kernel file from disk, open that file in IDA "
+                        "directly and use Apply kernel types.")
     bases = [address for kind, name, address, _ in rows if kind == "percpu" and name.startswith("cpu")]
     if len(bases) > 1 and len(set(bases)) == 1:
         problems.append("All %d per-CPU copies sit at the same address (%s), which is the boot-time template of a kernel "
@@ -361,10 +362,18 @@ def export_failure_text(stdout, stderr, isf_given):
         # The exporter was not loaded, so argparse lists every other plugin. Usually an older Volatility whose Linux
         # module API the exporter cannot import (seen with 2.11.0).
         version = re.search(r"Volatility 3 Framework ([0-9][0-9.]*)", out + err)
-        lines.append("This Volatility%s could not load MemLens' exporter (linux.kernel2elf), usually because it is older "
-                     "than the Linux module API the exporter uses. MemLens is tested with Volatility 2.28.2: "
-                     "pipx install volatility3==2.28.2 (or a venv, see the README), then make sure IDA finds that vol "
-                     "first on PATH." % (" (%s)" % version.group(1).rstrip(".") if version else ""))
+        number = version.group(1).rstrip(".") if version else ""
+        parts = tuple(int(part) for part in number.split(".") if part.isdigit())
+        if parts and parts >= (2, 28, 2):
+            # Not the old-API case: say so instead of telling the user to install the version they already have.
+            lines.append("This Volatility (%s) could not load MemLens' exporter (linux.kernel2elf), and it is not older "
+                         "than 2.28.2, the version MemLens is tested with, so the usual cause does not apply. Please report "
+                         "it with the text below." % number)
+        else:
+            lines.append("This Volatility%s could not load MemLens' exporter (linux.kernel2elf), usually because it is older "
+                         "than the Linux module API the exporter uses. MemLens is tested with Volatility 2.28.2: "
+                         "pipx install volatility3==2.28.2 (or a venv, see the README), then make sure IDA finds that vol "
+                         "first on PATH." % (" (%s)" % number if number else ""))
     elif "symbol_table_name" in err or "symbol table requirement" in out:
         if isf_given:
             lines.append("It found no symbols matching this image's kernel: the ISF you chose was probably built for another "

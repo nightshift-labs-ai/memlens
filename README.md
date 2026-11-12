@@ -125,10 +125,10 @@ In IDA, with any database open (plugin menu entries need one), under **Edit > Pl
 The ISF must come from exactly the kernel that was running when the image was taken.
 
 1. Find that kernel: `vol -q -f <image> banners.Banners` prints its `Linux version ...` line.
-2. Get an ISF for that banner. A ready-made one may exist in the community collection [Abyss-W4tcher/volatility3-symbols](https://github.com/Abyss-W4tcher/volatility3-symbols) (Debian, Ubuntu, Kali, AlmaLinux, Rocky; its `banners/` folder lists the banners it covers). Otherwise build one with [dwarf2json](https://github.com/volatilityfoundation/dwarf2json) from the kernel's debug image: `dwarf2json linux --elf /usr/lib/debug/boot/vmlinux-<version> | xz > <version>.json.xz` (Debian: package `linux-image-<version>-dbg`; Ubuntu: the matching `-dbgsym` package from ddebs.ubuntu.com).
+2. Get an ISF for that banner. A ready-made one may exist in the community collection [Abyss-W4tcher/volatility3-symbols](https://github.com/Abyss-W4tcher/volatility3-symbols) (Debian, Ubuntu, Kali, AlmaLinux, Rocky): grep your banner line in its [`banners/banners_plain.json`](https://github.com/Abyss-W4tcher/volatility3-symbols/raw/master/banners/banners_plain.json), which gives the ISF's download URL (since 10/20/2026 the ISFs are GitHub Release assets; the old `raw/master/<Distro>/...` paths stop working on 11/21/2026, so use the index). Otherwise build one with [dwarf2json](https://github.com/volatilityfoundation/dwarf2json) from the kernel's debug image: `dwarf2json linux --elf /usr/lib/debug/boot/vmlinux-<version> | xz > <version>.json.xz` (Debian: package `linux-image-<version>-dbg`; Ubuntu: `linux-image-unsigned-<version>-dbgsym` from ddebs.ubuntu.com).
 3. Export with that ISF (step 1 above), then apply the same ISF (step 3).
 
-Without IDA:
+### Without IDA
 
 ```
 vol -p vol_plugins -s <symbols> -o <outdir> -f <image> linux.kernel2elf.Kernel2Elf [--no-percpu] [--no-modules]
@@ -136,7 +136,9 @@ python3 isf2c.py <isf.json.xz> kernel_types.h
 python3 patchscan.py kernel.elf
 ```
 
-Headless, with idalib (IDA 9.0 or newer; set up the `idapro` module as Hex-Rays describes):
+### Headless, with idalib
+
+IDA 9.0 or newer; set up the `idapro` module as Hex-Rays describes:
 
 ```
 python3 tools/memlens_headless.py kernel.elf <isf.json.xz> [--no-analysis] [--any-kernel]

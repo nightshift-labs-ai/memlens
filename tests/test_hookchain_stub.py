@@ -16,7 +16,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     g = runpy.run_path(os.path.join(HERE, "test_plugin_stub.py"))
     builder = runpy.run_path(os.path.join(HERE, "test_patchscan.py"))
 m, calls, nalt, names, blobs, comments = g["m"], g["calls"], g["nalt"], g["names"], g["blobs"], g["comments"]
-dummy_names = g["dummy_names"]
+dummy_names, netnode = g["dummy_names"], g["netnode"]
 elf, call, BASE, TEXT = builder["elf"], builder["call"], builder["BASE"], builder["TEXT"]
 CALL, JUMP = 17 | 32, 19 | 32  # fl_CN | XREF_USER, fl_JN | XREF_USER
 
@@ -118,6 +118,19 @@ with tempfile.TemporaryDirectory() as work:
     blobs[next(iter(blobs))] = b"{not json"
     crefs, renames, out = run()
     assert len(crefs) == 7, crefs
+    # If linking itself fails (here the netnode read raises), the list is still shown with the scan's labels and the
+    # traceback goes to the Output window.
+    database(blob)
+    good_getblob = netnode.getblob
+    def broken(self, start, tag): raise TypeError("getblob broke")
+    netnode.getblob = broken
+    try:
+        crefs, renames, out = run()
+    finally:
+        netnode.getblob = good_getblob
+    assert crefs == [] and renames == [] and "getblob broke" in out and "hook chain not added" in out, out
+    lines = {line[1]: line for line in (m._open_list.OnGetLine(n) for n in range(m._open_list.OnGetSize()))}
+    assert lines["traced_a"][3:] == ["memlens_target_%x (calls function_trace_call, ftrace)" % F, ""] and len(lines) == 5, lines
 print("hook chain stub test OK (hand-made ELF; fake IDA modules)")
 
 for path in sys.argv[1:2]:

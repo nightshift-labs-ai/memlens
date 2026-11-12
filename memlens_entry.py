@@ -633,9 +633,14 @@ class FindPatches(ida_kernwin.action_handler_t):
         image, findings = scanned
         for address, _, what, target, _ in findings:
             add_comment(address, "MemLens: %s %s" % (what, target))
-        links, counts = link_hooks(image, findings)
         ida_kernwin.msg("[MemLens] %d patched entries or odd syscall slots\n" % len(findings))
-        ida_kernwin.msg(link_report(links, counts))
+        try:
+            links, counts = link_hooks(image, findings)
+            ida_kernwin.msg(link_report(links, counts))
+        except Exception:  # the list is still worth showing; it falls back to the scan's labels
+            links = []
+            ida_kernwin.msg("[MemLens] hook chain not added (no xrefs, renames or Handler column) because of this error:\n%s\n"
+                            % traceback.format_exc())
         names = {link.target: ida_name.get_name(link.target) for link in links}
         global _open_list  # a non-modal chooser must outlive this call
         _open_list = PatchList(patchscan.list_rows(image, findings, links, names))

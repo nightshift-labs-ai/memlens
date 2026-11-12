@@ -1,0 +1,3 @@
+WARNING  volatility3.framework.layers.avml: AVML file detected, but snappy library could not be found
+Please install the snappy from your distribution or https://google.github.io/snappy/.
+Unable to validate the plugin requirements: ['plugins.Kernel2Elf.kernel.layer_name', 'plugins.Kernel2Elf.kernel.symbol_table_name']

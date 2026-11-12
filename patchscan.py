@@ -390,8 +390,8 @@ Link = collections.namedtuple("Link", "entry function site flow target page hand
                               defaults=(None,))
 
 # Who put a hook page there, as far as the ELF tells: text for the list, the owner's address when it is in the ELF (else
-# None), how it was found ("ftrace_ops" or "first named call") and the references that lead there, as
-# (from, to, "data") for a pointer in memory.
+# None), how it was found ("ftrace_ops", "BPF program" or "first named call") and the references that lead there, as
+# (from, to, "data") for a pointer in memory and (from, to, "call") for a call instruction.
 Owner = collections.namedtuple("Owner", "text address how refs")
 
 # An x86 ftrace trampoline (arch/x86/kernel/ftrace.c, create_trampoline) is a copy of ftrace_caller or ftrace_regs_caller,
@@ -451,10 +451,54 @@ def ftrace_owner(image, page):
     return Owner("%s (ftrace_ops %s)" % (at(image, func), at(image, ops)), address, "ftrace_ops", refs)
 
 
+# A BPF trampoline (arch/x86/net/bpf_jit_comp.c, invoke_bpf_prog) runs each program right after a call to
+# __bpf_prog_enter* (__bpf_prog_enter, __bpf_prog_enter_recur, ...): mov rbx, rax; test rax, rax; je over the program
+# (a 2-byte NOP until patched); lea rdi, [rbp-N]; movabs rsi, prog->insnsi (interpreter only); call the program.
+BPF_PROG_ENTER = "__bpf_prog_enter"
+BPF_BEFORE_PROGRAM = ((b"\x48\x89\xc3", 3), (b"\x48\x85\xc0", 3), (b"\x74", 2), (b"\x66\x90", 2), (b"\x48\x8d\x7d", 4),
+                      (b"\x48\x8d\xbd", 7), (b"\x48\xbe", 10))
+
+
+def program_call(code, offset):
+    """Offset of the call that runs the program, walking from code[offset] (just after the call to __bpf_prog_enter*)
+    over the instructions invoke_bpf_prog emits before it; None as soon as anything else is there."""
+    while offset + 5 <= len(code):
+        if code[offset] == 0xE8:
+            return offset
+        size = next((size for start, size in BPF_BEFORE_PROGRAM if code.startswith(start, offset)), None)
+        if size is None:
+            return None
+        offset += size
+    return None
+
+
+def bpf_owner(image, page, span=0x1000):
+    """An Owner naming the program(s) a BPF trampoline page runs, or None when none is found."""
+    code = page_code(image, page, span)
+    programs = []
+    for site, _, name in named_calls(image, page, span):
+        if not name.startswith(BPF_PROG_ENTER):
+            continue
+        offset = program_call(code, site - page + 5)
+        if offset is not None:
+            program = (page + offset + 5 + struct.unpack_from("<i", code, offset + 1)[0]) & 0xFFFFFFFFFFFFFFFF
+            programs.append((page + offset, program))
+    if not programs:
+        return None
+    names = []
+    for _, program in programs:
+        name = symbol_start(image, program)
+        names.append("%s (BPF program)" % name if name else "BPF program at %#x" % program)
+    first = programs[0][1]
+    refs = [(site, program, "call") for site, program in programs if image.segment(program)]
+    return Owner(", ".join(names), first if image.segment(first) else None, "BPF program", refs)
+
+
 def page_owner(image, page, handler_site, handler, handler_name, kind):
-    """The Owner of a copied hook page: ftrace_ops->func for an ftrace trampoline; else, when the page's first named call
-    has no known role (a module's callback, say), that call; else None (known plumbing only)."""
-    owner = ftrace_owner(image, page)
+    """The Owner of a copied hook page: the program(s) a BPF trampoline runs, ftrace_ops->func for an ftrace trampoline;
+    else, when the page's first named call has no known role (a module's callback, say), that call; else None (known
+    plumbing only)."""
+    owner = bpf_owner(image, page) if kind == "BPF trampoline" else ftrace_owner(image, page)
     if owner is None and handler_name and kind is None:
         owner = Owner("%s (first named call)" % handler_name, handler, "first named call", [])
     return owner

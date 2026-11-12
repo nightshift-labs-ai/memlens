@@ -155,18 +155,100 @@ assert ps.Image(blob).ftrace_ops_func == ps.FTRACE_OPS_FUNC == 0
 print("owner tests OK (hand-made ELF: %d hooked entries, %d with an ftrace_ops owner)" % (
     len(links), sum(1 for owner in owners.values() if owner and owner.how == "ftrace_ops")))
 
+# BPF trampolines (arch/x86/net/bpf_jit_comp.c, invoke_bpf_prog): after the call to __bpf_prog_enter* come
+# mov rbx, rax; test rax, rax; je (a 2-byte NOP until patched); lea rdi, [rbp-N]; movabs rsi, insnsi (interpreter only);
+# then the call that runs the program. The program is the owner.
+ktext = bytearray(b"\xcc" * 0x2000)
+jit = bytearray(b"\xcc" * 0x4000)
+JIT = 0xffffffffc0004000
+TRAMP_ENTER, PROG_ENTER, PROG_ENTER_RECUR, PROG_EXIT, PROG_RUN = (KTEXT + 0x1000 + 0x100 * i for i in range(5))
+PROG, NAMED_PROG, PROG2 = JIT + 0x664, JIT + 0x800, JIT + 0x900
+UNEXPORTED_PROG = 0xffffffffc0700000
+
+
+def bpf_trampoline(page, programs, je=b"\x74\x0d", lea=b"\x48\x8d\x7d\xe8", extra=b"", decoy=False):
+    """A BPF trampoline page: __bpf_tramp_enter, then per program __bpf_prog_enter* and the program call. decoy: right
+    after __bpf_tramp_enter, a lea rdi and a call that look like a program call but follow no __bpf_prog_enter*."""
+    at = page + 0x23
+    put(jit, JIT, at, rel32(at, TRAMP_ENTER))
+    if decoy:
+        put(jit, JIT, at + 5, b"\x48\x8d\x7d\xf0" + rel32(at + 9, PROG2))
+    at += 0x20
+    sites = []
+    for enter, program in programs:
+        put(jit, JIT, at, rel32(at, enter)); at += 5
+        body = b"\x48\x89\xc3" + b"\x48\x85\xc0" + je + lea + extra
+        put(jit, JIT, at, body); at += len(body)
+        put(jit, JIT, at, rel32(at, program)); sites.append(at); at += 5
+        put(jit, JIT, at, b"\x48\x89\x45\xf8"); at += 4
+        put(jit, JIT, at, rel32(at, PROG_EXIT)); at += 0x10
+    put(jit, JIT, at, b"\xc3")
+    return sites
+
+
+BPAGES = {name: JIT + 0x1000 + 0x200 * index for index, name in enumerate(
+    ("bpf_lsm_file_open", "named", "interp", "two", "unpatched", "odd", "unexported", "decoy"))}
+BSITES = {
+    "bpf_lsm_file_open": bpf_trampoline(BPAGES["bpf_lsm_file_open"], [(PROG_ENTER, PROG)]),  # lea rdi, [rbp-0x18]: an e8 byte
+    "named": bpf_trampoline(BPAGES["named"], [(PROG_ENTER_RECUR, NAMED_PROG)]),
+    "interp": bpf_trampoline(BPAGES["interp"], [(PROG_ENTER, PROG_RUN)], lea=b"\x48\x8d\xbd" + struct.pack("<i", -0x118),
+                             extra=b"\x48\xbe" + struct.pack("<Q", 0xffff8880e8e8e8e8)),
+    "two": bpf_trampoline(BPAGES["two"], [(PROG_ENTER, PROG), (PROG_ENTER_RECUR, PROG2)]),
+    "unpatched": bpf_trampoline(BPAGES["unpatched"], [(PROG_ENTER, PROG)], je=b"\x66\x90"),
+    "odd": bpf_trampoline(BPAGES["odd"], [(PROG_ENTER, PROG)], extra=b"\x90"),  # an instruction invoke_bpf_prog does not emit
+    "unexported": bpf_trampoline(BPAGES["unexported"], [(PROG_ENTER, UNEXPORTED_PROG)]),
+    "decoy": bpf_trampoline(BPAGES["decoy"], [(PROG_ENTER, PROG)], decoy=True),
+}
+BENTRIES = {name: KTEXT + 0x40 * index for index, name in enumerate(BPAGES)}
+for name, entry in BENTRIES.items():
+    put(ktext, KTEXT, entry, b"\xf3\x0f\x1e\xfa" + rel32(entry + 4, BPAGES[name]))
+bsymbols = [(name, entry, 0x40, FUNC) for name, entry in BENTRIES.items()]
+bsymbols += [("__bpf_tramp_enter", TRAMP_ENTER, 0x80, FUNC), ("__bpf_prog_enter", PROG_ENTER, 0x80, FUNC),
+             ("__bpf_prog_enter_recur", PROG_ENTER_RECUR, 0x80, FUNC), ("__bpf_prog_exit", PROG_EXIT, 0x80, FUNC),
+             ("__bpf_prog_run32", PROG_RUN, 0x80, FUNC), ("linux_banner", KDATA, 0x20, OBJECT),
+             ("bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems", NAMED_PROG, 0x100, FUNC)]
+bsymbols += [("%s%x" % (ps.TARGET_PREFIX, page), page, 0, FUNC) for page in BPAGES.values()]
+bblob = build([(KTEXT, ktext, 5), (KDATA, bytearray(0x100), 6), (JIT, jit, 5)], bsymbols)
+bimage = ps.Image(bblob)
+blinks = {link.function: link for link in ps.hook_links(bimage, ps.scan(bblob, bimage))}
+assert set(blinks) == set(BPAGES) and all(link.kind == "BPF trampoline" for link in blinks.values()), blinks
+bowners = {name: link.owner for name, link in blinks.items()}
+C, B = "call", "BPF program"
+assert bowners["bpf_lsm_file_open"] == ps.Owner("BPF program at %#x" % PROG, PROG, B, [(BSITES["bpf_lsm_file_open"][0], PROG, C)]), bowners
+assert bowners["named"] == ps.Owner("bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems (BPF program)", NAMED_PROG, B,
+                                    [(BSITES["named"][0], NAMED_PROG, C)]), bowners["named"]
+assert bowners["interp"] == ps.Owner("__bpf_prog_run32 (BPF program)", PROG_RUN, B, [(BSITES["interp"][0], PROG_RUN, C)]), bowners
+assert bowners["two"] == ps.Owner("BPF program at %#x, BPF program at %#x" % (PROG, PROG2), PROG, B,
+                                  [(BSITES["two"][0], PROG, C), (BSITES["two"][1], PROG2, C)]), bowners["two"]
+assert bowners["unpatched"] == bowners["bpf_lsm_file_open"]._replace(refs=[(BSITES["unpatched"][0], PROG, C)]), bowners
+assert bowners["odd"] is None, bowners["odd"]  # not the sequence invoke_bpf_prog emits: no guess
+assert bowners["decoy"] == ps.Owner("BPF program at %#x" % PROG, PROG, B, [(BSITES["decoy"][0], PROG, C)]), bowners["decoy"]
+assert bowners["unexported"] == ps.Owner("BPF program at %#x" % UNEXPORTED_PROG, None, B, []), bowners["unexported"]
+print("BPF owner tests OK (hand-made ELF: %d BPF trampolines, %d with a program)" % (
+    len(blinks), sum(1 for owner in bowners.values() if owner)))
+
 # Real exports: the ftrace_ops each trampoline loads (CheckFtrace lists the same ops and callbacks on the demo image).
 EXPECTED = {
     "vfs_getattr": ("function_trace_call (ftrace_ops global_ops)", "function_trace_call", 0xdd, "global_ops"),
     "do_sys_openat2": ("kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)", "kprobe_ftrace_handler", 0x162, "kprobe_ftrace_ops"),
 }
+# BPF trampolines: the program call's offset in the page and the program's address (linux.kallsyms --bpf names them
+# bpf_prog_e8932b6bae2b9745_restrict_filesystems on the demo, bpf_prog_7cc47bbf07148bfe_hid_tail_call on Ubuntu 24.04).
+EXPECTED_BPF = {"bpf_lsm_file_open": (0x53, 0xffffffffc0004664), "__hid_bpf_tail_call": (0x53, 0xffffffffc0043958)}
 for path in sys.argv[1:]:
     image = ps.Image(open(path, "rb").read())
     findings = ps.scan(None, image)
     links = ps.hook_links(image, findings)
     known = [link for link in links if link.function in EXPECTED]
-    if not known:
-        print("%s: SKIPPED, no ftrace hook with expected values (EXPECTED knows the demo's)" % path)
+    for link in links:
+        if link.function in EXPECTED_BPF:
+            site, program = EXPECTED_BPF[link.function]
+            name = ps.symbol_start(image, program)
+            text = "%s (BPF program)" % name if name else "BPF program at %#x" % program
+            assert link.owner == ps.Owner(text, program, "BPF program", [(link.target + site, program, "call")]), link
+            print("%s: %s -> %s" % (path, link.function, link.owner.text))
+    if not known and not any(link.function in EXPECTED_BPF for link in links):
+        print("%s: SKIPPED, no hook with expected values (EXPECTED knows the demo's and Ubuntu 24.04's)" % path)
         continue
     for link in known:
         text, func, slot, ops = EXPECTED[link.function]

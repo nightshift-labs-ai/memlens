@@ -4,7 +4,8 @@ Three actions under Edit > Plugins:
   * Export kernel from memory image: runs Volatility 3 and writes a symbolled ELF to open in IDA.
   * Apply kernel types from ISF: imports every struct, union and enum of that kernel.
   * Show patched kernel functions: lists hooked entries and odd syscall slots, Enter jumps there; links each hooked
-    entry to its hook page and the page to its handler (code xrefs) and names the hook pages by role.
+    entry to its hook page and the page to its handler (code xrefs) and to its owner (the BPF program, or the
+    ftrace_ops and its callback), and names the hook pages by role.
 """
 import base64
 import hashlib
@@ -99,6 +100,9 @@ def apply_types(isf_path, confirm=None):
     mismatch = banner_mismatch(isf)
     if mismatch and confirm and not confirm(*mismatch):
         return None
+    func_offset = patchscan.ftrace_ops_func_offset(isf)
+    if func_offset is not None:  # where Show patched kernel functions reads ops->func
+        save_layout(dict(load_layout(), **{"ftrace_ops.func": func_offset}))
     generator = isf2c.Generator(isf)
 
     stopped = {}
@@ -793,20 +797,23 @@ class ExportKernel(ida_kernwin.action_handler_t):
 
 class PatchList(ida_kernwin.Choose):
     """Patched entries and odd syscall slots. Enter jumps to the entry; Ctrl+E (the chooser's Edit command, captioned
-    "Jump to handler" in its context menu) jumps to the handler the hook page calls."""
+    "Jump to handler" in its context menu) jumps to the handler the hook page calls; Ins (the Insert command, captioned
+    "Jump to owner") jumps to the page's owner when it is in the database."""
 
     def __init__(self, rows):
-        columns = [["Address", 18 | ida_kernwin.Choose.CHCOL_HEX], ["Where", 34], ["What", 34], ["Target", 40], ["Handler", 36]]
-        ida_kernwin.Choose.__init__(self, "MemLens: patched kernel functions", columns, ida_kernwin.Choose.CH_CAN_EDIT,
-                                    popup_names=["Insert", "Delete", "Jump to handler", "Refresh"])
+        columns = [["Address", 18 | ida_kernwin.Choose.CHCOL_HEX], ["Where", 34], ["What", 34], ["Target", 40], ["Handler", 36],
+                   ["Owner", 48]]
+        ida_kernwin.Choose.__init__(self, "MemLens: patched kernel functions", columns,
+                                    ida_kernwin.Choose.CH_CAN_EDIT | ida_kernwin.Choose.CH_CAN_INS,
+                                    popup_names=["Jump to owner", "Delete", "Jump to handler", "Refresh"])
         self.rows = rows
 
     def OnGetSize(self):
         return len(self.rows)
 
     def OnGetLine(self, n):
-        address, name, what, target, handler, _ = self.rows[n]
-        return ["%X" % address, name, what, target, handler]
+        address, name, what, target, handler, _, owner, _ = self.rows[n]
+        return ["%X" % address, name, what, target, handler, owner]
 
     def OnSelectLine(self, n):
         ida_kernwin.jumpto(self.rows[n][0])
@@ -818,6 +825,18 @@ class PatchList(ida_kernwin.Choose):
             ida_kernwin.msg("[MemLens] no handler is known for %s (only hook pages that MemLens copied have one)\n" % self.rows[n][1])
         else:
             ida_kernwin.jumpto(handler)
+        return (ida_kernwin.Choose.NOTHING_CHANGED,)
+
+    def OnInsertLine(self, n):
+        if not 0 <= n < len(self.rows):  # IDA passes -1 when no row is selected
+            ida_kernwin.msg("[MemLens] select a row to jump to its owner\n")
+        elif self.rows[n][7] is not None:
+            ida_kernwin.jumpto(self.rows[n][7])
+        elif self.rows[n][6]:
+            ida_kernwin.msg("[MemLens] the owner of %s is not in this database: %s\n" % (self.rows[n][1], self.rows[n][6]))
+        else:
+            ida_kernwin.msg("[MemLens] no owner is known for %s (MemLens reads it from the BPF program a trampoline runs "
+                            "or the ftrace_ops an ftrace trampoline loads)\n" % self.rows[n][1])
         return (ida_kernwin.Choose.NOTHING_CHANGED,)
 
 
@@ -874,6 +893,22 @@ def add_comment(address, text):
 
 HOOK_RECORD = "$ memlens.hooks"  # netnode: what MemLens linked and renamed, so running it again adds nothing twice
 HOOK_RECORD_TAG = "B"
+LAYOUT_RECORD = "$ memlens.layout"  # netnode: struct offsets from the ISF that Apply kernel types imported
+LAYOUT_TAG = "L"
+
+
+def load_layout():
+    """{"ftrace_ops.func": offset} as Apply kernel types recorded it, or {} (no ISF applied yet, or an unreadable record)."""
+    blob = ida_netnode.netnode(LAYOUT_RECORD, 0, True).getblob(0, LAYOUT_TAG)
+    try:
+        layout = json.loads(blob.decode("utf-8")) if blob else {}
+    except ValueError:
+        layout = {}
+    return layout if isinstance(layout, dict) else {}
+
+
+def save_layout(layout):
+    ida_netnode.netnode(LAYOUT_RECORD, 0, True).setblob(json.dumps(layout).encode("utf-8"), 0, LAYOUT_TAG)
 
 
 def load_hook_record():
@@ -892,21 +927,30 @@ def link_hooks(image, findings):
     from each copied hook page's handler call to the handler, a role name for each such page (once, and only while it
     still has the exporter's memlens_target_ label or no name but IDA's dummy one), and a comment there with the old
     label. What was added is kept in the HOOK_RECORD netnode, so a second run adds no xref and renames nothing again,
-    and an xref or name the user removed since is not put back. Returns (links, counts)."""
+    and an xref or name the user removed since is not put back. The owner's references are added too: the call to a
+    BPF program, and for an ftrace trampoline user data xrefs (dr_O) from its ftrace_ops slot to the ops and from
+    ops->func to the callback; ops->func is read at the ISF's offset when Apply kernel types recorded one. Returns
+    (links, counts)."""
+    func_offset = load_layout().get("ftrace_ops.func")
+    if isinstance(func_offset, int):
+        image.ftrace_ops_func = func_offset
     links = patchscan.hook_links(image, findings)
     flow_types = {"call": ida_xref.fl_CN, "jmp": ida_xref.fl_JN}  # near call or near jump, as the hooking instruction is
     node, record = load_hook_record()
     done = {tuple(xref) for xref in record["xrefs"]}
-    counts = dict.fromkeys(("xrefs", "xrefs_before", "xrefs_failed", "renamed", "named_before", "kept", "rename_failed"), 0)
+    counts = dict.fromkeys(("xrefs", "xrefs_before", "xrefs_failed", "drefs", "drefs_before", "drefs_failed", "renamed",
+                            "named_before", "kept", "rename_failed"), 0)
     for source, target, flow in patchscan.hook_xrefs(links):
+        kind = "drefs" if flow == "data" else "xrefs"
         if (source, target, flow) in done:
-            counts["xrefs_before"] += 1
-        elif ida_xref.add_cref(source, target, flow_types[flow] | ida_xref.XREF_USER):
+            counts[kind + "_before"] += 1
+        elif (ida_xref.add_dref(source, target, ida_xref.dr_O | ida_xref.XREF_USER) if flow == "data"
+              else ida_xref.add_cref(source, target, flow_types[flow] | ida_xref.XREF_USER)):
             record["xrefs"].append([source, target, flow])
             done.add((source, target, flow))
-            counts["xrefs"] += 1
+            counts[kind] += 1
         else:
-            counts["xrefs_failed"] += 1
+            counts[kind + "_failed"] += 1
     renamed = {page for page, _, _ in record["names"]}
     for page, name in sorted(patchscan.role_names(image, links).items()):
         label = "%s%x" % (patchscan.TARGET_PREFIX, page)
@@ -933,6 +977,11 @@ def link_report(links, counts):
     extra = [("%d already added by an earlier run" % counts["xrefs_before"]) if counts["xrefs_before"] else "",
              ("%d refused by IDA" % counts["xrefs_failed"]) if counts["xrefs_failed"] else ""]
     line += "".join(" (%s)" % text for text in extra if text)
+    drefs, before, failed = (counts.get(key, 0) for key in ("drefs", "drefs_before", "drefs_failed"))
+    if drefs or before or failed:  # ftrace_ops pointers toward an owner; the line is unchanged without any
+        line += "; %d data xrefs added" % drefs
+        extra = [("%d already added by an earlier run" % before) if before else "", ("%d refused by IDA" % failed) if failed else ""]
+        line += "".join(" (%s)" % text for text in extra if text)
     line += "; %d hook pages renamed by role" % counts["renamed"]
     for key, text in (("named_before", "%d already named by an earlier run"), ("kept", "%d left alone, they have another name now"),
                       ("rename_failed", "%d refused by IDA")):

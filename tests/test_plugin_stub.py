@@ -13,7 +13,7 @@ kw.unregister_action = lambda a: calls.append(("unreg", a)) or True
 kw.msg = lambda s: calls.append(("msg", s)); kw.info = kw.warning = lambda s: calls.append(("ui", s))
 kw.show_wait_box = kw.replace_wait_box = lambda s: None; kw.hide_wait_box = lambda: None; kw.user_cancelled = lambda: False
 class chooser:
-    CHCOL_HEX = 1 << 24; NOTHING_CHANGED = 0; CH_CAN_EDIT = 1024
+    CHCOL_HEX = 1 << 24; NOTHING_CHANGED = 0; CH_CAN_EDIT = 1024; CH_CAN_INS = 256
     def __init__(self, title, cols, flags=0, popup_names=None):
         self.title, self.cols, self.flags, self.popup_names = title, cols, flags, popup_names
     def Show(self): calls.append(("show", self.title))
@@ -47,8 +47,9 @@ idc.SetType = lambda ea, d: calls.append(("settype", ea, d)) or True
 nalt = types.ModuleType("ida_nalt"); nalt.get_input_file_path = lambda: ""
 nalt.retrieve_input_file_sha256 = lambda: None  # no stored hash: nothing to compare a picked file with
 # Hook chain: xrefs and names are recorded; flag values as in the IDA 9.1-9.4 stubs (ida_xref.pyi, ida_name.pyi).
-xref = types.ModuleType("ida_xref"); xref.fl_CN, xref.fl_JN, xref.XREF_USER = 17, 19, 32
+xref = types.ModuleType("ida_xref"); xref.fl_CN, xref.fl_JN, xref.XREF_USER, xref.dr_O = 17, 19, 32, 1
 xref.add_cref = lambda frm, to, kind: calls.append(("cref", frm, to, kind)) or True
+xref.add_dref = lambda frm, to, kind: calls.append(("dref", frm, to, kind)) or True
 iname = types.ModuleType("ida_name"); iname.SN_NOWARN, iname.SN_NON_AUTO = 256, 64
 iname.get_name = lambda ea: next((n for n, a in names.items() if a == ea), "")
 def set_name(ea, name, flags):
@@ -275,13 +276,28 @@ with tempfile.TemporaryDirectory() as t:
                     "rejected": [], "missing": [], "wrong_size": []})
     assert "declarations generated from the ISF: 9,734 structs, 1,715 unions, 2,149 enums, 2 skipped\n" in rep, rep
     assert "{" not in rep and "globals_typed" not in rep, rep
-    table = m.PatchList([(0x10, "fn", "what", "tgt", "handler_fn (ftrace)", 0x30), (0x40, "sys_call_table[1]", "odd", "x", "", None)])
-    assert [c[0] for c in table.cols] == ["Address", "Where", "What", "Target", "Handler"], table.cols
+    table = m.PatchList([(0x10, "fn", "what", "tgt", "handler_fn (ftrace)", 0x30, "evil.cb (ftrace_ops evil.ops)", 0x50),
+                         (0x40, "sys_call_table[1]", "odd", "x", "", None, "", None),
+                         (0x60, "gn", "what", "tgt", "assist (ftrace)", 0x70, "ftrace_ops at 0xffff888000001000 (no symbol: heap)", None)])
+    assert [c[0] for c in table.cols] == ["Address", "Where", "What", "Target", "Handler", "Owner"], table.cols
     assert table.flags & kw.Choose.CH_CAN_EDIT and table.popup_names[2] == "Jump to handler", (table.flags, table.popup_names)
-    assert table.OnGetSize() == 2 and table.OnGetLine(0) == ["10", "fn", "what", "tgt", "handler_fn (ftrace)"]
+    assert table.flags & kw.Choose.CH_CAN_INS and table.popup_names[0] == "Jump to owner", (table.flags, table.popup_names)
+    assert table.OnGetSize() == 3 and table.OnGetLine(0) == ["10", "fn", "what", "tgt", "handler_fn (ftrace)", "evil.cb (ftrace_ops evil.ops)"]
     assert table.OnSelectLine(0) == (0,) and calls[-1] == ("jump", 0x10)
     assert table.OnEditLine(0) == (0,) and calls[-1] == ("jump", 0x30)  # Ctrl+E: the handler
     assert table.OnEditLine(1) == (0,) and calls[-1][0] == "msg" and "no handler is known for sys_call_table[1]" in calls[-1][1], calls[-1]
+    assert table.OnInsertLine(0) == (0,) and calls[-1] == ("jump", 0x50)  # Insert: the owner
+    assert table.OnInsertLine(1) == (0,) and calls[-1][0] == "msg" and "no owner is known for sys_call_table[1]" in calls[-1][1], calls[-1]
+    assert table.OnInsertLine(2) == (0,) and calls[-1][0] == "msg" and "(no symbol: heap)" in calls[-1][1] and "not in this database" in calls[-1][1], calls[-1]
+    assert table.OnInsertLine(-1) == (0,) and calls[-1][0] == "msg", calls[-1]  # nothing selected
+    # Apply kernel types keeps the ISF's offset of ftrace_ops.func for the patch list (Show patched kernel functions).
+    layout_isf = dict(isf, user_types=dict(isf["user_types"], ftrace_ops={"kind": "struct", "size": 16, "fields": {
+        "func": {"offset": 8, "type": {"kind": "base", "name": "unsigned int"}}}}))
+    lp = os.path.join(t, "layout.json"); json.dump(layout_isf, open(lp, "w"))
+    blobs.clear()
+    assert m.load_layout() == {} and m.apply_types(p) is not None and m.load_layout() == {}  # no ftrace_ops in that ISF
+    assert m.apply_types(lp) is not None and m.load_layout() == {"ftrace_ops.func": 8}, m.load_layout()
+    blobs.clear()
     import base64
     def banner_isf(text):
         data = dict(isf); data["symbols"] = dict(isf["symbols"], linux_banner={"address": 9, "constant_data": base64.b64encode(text + b"\0").decode()})

@@ -108,17 +108,21 @@ many = [ps.Link(BASE + 0x10 * i, "fn%d" % i, BASE + 0x10 * i, "call", P["F"], Tr
 assert ps.page_comments(many)[P["F"]].endswith("reached from fn0, fn1, fn2, fn3, fn4 and 2 more"), ps.page_comments(many)
 
 rows = {row[1]: row for row in ps.list_rows(image, findings, list(links.values()), names)}
-assert rows["traced_a"][3:] == ("ftrace_tramp_%x" % P["F"], "function_trace_call (ftrace)", FTRACE), rows["traced_a"]
-assert rows["pushret"][3:] == ("memlens_target_%x" % P["U"], "some_helper", OTHER), rows["pushret"]
-assert rows["ripjmp"][3:] == ("real_tramp", "", None), rows["ripjmp"]
+assert rows["traced_a"][3:6] == ("ftrace_tramp_%x" % P["F"], "function_trace_call (ftrace)", FTRACE), rows["traced_a"]
+assert rows["pushret"][3:6] == ("memlens_target_%x" % P["U"], "some_helper", OTHER), rows["pushret"]
+assert rows["ripjmp"][3:6] == ("real_tramp", "", None), rows["ripjmp"]
+# Owner (tests/test_owner.py has the ftrace_ops and BPF cases): known plumbing with no ftrace_ops gives none; a first named
+# call with no known role is the owner, marked as such.
+assert rows["traced_a"][6:] == ("", None) and rows["pushret"][6:] == ("some_helper (first named call)", OTHER), rows
+assert rows["ripjmp"][6:] == ("", None) and len(rows["ripjmp"]) == 8, rows["ripjmp"]
 # A link that is not a hook page keeps the scan's label even if the database calls its target something else now (IDA
 # may give a module function's middle a dummy loc_ name once an xref lands there).
 dummy = dict(names); dummy[P["X"]] = "loc_%X" % P["X"]
 assert {row[1]: row for row in ps.list_rows(image, findings, list(links.values()), dummy)}["ripjmp"][3] == "real_tramp"
 # A syscall slot is never linked, but its target page F was renamed: the row shows the page's name now and its handler.
-assert rows["sys_call_table[0]"][3:] == ("ftrace_tramp_%x" % P["F"], "function_trace_call (ftrace)", FTRACE), rows["sys_call_table[0]"]
+assert rows["sys_call_table[0]"][3:6] == ("ftrace_tramp_%x" % P["F"], "function_trace_call (ftrace)", FTRACE), rows["sys_call_table[0]"]
 assert ps.copied_targets(image, findings) == {link.target for link in links.values() if link.page}, ps.copied_targets(image, findings)
-assert rows["int3_fn"][3:] == ("", "", None) and rows["far"][3] == "0xffffffffc0001000 (no symbol)", (rows["int3_fn"], rows["far"])
+assert rows["int3_fn"][3:] == ("", "", None, "", None) and rows["far"][3] == "0xffffffffc0001000 (no symbol)", (rows["int3_fn"], rows["far"])
 assert [row[0] for row in ps.list_rows(image, findings, [], {})] == [row[0] for row in findings]
 # The command line prints the same chain with --links (and only then): one line per xref, one per rename.
 with tempfile.TemporaryDirectory() as work:
@@ -135,7 +139,8 @@ assert linked.stdout.startswith(plain.stdout) and not any(line.startswith(("xref
 assert [line.split("\t")[1:4] for line in extra if line.startswith("xref")] == [["%#x" % a, "%#x" % b, f] for a, b, f in xrefs], extra
 assert [line.split("\t")[1:] for line in extra if line.startswith("rename")] == [
     ["%#x" % page, "%s%x" % (ps.TARGET_PREFIX, page), name] for page, name in sorted(names.items())], extra
-assert len(extra) == len(xrefs) + len(names), extra
+assert [line.split("\t")[1:] for line in extra if line.startswith("owner")] == [["%#x" % P["U"], "%#x" % OTHER, "some_helper (first named call)"]], extra
+assert len(extra) == len(xrefs) + len(names) + 1, extra
 assert "xref\t%#x\t%#x\tcall\ttraced_a+0x4 -> memlens_target_%x" % (BASE + 4, P["F"], P["F"]) in extra, extra
 assert "xref\t%#x\t%#x\tcall\tmemlens_target_%x+0x40 -> function_trace_call" % (P["F"] + 0x40, FTRACE, P["F"]) in extra, extra
 
@@ -203,8 +208,9 @@ for path in sys.argv[1:]:
         assert names[link.target] == name, (names, link)
         assert ps.describe(image, link.target) == "%s%x" % (ps.TARGET_PREFIX, link.target)
     xrefs = ps.hook_xrefs(links)
-    assert len(xrefs) == 2 * len(links), xrefs
-    print("%s: %d patched entries, %d linked to a copied hook page, %d xrefs, %d pages renamed (%s)" % (
-        path, len(findings), sum(link.page for link in links), len(xrefs), len(names), ", ".join(sorted(names.values()))))
+    owner_refs = {ref for link in links if link.owner for ref in link.owner.refs}  # tests/test_owner.py checks them
+    assert len(xrefs) == 2 * len(links) + len(owner_refs) and owner_refs <= set(xrefs), xrefs
+    print("%s: %d patched entries, %d linked to a copied hook page, %d xrefs (%d to or toward an owner), %d pages renamed (%s)" % (
+        path, len(findings), sum(link.page for link in links), len(xrefs), len(owner_refs), len(names), ", ".join(sorted(names.values()))))
 if len(sys.argv) < 2:
     print("real kernel.elf files SKIPPED (none given)")

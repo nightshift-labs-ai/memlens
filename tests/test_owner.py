@@ -10,7 +10,7 @@ An ftrace trampoline (arch/x86/kernel/ftrace.c, create_trampoline) is a copy of 
 then its ret, then a pointer to the ftrace_ops it serves; its mov rdx, [rip+disp32] loads that pointer. ops->func is
 the callback the ops registered, also when the trampoline calls ftrace_ops_assist_func instead of it.
 """
-import os, struct, sys
+import json, os, struct, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
 import patchscan as ps
@@ -155,6 +155,54 @@ assert ps.Image(blob).ftrace_ops_func == ps.FTRACE_OPS_FUNC == 0
 print("owner tests OK (hand-made ELF: %d hooked entries, %d with an ftrace_ops owner)" % (
     len(links), sum(1 for owner in owners.values() if owner and owner.how == "ftrace_ops")))
 
+# Where users see it: the list rows (owner text and address after the handler), the page comment, the xrefs that lead
+# to the owner (each once), and patchscan.py --links, one "owner" line per copied page that has one.
+rows = {row[1]: row for row in ps.list_rows(image, findings, list(links.values()), {})}
+assert rows["__x64_sys_getdents64"][4:] == ("ftrace_ops_assist_func (ftrace)", ASSIST,
+                                            "evilmod.fh_ftrace_thunk (ftrace_ops evilmod.hooks+0x20)", THUNK), rows["__x64_sys_getdents64"]
+assert rows["__x64_sys_kill"][6:] == ("ftrace_ops at 0xffff888003c41a00 (no symbol: heap)", None), rows["__x64_sys_kill"]
+assert rows["direct_cb"][6:] == ("evilmod.fh_sys_kill (first named call)", KILL) and rows["plumbing_only"][6:] == ("", None), rows
+comments = ps.page_comments(list(links.values()))
+assert comments[PAGES["__x64_sys_getdents64"]].endswith(
+    "first named call: ftrace_ops_assist_func (ftrace); owner: evilmod.fh_ftrace_thunk (ftrace_ops evilmod.hooks+0x20)"), comments
+assert "owner" not in comments[PAGES["direct_cb"]] and "owner" not in comments[PAGES["plumbing_only"]], comments
+xrefs = ps.hook_xrefs(list(links.values()))
+assert len(xrefs) == len(set(xrefs)) and xrefs.count((HOOK_ARRAY + 0x20, THUNK, "data")) == 1, xrefs  # two pages share that ops
+assert {(SLOTS["__x64_sys_getdents64"], HOOK_ARRAY + 0x20, "data"), (SLOTS["vfs_getattr"], GLOBAL_OPS, "data"),
+        (GLOBAL_OPS, FTRACE, "data")} <= set(xrefs), xrefs
+assert not [x for x in xrefs if x[1] in (HEAP_OPS, HIDDEN_OPS)], xrefs  # nothing to point at outside the ELF
+cli = [sys.executable, "-I", os.path.join(HERE, "..", "patchscan.py")]
+
+
+def owner_lines(path, *options):
+    run = subprocess.run(cli + list(options) + ["--links", path], capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr
+    return [line.split("\t")[1:] for line in run.stdout.splitlines() if line.startswith("owner")], run.stdout
+
+
+with tempfile.TemporaryDirectory() as work:
+    path = os.path.join(work, "kernel.elf")
+    with open(path, "wb") as handle:
+        handle.write(blob)
+    lines, out = owner_lines(path)
+    expected = [["%#x" % link.target, "%#x" % link.owner.address if link.owner.address is not None else "-", link.owner.text]
+                for link in sorted(links.values(), key=lambda link: link.target) if link.owner]
+    assert lines == expected and len(lines) == 11, (lines, expected)
+    assert "owner\t%#x\t-\tftrace_ops at 0xffff888003c41a00 (no symbol: heap)" % PAGES["__x64_sys_kill"] in out, out
+    assert "xref\t%#x\t%#x\tdata\tevilmod.hooks+0x20 -> evilmod.fh_ftrace_thunk" % (HOOK_ARRAY + 0x20, THUNK) in out, out
+    # --isf: the offset of ftrace_ops.func from the ISF (here 8, for the offset8 page).
+    isf = os.path.join(work, "k.json")
+    with open(isf, "w") as handle:
+        json.dump({"user_types": {"ftrace_ops": {"kind": "struct", "size": 16, "fields": {"func": {"offset": 8}}}}}, handle)
+    lines8, _ = owner_lines(path, "--isf", isf)
+    assert ["%#x" % PAGES["offset8"], "%#x" % KPROBE, "kprobe_ftrace_handler (ftrace_ops other_ops)"] in lines8, lines8
+    plain = subprocess.run(cli + [path], capture_output=True, text=True)
+    assert plain.returncode == 0 and "owner" not in plain.stdout and "xref" not in plain.stdout, plain.stdout
+    bad = subprocess.run(cli + ["--isf", os.path.join(work, "missing.json"), path], capture_output=True, text=True)
+    assert bad.returncode != 0 and "missing.json" in bad.stderr, bad.stderr
+    noisf = subprocess.run(cli + [path, "--isf"], capture_output=True, text=True)
+    assert noisf.returncode != 0 and "usage" in noisf.stderr, noisf.stderr
+
 # BPF trampolines (arch/x86/net/bpf_jit_comp.c, invoke_bpf_prog): after the call to __bpf_prog_enter* come
 # mov rbx, rax; test rax, rax; je (a 2-byte NOP until patched); lea rdi, [rbp-N]; movabs rsi, insnsi (interpreter only);
 # then the call that runs the program. The program is the owner.
@@ -250,6 +298,9 @@ for path in sys.argv[1:]:
     if not known and not any(link.function in EXPECTED_BPF for link in links):
         print("%s: SKIPPED, no hook with expected values (EXPECTED knows the demo's and Ubuntu 24.04's)" % path)
         continue
+    lines, _ = owner_lines(path)
+    assert lines == [["%#x" % link.target, "%#x" % link.owner.address if link.owner.address is not None else "-", link.owner.text]
+                     for link in sorted(links, key=lambda link: link.target) if link.owner], lines
     for link in known:
         text, func, slot, ops = EXPECTED[link.function]
         owner = link.owner

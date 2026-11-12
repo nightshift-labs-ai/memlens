@@ -73,20 +73,24 @@ with tempfile.TemporaryDirectory() as work:
     assert comments[F].startswith("MemLens: hook page no module owns, copied from memory (exporter label memlens_target_%x); "
                                   "reached from traced_a, traced_b" % F), comments
     assert comments[BASE + 4 - 4].startswith("MemLens: call to memory with no symbol memlens_target_%x" % F), comments
-    # The list: a Handler column; Enter goes to the entry, Ctrl+E ("Jump to handler") to the handler.
+    # The list: Handler and Owner columns; Enter goes to the entry, Ctrl+E ("Jump to handler") to the handler.
     table = m._open_list
-    assert [c[0] for c in table.cols] == ["Address", "Where", "What", "Target", "Handler"], table.cols
+    assert [c[0] for c in table.cols] == ["Address", "Where", "What", "Target", "Handler", "Owner"], table.cols
     lines = {line[1]: line for line in (table.OnGetLine(n) for n in range(table.OnGetSize()))}
-    assert lines["traced_a"][3:] == ["ftrace_tramp_%x" % F, "function_trace_call (ftrace)"], lines
-    assert lines["probed"][3:] == ["kprobe_ftrace_tramp_probed", "kprobe_ftrace_handler (kprobe via ftrace)"], lines
-    assert lines["kprobe_me"][3:] == ["", ""], lines
+    assert lines["traced_a"][3:5] == ["ftrace_tramp_%x" % F, "function_trace_call (ftrace)"], lines
+    assert lines["probed"][3:5] == ["kprobe_ftrace_tramp_probed", "kprobe_ftrace_handler (kprobe via ftrace)"], lines
+    assert lines["kprobe_me"][3:] == ["", "", ""], lines
+    assert all(line[5] == "" for line in lines.values()), lines  # plumbing only, no ftrace_ops slot here: no owner
     # The syscall slot that points at page K: not linked, but it shows the page's new name and its handler.
-    assert lines["sys_call_table[0]"][3:] == ["kprobe_ftrace_tramp_probed", "kprobe_ftrace_handler (kprobe via ftrace)"], lines
+    assert lines["sys_call_table[0]"][3:5] == ["kprobe_ftrace_tramp_probed", "kprobe_ftrace_handler (kprobe via ftrace)"], lines
     table.OnEditLine(list(lines).index("sys_call_table[0]")); assert calls[-1] == ("jump", KPROBE), calls[-1]
     index = [table.OnGetLine(n)[1] for n in range(table.OnGetSize())]
     table.OnSelectLine(index.index("movjmp")); assert calls[-1] == ("jump", BASE + 0x300), calls[-1]
     table.OnEditLine(index.index("movjmp")); assert calls[-1] == ("jump", BPF), calls[-1]
     table.OnEditLine(index.index("kprobe_me")); assert calls[-1][0] == "msg" and "no handler" in calls[-1][1], calls[-1]
+    # Insert ("Jump to owner"): no owner is known on these pages, so it says so instead of jumping.
+    table.OnInsertLine(index.index("traced_a")); assert calls[-1][0] == "msg" and "no owner" in calls[-1][1], calls[-1]
+    table.OnInsertLine(-1); assert calls[-1][0] == "msg", calls[-1]  # nothing selected
 
     # Second run: nothing added or renamed twice; comments unchanged.
     before = dict(comments)
@@ -161,7 +165,7 @@ with tempfile.TemporaryDirectory() as work:
         netnode.getblob = good_getblob
     assert crefs == [] and renames == [] and "getblob broke" in out and "hook chain stopped by this error" in out, out
     lines = {line[1]: line for line in (m._open_list.OnGetLine(n) for n in range(m._open_list.OnGetSize()))}
-    assert lines["traced_a"][3:] == ["memlens_target_%x" % F, "function_trace_call (ftrace)"] and len(lines) == 6, lines
+    assert lines["traced_a"][3:5] == ["memlens_target_%x" % F, "function_trace_call (ftrace)"] and len(lines) == 6, lines
     # A late failure (the record cannot be saved) after xrefs and names were added: the Output window must not claim
     # that nothing was added.
     database(blob)
@@ -209,18 +213,63 @@ with tempfile.TemporaryDirectory() as work:
     crefs, renames, out = run()
     assert asked == [] and len(crefs) == 7, (asked, crefs)
     nalt.get_input_file_path = lambda: path
-print("hook chain stub test OK (hand-made ELF; fake IDA modules)")
+
+# An ftrace trampoline whose ftrace_ops sits in a module's data (the ftrace-hook rootkit pattern; tests/test_owner.py has
+# the layout): data xrefs slot -> ops -> callback (dr_O, user), the Owner column, Insert jumps to the callback, the page
+# comment names it, a second run adds nothing. With an ISF offset recorded by Apply kernel types, ops->func is read there.
+DATA = 1 | 32  # dr_O | XREF_USER
+code = bytearray(b"\x90" * TEXT)
+ASSIST, THUNK, OPS, PAGE = BASE + 0x1000, BASE + 0x1100, BASE + TEXT + 0x40, BASE + 0x2000
+put(PAGE - BASE + 0x74, b"\x48\x8b\x15" + struct.pack("<i", (PAGE + 0xdd) - (PAGE + 0x7b)))  # mov rdx, [rip+X]: the ops slot
+put(PAGE - BASE + 0x94, call(PAGE + 0x94, ASSIST))
+put(PAGE - BASE + 0xd8, b"\xc3\xcc\x00\x00\x00" + struct.pack("<Q", OPS))
+put(0x000, b"\xf3\x0f\x1e\xfa" + call(BASE + 4, PAGE))
+rodata = b"Linux version 6.12\0".ljust(0x40, b"\0") + struct.pack("<QQ", THUNK, ASSIST)  # ops: func, then a decoy at +8
+symbols = [("__x64_sys_getdents64", BASE, 0x100), ("ftrace_ops_assist_func", ASSIST, 0x100), ("evilmod.fh_ftrace_thunk", THUNK, 0x100),
+           ("linux_banner", BASE + TEXT, 0x20), ("evilmod.hooks", OPS - 0x20, 0x80), ("%s%x" % (ps.TARGET_PREFIX, PAGE), PAGE, 0)]
+blob = elf(code, symbols, rodata)
+with tempfile.TemporaryDirectory() as work:
+    path = os.path.join(work, "kernel.elf")
+    with open(path, "wb") as handle:
+        handle.write(blob)
+    nalt.get_input_file_path = lambda: path
+    database(blob)
+    crefs, renames, out = run()
+    drefs = sorted(c[1:] for c in calls if c[0] == "dref")
+    assert drefs == [(PAGE + 0xdd, OPS, DATA), (OPS, THUNK, DATA)], drefs
+    assert crefs == [(BASE + 4, PAGE, CALL), (PAGE + 0x94, ASSIST, CALL)], crefs
+    assert renames == [(PAGE, "ftrace_tramp___x64_sys_getdents64", RENAME)], renames  # ftrace_ops_assist_func: an ftrace role
+    assert "2 code xrefs added; 2 data xrefs added; 1 hook pages renamed by role" in out, out
+    table = m._open_list
+    line = table.OnGetLine(0)
+    assert line[3:] == ["ftrace_tramp___x64_sys_getdents64", "ftrace_ops_assist_func (ftrace)",
+                        "evilmod.fh_ftrace_thunk (ftrace_ops evilmod.hooks+0x20)"], line
+    table.OnInsertLine(0); assert calls[-1] == ("jump", THUNK), calls[-1]
+    table.OnEditLine(0); assert calls[-1] == ("jump", ASSIST), calls[-1]
+    assert comments[PAGE].endswith("; owner: evilmod.fh_ftrace_thunk (ftrace_ops evilmod.hooks+0x20)"), comments[PAGE]
+    crefs, renames, out = run()
+    assert crefs == [] and not [c for c in calls if c[0] == "dref"], calls
+    assert "0 code xrefs added (2 already added by an earlier run); 0 data xrefs added (2 already added by an earlier run)" in out, out
+    # The ISF that Apply kernel types imported said func is at offset 8: the decoy there is read instead.
+    database(blob)
+    m.save_layout({"ftrace_ops.func": 8})
+    crefs, renames, out = run()
+    assert m._open_list.OnGetLine(0)[5] == "ftrace_ops_assist_func (ftrace_ops evilmod.hooks+0x20)", m._open_list.OnGetLine(0)
+    assert sorted(c[1:] for c in calls if c[0] == "dref") == [(PAGE + 0xdd, OPS, DATA), (OPS + 8, ASSIST, DATA)], calls
+    nalt.get_input_file_path = lambda: ""
+print("hook chain stub test OK (hand-made ELFs; fake IDA modules)")
 
 for path in sys.argv[1:2]:
     blob = open(path, "rb").read()
     nalt.get_input_file_path = lambda: path
     database(blob)
     crefs, renames, out = run()
-    assert crefs and all(kind == CALL for _, _, kind in crefs), crefs
+    drefs = [c for c in calls if c[0] == "dref"]
+    assert crefs and all(kind == CALL for _, _, kind in crefs) and all(c[3] == DATA for c in drefs), (crefs, drefs)
     second = run()
-    assert second[:2] == ([], []), second
-    print("%s: first run %d add_cref, %d set_name (%s); second run %d add_cref, %d set_name" % (
-        path, len(crefs), len(renames), ", ".join(r[1] for r in renames), len(second[0]), len(second[1])))
+    assert second[:2] == ([], []) and not [c for c in calls if c[0] == "dref"], second
+    print("%s: first run %d add_cref, %d add_dref, %d set_name (%s); second run %d add_cref, %d set_name" % (
+        path, len(crefs), len(drefs), len(renames), ", ".join(r[1] for r in renames), len(second[0]), len(second[1])))
     for line in out.splitlines():
         print("  " + line)
     table = m._open_list

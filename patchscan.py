@@ -7,6 +7,7 @@ of a function, or one made by something that leaves the entry bytes alone, is no
 """
 import bisect
 import collections
+import os
 import struct
 import sys
 
@@ -30,8 +31,9 @@ FTRACE_OWN = {"ftrace_caller", "ftrace_regs_caller", "ftrace_call", "ftrace_regs
 
 
 TARGET_PREFIX = "memlens_target_"  # labels the exporter gives to hook targets it copied in
-# Offset of func in struct ftrace_ops: 0 in the ISFs of Linux 6.1, 6.8, 6.12 and 7.0 we checked. Set
-# Image.ftrace_ops_func from an ISF (ftrace_ops_func_offset) when one is at hand.
+# Offset of func in struct ftrace_ops: 0 in the ISFs of Linux 6.1, 6.8, 6.12 and 7.0 we checked. Image.ftrace_ops_func
+# takes it from an ISF when one is at hand (ftrace_ops_func_offset): patchscan.py --isf, and in IDA the ISF that Apply
+# kernel types imported.
 FTRACE_OPS_FUNC = 0
 
 
@@ -567,15 +569,23 @@ def copied_targets(image, findings):
 
 
 def hook_xrefs(links):
-    """(from, to, 'call' or 'jmp') code cross-references for the links, sorted and without repeats: each transfer
-    instruction to its target, and each copied page's handler call to the handler (once, however many entries share
-    the page)."""
+    """(from, to, 'call', 'jmp' or 'data') cross-references for the links, sorted and without repeats: each transfer
+    instruction to its target, each copied page's handler call to the handler (once, however many entries share the
+    page), and the references that lead to each page's owner (Owner.refs: a BPF program's call; for an ftrace
+    trampoline the data references slot -> ftrace_ops -> callback), where they are in the ELF."""
     xrefs = set()
     for link in links:
         xrefs.add((link.site, link.target, link.flow))
         if link.handler is not None:
             xrefs.add((link.handler_site, link.handler, "call"))
+        if link.owner is not None:
+            xrefs.update(link.owner.refs)
     return sorted(xrefs)
+
+
+def page_owners(links):
+    """{page address: Owner} for the copied hook pages of the links that have an owner."""
+    return {link.target: link.owner for link in links if link.page and link.owner is not None}
 
 
 def ida_safe(text):
@@ -627,6 +637,8 @@ def page_comments(links):
             TARGET_PREFIX, page, ", ".join(callers[:5]) + (" and %d more" % (len(callers) - 5) if len(callers) > 5 else ""))
         if link.handler_name:
             text += "; first named call: %s%s" % (link.handler_name, " (%s)" % link.kind if link.kind else "")
+        if link.owner is not None and link.owner.how != "first named call":  # that one is in the comment already
+            text += "; owner: %s" % link.owner.text
         comments[page] = text
     return comments
 
@@ -639,7 +651,8 @@ def handler_text(link):
 
 
 def list_rows(image, findings, links, names):
-    """Rows of the IDA list: (address, function, what, target, handler, handler address or None).
+    """Rows of the IDA list: (address, function, what, target, handler, handler address or None, owner, owner address or
+    None); the owner is page_owner's text, '' when none is known, and its address None when it is not in the ELF.
 
     names maps a hook page to the name the database gives it now (after renaming). For an entry linked to a copied hook
     page the target is that name, else the ELF's name for it (any other link keeps the scan's label); the handler has its own column. A syscall slot is never linked, but when it points
@@ -654,10 +667,12 @@ def list_rows(image, findings, links, names):
             handler = page_handler(image, target)
             link = Link(address, function, None, None, target, True, *handler, page_owner(image, target, *handler))
         if link is None:
-            rows.append((address, function, what, label, "", None))
+            rows.append((address, function, what, label, "", None, "", None))
             continue
         shown = (names.get(link.target) or describe(image, link.target)) if link.page else label
-        rows.append((address, function, what, shown, handler_text(link), link.handler))
+        owner = link.owner if link.page else None
+        rows.append((address, function, what, shown, handler_text(link), link.handler,
+                     owner.text if owner else "", owner.address if owner else None))
     return rows
 
 
@@ -672,21 +687,47 @@ def at(image, address):
 
 
 def print_links(image, findings):
-    """The hook chain that MemLens adds in IDA, as tab-separated lines: xref <from> <to> <call|jmp> <where -> where>
-    and rename <page> <exporter label> <new name>."""
+    """The hook chain that MemLens adds in IDA, as tab-separated lines: xref <from> <to> <call|jmp|data> <where -> where>,
+    rename <page> <exporter label> <new name>, and owner <page> <owner address, or - when not in the ELF> <owner> (the
+    list's Owner column)."""
     links = hook_links(image, findings)
     for source, target, flow in hook_xrefs(links):
         print("xref\t%#x\t%#x\t%s\t%s -> %s" % (source, target, flow, at(image, source), at(image, target)))
     for page, name in sorted(role_names(image, links).items()):
         print("rename\t%#x\t%s\t%s" % (page, describe(image, page), name))
+    for page, owner in sorted(page_owners(links).items()):
+        print("owner\t%#x\t%s\t%s" % (page, "-" if owner.address is None else "%#x" % owner.address, owner.text))
+
+
+USAGE = ("usage: python3 patchscan.py [--links] [--isf <isf>] kernel.elf   (the ELF that MemLens/kernel2elf exported; "
+         "--links also prints the cross-references, hook page names and owners that MemLens adds in IDA; --isf takes the "
+         "offset of ftrace_ops.func from that kernel's ISF instead of %d)" % FTRACE_OPS_FUNC)
 
 
 def main(argv):
     links = "--links" in argv[1:]
     argv = [argv[0]] + [arg for arg in argv[1:] if arg != "--links"]
+    isf_path = None
+    if "--isf" in argv[1:]:
+        at_isf = argv.index("--isf")
+        if at_isf + 1 >= len(argv):
+            sys.exit(USAGE)
+        isf_path = argv[at_isf + 1]
+        argv = argv[:at_isf] + argv[at_isf + 2:]
     if len(argv) != 2:
-        sys.exit("usage: python3 patchscan.py [--links] kernel.elf   (the ELF that MemLens/kernel2elf exported; --links also "
-                 "prints the cross-references and hook page names that MemLens adds in IDA)")
+        sys.exit(USAGE)
+    func_offset = None
+    if isf_path is not None:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)  # isf2c lives next to this file (python3 -I does not add the script's folder)
+        import isf2c
+        try:
+            func_offset = ftrace_ops_func_offset(isf2c.load_isf(isf_path))
+        except (isf2c.ISFError, OSError) as error:
+            sys.exit("patchscan: cannot read the ISF %s: %s" % (isf_path, error))
+        if func_offset is None:
+            print("warning: %s has no ftrace_ops.func; ops->func is read at offset %d" % (isf_path, FTRACE_OPS_FUNC), file=sys.stderr)
     try:
         with open(argv[1], "rb") as handle:
             blob = handle.read()
@@ -696,6 +737,8 @@ def main(argv):
         if on_disk_kernel(blob):
             print("warning: this is a kernel file from disk, not a memory export; its unapplied alternatives show up as false rows", file=sys.stderr)
         image = Image(blob)
+        if func_offset is not None:
+            image.ftrace_ops_func = func_offset
         functions = sum(1 for symbol in image.symbols if symbol[3] == STT_FUNC)
         print("%d function symbols scanned" % functions, file=sys.stderr)
         reason = nothing_to_check(image)

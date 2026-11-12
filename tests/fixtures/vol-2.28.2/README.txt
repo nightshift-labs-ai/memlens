@@ -8,6 +8,10 @@ Images:
   random.bin       50 MiB of pseudo-random bytes (Python random.Random(157).randbytes)
   header_only.avml 8 MiB: the 8-byte AVML v2 header ("AVML", version 2), then random bytes; no libsnappy installed
   random_with_banner.bin  50 MiB random bytes with the Debian 13 ISF's linux_banner (with its "\n\0") at 0x100000
+  journal_copy.lime       trace.elf converted to LiME (same ranges), with one systemd journal DATA object
+                          "MESSAGE=<the Debian 12 ISF's line>" then NUL bytes planted in a zero page at 0x30000000
+                          (a copy of an earlier boot's kernel line; the image's own journal holds such a copy of its
+                          kernel's line at 0xc066ae8). Made by a code review (s158), recorded 2026-11-12.
 ISFs (copied into <symbols>/linux/ as MemLens does):
   Debian 13  debian-6.12.115+deb13.1-amd64.json.xz (the demo ISF, matches trace.elf)
   Debian 12  debian-6.1.0-54.json.xz (another kernel: wrong for trace.elf)
@@ -24,7 +28,9 @@ export_trace_no_isf           1     5.7      -p <memlens>/vol_plugins -o <out> -
 export_random_no_isf          1     5.2      -p <memlens>/vol_plugins -o <out> -f random.bin linux.kernel2elf.Kernel2Elf
 export_avml_header_isf        1     5.1      -p <memlens>/vol_plugins -s <Debian 13> -o <out> -f header_only.avml linux.kernel2elf.Kernel2Elf
 export_random_with_banner_isf 0     32.7     -p <memlens>/vol_plugins -s <Debian 13> -o <out> -f random_with_banner.bin linux.kernel2elf.Kernel2Elf
+banners_journal_copy          0     11.5     -f journal_copy.lime banners.Banners
+export_journal_copy_wrong_isf 1     7.4      -p <memlens>/vol_plugins -s <Debian 12> -o <out> -f journal_copy.lime linux.kernel2elf.Kernel2Elf
 
-The five failed exports other than AVML print byte-identical stdout and stderr: Volatility's text cannot tell a wrong
+The six failed exports other than AVML print byte-identical stdout and stderr: Volatility's text cannot tell a wrong
 ISF from no ISF or from a file that is not a memory image. random_with_banner.bin is not a failure: Volatility exits 0
 and writes an ELF with 0 bytes of .text.

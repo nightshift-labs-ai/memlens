@@ -133,10 +133,11 @@ Volatility 2.28.2 prints the same error, byte for byte, for a wrong ISF, for no 
   Image: Linux version 6.12.115+deb13.1-amd64 (...) #1 SMP PREEMPT_DYNAMIC Debian 6.12.115-2 (2026-11-01)1)
   ```
   An image can hold several such lines (the demo image has 4, 3 of them different), so up to 3 are shown, most frequent first. MemLens does not say which one is the running kernel.
+- The ISF's line is among the image's: banners.Banners also lists copies of a line (for example `MESSAGE=<line>` in the systemd journal of an earlier boot), but Volatility only matches the line as the kernel stores it, followed by a newline and a NUL byte. So MemLens then looks for exactly those bytes in the image file (one more read of the file, 1 to 3 s for the 1 GB demo image here; Cancel stops it). Found: the ISF fits a kernel in the image and Volatility failed for another reason. Not found: the line is only a copy and the ISF was built for another kernel; the dialog lists the ISF's line among the image's, marked `(the ISF's, only a copy)`, also when it is not among the 3 most frequent. A compressed file (xz, gzip, bzip2, AVML, zip) cannot be checked this way, so the dialog then names both causes.
 - No ISF chosen: the image's lines, so you know which ISF to get (next section).
 - An AVML image that Volatility cannot read because the snappy library is missing: the dialog says so (Volatility's own warning).
 
-These cases were run with real Volatility 2.28.2 (the demo `trace.elf` with a Debian 12 ISF and with none, 50 MiB of random bytes with and without the right ISF, an AVML header without snappy) through the plugin's export code on fake IDA modules, not in real IDA.
+These cases were run with real Volatility 2.28.2 (the demo `trace.elf` with a Debian 12 ISF and with none, 50 MiB of random bytes with and without the right ISF, an AVML header without snappy, a LiME copy of `trace.elf` with a journal copy of the Debian 12 line planted in it, with the Debian 12 ISF) through the plugin's export code on fake IDA modules, not in real IDA.
 
 ### An ISF for your own image
 

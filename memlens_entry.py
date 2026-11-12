@@ -393,16 +393,49 @@ def image_banners(stdout):
 
 
 def isf_banner(isf_path):
-    """(the ISF's kernel version line, None), or (None, why there is none). Read with isf2c, no Volatility call."""
+    """(the ISF's kernel version line, the exact bytes Volatility looks for, None), or (None, None, why there is none).
+    Read with isf2c, no Volatility call. Volatility's Linux identifier is the whole base64-decoded constant_data of
+    linux_banner, its trailing "\\n\\0" included (automagic/symbol_cache.py, LinuxIdentifier); the line is that up to the
+    NUL, stripped, as banners.Banners prints the image's lines."""
     try:
-        banner = isf_linux_banner(isf2c.load_isf(isf_path))
+        data = (isf2c.load_isf(isf_path).get("symbols", {}).get("linux_banner") or {}).get("constant_data")
+        exact = base64.b64decode(data) if data else None
     except isf2c.ISFError as error:
-        return None, str(error)
+        return None, None, str(error)
     except (ValueError, TypeError, AttributeError) as error:  # a damaged linux_banner entry (not base64, not text)
-        return None, "its linux_banner is not readable (%s)" % error
-    if not banner:
-        return None, "it has no linux_banner"
-    return banner.decode("ascii", "replace").strip(), None
+        return None, None, "its linux_banner is not readable (%s)" % error
+    if not exact or not exact.split(b"\0")[0]:
+        return None, None, "it has no linux_banner"
+    return exact.split(b"\0")[0].decode("ascii", "replace").strip(), exact, None
+
+
+# Files whose raw bytes are not the image's: xz, gzip and bzip2 (Volatility decompresses them itself,
+# layers/resources.py), AVML (snappy-compressed) and zip.
+COMPRESSED_MAGIC = (b"\xfd7zXZ\x00", b"\x1f\x8b", b"BZh", b"AVML", b"PK\x03\x04")
+
+
+def holds_bytes(path, needle, chunk=1 << 24):
+    """(True or False, None) whether the file holds these exact bytes, or (None, why it cannot tell): a compressed file,
+    a read error, or Cancel (checked after each chunk). Reads the whole file once if the bytes are not there."""
+    keep = len(needle) - 1
+    try:
+        with open(path, "rb") as handle:
+            if handle.read(8).startswith(COMPRESSED_MAGIC):
+                return None, "the file is compressed"
+            handle.seek(0)
+            carry = b""
+            while True:
+                block = handle.read(chunk)
+                if not block:
+                    return False, None
+                data = carry + block  # carry: the end of the previous chunk, for a match across the boundary
+                if needle in data:
+                    return True, None
+                carry = data[max(len(data) - keep, 0):] if keep > 0 else b""
+                if ida_kernwin.user_cancelled():
+                    return None, "you cancelled that check"
+    except OSError as error:
+        return None, "the file could not be read (%s)" % error
 
 
 def kernel_check_wanted(stdout, stderr):
@@ -427,17 +460,23 @@ def check_kernel(vol, image, isf_path):
         check = {"banners": image_banners(stdout)}
         if isf_path and check["banners"]:
             ida_kernwin.replace_wait_box("MemLens: reading the ISF's kernel version")  # about 1.5 s for the demo ISF
-            check["isf_banner"], check["isf_problem"] = isf_banner(isf_path)
+            check["isf_banner"], exact, check["isf_problem"] = isf_banner(isf_path)
+            if check["isf_banner"] in check["banners"]:
+                # banners.Banners cuts each hit at the NUL and strips it, so it also lists copies (a journal's
+                # "MESSAGE=<line>\0") that Volatility never matches: it looks for the exact bytes, "\n\0" included.
+                ida_kernwin.replace_wait_box("MemLens: looking for the ISF's exact kernel version line in the image")
+                check["isf_exact"], check["isf_exact_unknown"] = holds_bytes(image, exact)
         return check
     finally:
         ida_kernwin.hide_wait_box()
 
 
-def banner_lines(banners, isf_line=None):
-    """Up to SHOWN_BANNERS "Image: ..." lines; the one equal to the ISF's line is marked."""
-    lines = ["Image: %s%s" % (banner, " (the ISF's)" if banner == isf_line else "") for banner in banners[:SHOWN_BANNERS]]
-    if len(banners) > SHOWN_BANNERS:
-        lines.append("... and %d more" % (len(banners) - SHOWN_BANNERS))
+def banner_lines(banners, isf_line=None, mark=" (the ISF's)"):
+    """Up to SHOWN_BANNERS "Image: ..." lines, plus the ISF's line when the image holds it further down; it is marked."""
+    shown = banners[:SHOWN_BANNERS] + ([isf_line] if isf_line in banners[SHOWN_BANNERS:] else [])
+    lines = ["Image: %s%s" % (banner, mark if banner == isf_line else "") for banner in shown]
+    if len(banners) > len(shown):
+        lines.append("... and %d more" % (len(banners) - len(shown)))
     if len(banners) > 1:
         lines.append("(%d different \"Linux version\" lines in the image, most frequent first. An image can hold more "
                      "than the running kernel's: copies in logs, lines of older kernels and damaged ones.)" % len(banners))
@@ -463,9 +502,22 @@ def kernel_hint(check, isf_given):
         return ["The file you chose as the ISF cannot be compared with the image: %s. Volatility picks a Linux ISF by "
                 "finding the ISF's kernel version line (linux_banner) in the image. Use the ISF built for the image's "
                 "kernel (%s)." % (problem, ISF_README), banner_lines(banners)]
+    exact = check.get("isf_exact")  # only looked for when the ISF's line is among the image's lines
+    if isf_line in banners and exact:
+        return ["This image holds the ISF's kernel version line as the kernel stores it, so the ISF fits a kernel in this "
+                "image; Volatility still failed, so the cause is something else (see its output below).",
+                "ISF: %s\n%s" % (isf_line, banner_lines(banners, isf_line))]
+    if isf_line in banners and exact is False:
+        return ["The ISF you chose was built for another kernel: its kernel version line is in this image only as a copy "
+                "(for example in the system log of an earlier boot), not as the kernel stores it (followed by a newline "
+                "and a NUL byte), which is what Volatility looks for. Use the ISF built for the image's kernel (%s)."
+                % ISF_README, "ISF: %s\n%s" % (isf_line, banner_lines(banners, isf_line, " (the ISF's, only a copy)"))]
     if isf_line in banners:
-        return ["This image holds the ISF's kernel version line, so the ISF fits a kernel in this image; Volatility still "
-                "failed, so the cause is something else (see its output below).",
+        return ["This image holds the ISF's kernel version line, but MemLens could not check whether it is there as the "
+                "kernel stores it (followed by a newline and a NUL byte), which is what Volatility looks for: %s. So "
+                "either the ISF fits a kernel in this image and Volatility failed for another reason (see its output "
+                "below), or the line is only a copy (for example in the system log of an earlier boot) and the ISF was "
+                "built for another kernel (%s)." % (check.get("isf_exact_unknown"), ISF_README),
                 "ISF: %s\n%s" % (isf_line, banner_lines(banners, isf_line))]
     return ["The ISF you chose was built for another kernel: its kernel version line (linux_banner) is not in this image, "
             "and Volatility picks a Linux ISF by finding that exact line. Use the ISF built for the image's kernel (%s)."

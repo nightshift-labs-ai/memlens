@@ -29,7 +29,7 @@ assert D13_LINE.startswith("Linux version 6.12.115+deb13.1-amd64 ") and D12_LINE
 # --- What the recordings show -------------------------------------------------------------------------------------
 # Volatility's text is the same for a wrong ISF, no ISF and a file that is not a memory image: only banners can tell.
 failed = ["export_trace_wrong_isf", "export_kernel_file_wrong_isf", "export_random_isf", "export_trace_no_isf",
-          "export_random_no_isf"]
+          "export_random_no_isf", "export_journal_copy_wrong_isf"]
 for name in failed:
     assert fixture(name + ".stdout") == fixture(failed[0] + ".stdout"), name
     assert fixture(name + ".stderr") == fixture(failed[0] + ".stderr"), name
@@ -51,6 +51,33 @@ assert m.banner_command("/v/vol", "/x/img") == ["/v/vol", "-q", "-f", "/x/img", 
 
 lines = m.banner_lines(["Linux version %d.0.0" % n for n in range(5)])
 assert lines.count("Image: ") == 3 and "... and 2 more" in lines and "5 different" in lines, lines
+lines = m.banner_lines(["Linux version %d.0.0" % n for n in range(5)], "Linux version 4.0.0", " (mark)")
+assert lines.count("Image: ") == 4 and "\nImage: Linux version 4.0.0 (mark)\n... and 1 more\n" in lines, lines
+
+# The exact-bytes check (what Volatility matches): across chunk boundaries, compressed files, Cancel.
+D12_EXACT = base64.b64decode(D12)
+assert D12_EXACT.endswith(b"\n\0")
+with tempfile.TemporaryDirectory() as work:
+    path = os.path.join(work, "img")
+    for at in range(0, 70):
+        with open(path, "wb") as handle:
+            handle.write(b"\0" * at + D12_EXACT + b"\0" * 9)
+        for chunk in (7, 64, 1 << 24):
+            assert m.holds_bytes(path, D12_EXACT, chunk) == (True, None), (at, chunk)
+    with open(path, "wb") as handle:
+        handle.write(b"MESSAGE=" + D12_EXACT[:-2] + b"\0" * 300)  # a journal copy: no "\n\0" after the line
+    assert m.holds_bytes(path, D12_EXACT, 64) == (False, None)
+    for magic in (b"\xfd7zXZ\x00", b"\x1f\x8b\x08", b"BZh9", b"AVML\x02\0\0\0", b"PK\x03\x04"):
+        with open(path, "wb") as handle:
+            handle.write(magic + D12_EXACT)
+        assert m.holds_bytes(path, D12_EXACT) == (None, "the file is compressed"), magic
+    with open(path, "wb") as handle:
+        handle.write(b"\0" * 1000 + D12_EXACT)
+    kw.user_cancelled = lambda: True
+    assert m.holds_bytes(path, D12_EXACT, 256) == (None, "you cancelled that check")
+    kw.user_cancelled = lambda: False
+    found, why = m.holds_bytes(os.path.join(work, "missing"), D12_EXACT)
+    assert found is None and why.startswith("the file could not be read"), why
 one = m.banner_lines([D13_LINE])
 assert one == "Image: " + D13_LINE, one
 
@@ -92,12 +119,16 @@ with tempfile.TemporaryDirectory() as work:
     d13, d12 = isf_file("d13.json", D13), isf_file("d12.json", D12)
     no_banner, not_isf = isf_file("plain.json"), isf_file("notes.json", text="not an ISF")
     waits, started = [], []
-    kw.show_wait_box = lambda text: waits.append(text)
+    kw.show_wait_box = kw.replace_wait_box = lambda text: waits.append(text)
     real_run_cancellable = m.run_cancellable
     m.run_cancellable = lambda command: started.append(command) or real_run_cancellable(command)
 
-    def run(export, banners=None, isf=None, cancel=lambda: False, export_sleep=0, banners_sleep=0, banners_exit=0):
-        """Export with the recorded export output, then (if the plugin asks) the recorded banners output."""
+    def run(export, banners=None, isf=None, cancel=lambda: False, export_sleep=0, banners_sleep=0, banners_exit=0,
+            image_bytes=b""):
+        """Export with the recorded export output, then (if the plugin asks) the recorded banners output. The image
+        file holds image_bytes (the plugin reads it only to look for the ISF's exact kernel version line)."""
+        with open(image, "wb") as handle:
+            handle.write(image_bytes)
         plan = {"export": {"path": os.path.join(FIX, export), "exit": 1, "sleep": export_sleep},
                 "banners": {"path": os.path.join(FIX, banners or "banners_random"), "exit": banners_exit,
                             "sleep": banners_sleep}}
@@ -153,17 +184,50 @@ with tempfile.TemporaryDirectory() as work:
     assert "is the running kernel" not in text, text
 
     # The ISF's line is in the image yet Volatility failed (not recorded: the real export with this ISF succeeds).
-    text = run("export_trace_wrong_isf", "banners_trace", d13)[0][0]
-    assert "holds the ISF's kernel version line" in text and "another kernel" not in text, text
+    D13_EXACT = base64.b64decode(D13)
+    text = run("export_trace_wrong_isf", "banners_trace", d13, image_bytes=b"\0" * 64 + D13_EXACT)[0][0]
+    assert "holds the ISF's kernel version line as the kernel stores it" in text and "another kernel" not in text, text
     assert "\nImage: " + D13_LINE + " (the ISF's)\n" in text and text.count("(the ISF's)") == 1, text
+    assert any("exact kernel version line" in w for w in waits), waits
+
+    # The review's planted journal copy of the Debian 12 line (real banners.Banners output, tests/fixtures): listed by
+    # banners.Banners (last of 4 different lines) but not as the kernel stores it, so Volatility never matches it.
+    copy = b"\0" * 64 + b"MESSAGE=" + D12_LINE.encode() + b"\0" * 8 + D13_EXACT
+    journal = m.image_banners(fixture("banners_journal_copy.stdout"))
+    assert len(journal) == 4 and journal[0] == D13_LINE and journal[-1] == D12_LINE, journal
+    text = run("export_journal_copy_wrong_isf", "banners_journal_copy", d12, image_bytes=copy)[0][0]
+    assert "The ISF you chose was built for another kernel: its kernel version line is in this image only as a copy" \
+        in text and "fits" not in text and "An ISF for your own image" in text, text
+    assert "\nISF: " + D12_LINE + "\n" in text and "\nImage: " + D12_LINE + " (the ISF's, only a copy)\n" in text, text
+    assert text.count("\nImage: ") == 4 and "4 different" in text and "... and" not in text, text
+    # The same image holding the Debian 12 line as a kernel stores it: the ISF fits (whatever its rank in the list).
+    text = run("export_journal_copy_wrong_isf", "banners_journal_copy", d12, image_bytes=copy + D12_EXACT)[0][0]
+    assert "holds the ISF's kernel version line as the kernel stores it" in text and "another kernel" not in text, text
+    assert "\nImage: " + D12_LINE + " (the ISF's)\n" in text, text
+    # A compressed image, or Cancel during that check: no verdict either way, both causes named.
+    for image_bytes, cancel, why in ((b"\xfd7zXZ\x00" + copy, lambda: False, "the file is compressed"),
+                                     (copy, lambda: bool(waits) and "exact" in waits[-1], "you cancelled that check")):
+        text = run("export_journal_copy_wrong_isf", "banners_journal_copy", d12, cancel=cancel,
+                   image_bytes=image_bytes)[0][0]
+        assert "could not check whether it is there as the kernel stores it" in text and ": %s. So" % why in text, text
+        assert "or the line is only a copy" in text and "Volatility failed for another reason" in text, text
+        assert "\nImage: " + D12_LINE + " (the ISF's)\n" in text, text
+    # A wrong ISF whose line is not in the image: no need to read the image (banners.Banners already says so).
+    reads = []
+    real_holds_bytes = m.holds_bytes
+    m.holds_bytes = lambda *a: reads.append(a) or real_holds_bytes(*a)
+    text = run("export_trace_wrong_isf", "banners_trace", d12, image_bytes=copy)[0][0]
+    m.holds_bytes = real_holds_bytes
+    assert reads == [] and "The ISF you chose was built for another kernel: its kernel version line (linux_banner) is " \
+        "not in this image" in text, (reads, text)
     # An ISF without linux_banner, and a file that is not an ISF: said so, the image's lines still shown.
     text = run("export_trace_wrong_isf", "banners_trace", no_banner)[0][0]
     assert "cannot be compared with the image: it has no linux_banner" in text and "\nImage: " + D13_LINE in text, text
     text = run("export_trace_wrong_isf", "banners_trace", not_isf)[0][0]
     assert "cannot be compared with the image: notes.json is not a readable Volatility ISF" in text, text
     for damaged in ("!!!x", 7):  # not base64, not text: said so instead of an unexpected error
-        line, problem = m.isf_banner(isf_file("damaged.json", damaged))
-        assert line is None and problem.startswith("its linux_banner is not readable"), problem
+        line, exact, problem = m.isf_banner(isf_file("damaged.json", damaged))
+        assert line is None is exact and problem.startswith("its linux_banner is not readable"), problem
 
     # AVML without libsnappy: Volatility's own warning names it; no banner scan of compressed bytes.
     dialogs, log, _ = run("export_avml_header_isf", "banners_avml_header", d13)
@@ -196,7 +260,7 @@ with tempfile.TemporaryDirectory() as work:
 # The real demo ISF, when present, carries exactly the line the recorded scan of trace.elf put first.
 demo_isf = os.environ.get("MEMLENS_ISF", "/home/agent/tools/memlens-demo/x/debian-6.12.115+deb13.1-amd64.json.xz")
 if os.path.isfile(demo_isf):
-    assert m.isf_banner(demo_isf) == (D13_LINE, None), m.isf_banner(demo_isf)
+    assert m.isf_banner(demo_isf) == (D13_LINE, base64.b64decode(D13), None), m.isf_banner(demo_isf)
     print("demo ISF %s: its linux_banner is the recorded image's first line" % demo_isf)
 else:
     print("SKIP: demo ISF not found (set MEMLENS_ISF)")

@@ -7,7 +7,7 @@ usage: python3 tests/test_hookchain_stub.py [kernel.elf]
 A hand-made kernel ELF always; with the demo kernel.elf (or another MemLens export) also that file, where the
 recorded calls are counted. The fake database starts with the ELF's memlens_target_ labels as its names.
 """
-import contextlib, io, os, runpy, struct, sys, tempfile
+import contextlib, io, json, os, runpy, struct, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
 import patchscan as ps
@@ -16,7 +16,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     g = runpy.run_path(os.path.join(HERE, "test_plugin_stub.py"))
     builder = runpy.run_path(os.path.join(HERE, "test_patchscan.py"))
 m, calls, nalt, names, blobs, comments = g["m"], g["calls"], g["nalt"], g["names"], g["blobs"], g["comments"]
-dummy_names, netnode = g["dummy_names"], g["netnode"]
+dummy_names, netnode, xref, iname = g["dummy_names"], g["netnode"], g["xref"], g["iname"]
 elf, call, BASE, TEXT = builder["elf"], builder["call"], builder["BASE"], builder["TEXT"]
 CALL, JUMP = 17 | 32, 19 | 32  # fl_CN | XREF_USER, fl_JN | XREF_USER
 
@@ -116,11 +116,38 @@ with tempfile.TemporaryDirectory() as work:
     assert len(crefs) == 7 and sorted(renames) == sorted([(B, "bpf_tramp_movjmp", 256), (F, "ftrace_tramp_%x" % F, 256),
                                                           (K, "kprobe_ftrace_tramp_probed", 256)]), (crefs, renames)
     assert "2 hook pages renamed by role, 1 refused by IDA" in out, out
+    # The refused name is not recorded, so the next run tries it again (and IDA refuses it again).
+    crefs, renames, out = run()
+    assert crefs == [] and renames == [(B, "bpf_tramp_movjmp", 256)], (crefs, renames)
+    assert "0 hook pages renamed by role, 2 already named by an earlier run, 1 refused by IDA" in out, out
     dummy_names.clear()
     # A damaged record is read as empty (everything added again), not a crash.
     blobs[next(iter(blobs))] = b"{not json"
     crefs, renames, out = run()
     assert len(crefs) == 7, crefs
+    # An xref IDA refuses is counted, not recorded, and tried again on the next run.
+    database(blob)
+    refuse, good_add_cref = {(BASE + 0x200, K)}, xref.add_cref
+    xref.add_cref = lambda frm, to, kind: calls.append(("cref", frm, to, kind)) or (frm, to) not in refuse
+    try:
+        crefs, renames, out = run()
+        assert len(crefs) == 7 and "6 code xrefs added (1 refused by IDA)" in out, (crefs, out)
+        assert [BASE + 0x200, K, "call"] not in json.loads(next(iter(blobs.values())))["xrefs"], blobs
+        refuse.clear()
+        crefs, renames, out = run()
+        assert crefs == [(BASE + 0x200, K, CALL)] and "1 code xrefs added (6 already added by an earlier run)" in out, (crefs, out)
+    finally:
+        xref.add_cref = good_add_cref
+    # A page the database shows with no name at all: the Target column falls back to the ELF's label, never "".
+    database(blob)
+    good_get_name = iname.get_name
+    iname.get_name = lambda ea: "" if ea == B else good_get_name(ea)
+    try:
+        run()
+    finally:
+        iname.get_name = good_get_name
+    lines = {line[1]: line for line in (m._open_list.OnGetLine(n) for n in range(m._open_list.OnGetSize()))}
+    assert lines["movjmp"][3] == "memlens_target_%x" % B, lines["movjmp"]
     # If linking itself fails (here the netnode read raises), the list is still shown (nothing renamed; the handlers are
     # read from the ELF) and the traceback goes to the Output window.
     database(blob)

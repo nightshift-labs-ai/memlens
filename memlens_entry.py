@@ -320,15 +320,16 @@ def elf_files(folder):
     try:
         return {name for name in os.listdir(folder) if name.endswith(".elf")}
     except OSError:
-        return set()
+        return None  # unknown, not empty: a failed listing must never make an old file look new (code review s170 n-2)
 
 
 def written_file(stdout, folder=None, before=None):
     """The file Volatility really wrote. If kernel.elf already exists Volatility picks a new name (kernel-1.elf)
     when it closes the file. kernel2elf prints its row after the close since 0.3.16; older copies printed it
     before, so the folder is still trusted over the row."""
-    if folder is not None and before is not None:
-        new = sorted(elf_files(folder) - before)
+    now = elf_files(folder) if folder is not None and before is not None else None
+    if now is not None:
+        new = sorted(now - before)
         if len(new) == 1:
             return new[0]
     for line in stdout.decode("utf-8", "replace").splitlines():
@@ -341,7 +342,10 @@ def written_file(stdout, folder=None, before=None):
 def remove_unusable(folder, name, before):
     """Remove an unusable export so nobody opens it by mistake, but only a file that was not in the folder before the
     export (before = elf_files(folder) then); returns the sentence for the dialog (judge s160 finding 6)."""
-    if name not in elf_files(folder) - before:
+    now = elf_files(folder)
+    if before is None or now is None:
+        return "MemLens could not list that folder to check that the file is new, so MemLens left it in place; do not open it."
+    if name not in now - before:
         return "It is not a new file in that folder, so MemLens left it in place."
     try:
         os.remove(os.path.join(folder, name))
@@ -905,8 +909,15 @@ def same_as_database(path, blob):
 def add_comment(address, text):
     """Adds our line to the comment at address and keeps whatever is already there."""
     old = idc.get_cmt(address, False) or ""
-    if text not in old:
-        idc.set_cmt(address, old + "\n" + text if old else text, False)
+    if text in old:
+        return
+    # A line an older build wrote, which this text only extends (a kind added after a comma or a space), is replaced,
+    # so re-running on an older database does not keep both (code review s170 m-1).
+    def extended(line):
+        stem = line[:-1] if line.endswith(")") else line
+        return line.startswith("MemLens: ") and text.startswith(stem) and text[len(stem):len(stem) + 1] in (",", " ")
+    lines = [line for line in old.split("\n") if line and not extended(line)]
+    idc.set_cmt(address, "\n".join(lines + [text]), False)
 
 
 HOOK_RECORD = "$ memlens.hooks"  # netnode: what MemLens linked and renamed, so running it again adds nothing twice

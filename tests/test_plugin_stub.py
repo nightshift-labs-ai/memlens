@@ -328,5 +328,23 @@ with tempfile.TemporaryDirectory() as t:
     comments[0x10] = "analyst note"
     m.add_comment(0x10, "MemLens: hook"); m.add_comment(0x10, "MemLens: hook"); m.add_comment(0x20, "MemLens: hook")
     assert comments == {0x10: "analyst note\nMemLens: hook", 0x20: "MemLens: hook"}, comments
+    # code review s170 m-1: a line an older build wrote, which the new text only extends (a kind added), is replaced, not kept twice
+    comments[0x30] = "analyst note\nMemLens: call to sys_kill (calls evilmod.fh_sys_kill)"
+    m.add_comment(0x30, "MemLens: call to sys_kill (calls evilmod.fh_sys_kill, module callback)")
+    assert comments[0x30] == "analyst note\nMemLens: call to sys_kill (calls evilmod.fh_sys_kill, module callback)", comments[0x30]
+    comments[0x40] = "MemLens: hook page for sys_kill"
+    m.add_comment(0x40, "MemLens: hook page for sys_kill (module callback)")
+    assert comments[0x40] == "MemLens: hook page for sys_kill (module callback)", comments[0x40]
+    # ... but a different line that merely shares a prefix is kept (calls a vs calls ab)
+    comments[0x50] = "MemLens: call to sys_kill (calls a)"
+    m.add_comment(0x50, "MemLens: call to sys_kill (calls ab, module callback)")
+    assert comments[0x50] == "MemLens: call to sys_kill (calls a)\nMemLens: call to sys_kill (calls ab, module callback)", comments[0x50]
+    # code review s170 n-2: a folder listing that fails is unknown (None), never an empty folder, so nothing is removed on it
+    missing = os.path.join(tempfile.mkdtemp(), "no-such-folder")
+    assert m.elf_files(missing) is None
+    assert "left it in place" in m.remove_unusable(missing, "kernel.elf", None)
+    keep_dir = tempfile.mkdtemp(); open(os.path.join(keep_dir, "kernel.elf"), "wb").close()
+    assert "left it in place" in m.remove_unusable(keep_dir, "kernel.elf", None) and os.path.exists(os.path.join(keep_dir, "kernel.elf"))
+    assert m.written_file(b"", missing, None) == "kernel.elf" and m.written_file(b"", missing, set()) == "kernel.elf"
     plugin.term(); assert sum(c[0] == "unreg" for c in calls) == 3
 print("stub test OK (fake IDA modules)")

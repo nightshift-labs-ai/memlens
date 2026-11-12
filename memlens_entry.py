@@ -572,9 +572,10 @@ def load_hook_record():
 
 def link_hooks(image, findings):
     """Apply the hook chain that patchscan decides: a user code xref from each hooking instruction to its target and
-    from each copied hook page's handler call to the handler, a role name for each such page (only while it still has
-    the exporter's memlens_target_ label, or no name but IDA's dummy one), and a comment there with the old label. What was added is kept in
-    the HOOK_RECORD netnode, so a second run adds no xref and renames nothing again. Returns (links, counts)."""
+    from each copied hook page's handler call to the handler, a role name for each such page (once, and only while it
+    still has the exporter's memlens_target_ label or no name but IDA's dummy one), and a comment there with the old
+    label. What was added is kept in the HOOK_RECORD netnode, so a second run adds no xref and renames nothing again,
+    and an xref or name the user removed since is not put back. Returns (links, counts)."""
     links = patchscan.hook_links(image, findings)
     flow_types = {"call": ida_xref.fl_CN, "jmp": ida_xref.fl_JN}  # near call or near jump, as the hooking instruction is
     node, record = load_hook_record()
@@ -589,13 +590,14 @@ def link_hooks(image, findings):
             counts["xrefs"] += 1
         else:
             counts["xrefs_failed"] += 1
+    renamed = {page for page, _, _ in record["names"]}
     for page, name in sorted(patchscan.role_names(image, links).items()):
         label = "%s%x" % (patchscan.TARGET_PREFIX, page)
         current = ida_name.get_name(page)
         if current == name:
             counts["named_before"] += 1
-        elif current != label and ida_bytes.has_user_name(ida_bytes.get_flags(page)):
-            counts["kept"] += 1  # a real name, given by the user or another tool since: leave it
+        elif page in renamed or (current != label and ida_bytes.has_user_name(ida_bytes.get_flags(page))):
+            counts["kept"] += 1  # renamed or unnamed by the user since MemLens named it, or a real name: leave it
         elif ida_name.set_name(page, name, ida_name.SN_NOWARN):
             record["names"].append([page, label, name])
             counts["renamed"] += 1

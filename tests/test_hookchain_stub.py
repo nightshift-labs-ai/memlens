@@ -97,6 +97,11 @@ with tempfile.TemporaryDirectory() as work:
     crefs, renames, out = run()
     assert crefs == [] and renames == [] and "2 already named by an earlier run, 1 left alone, they have another name now" in out, out
     assert {line[1]: line[3] for line in (m._open_list.OnGetLine(n) for n in range(3))}["probed"] == "my_kprobe"
+    # ... or removed the name MemLens gave (IDA shows a dummy name): not named again either.
+    del names["my_kprobe"]; names["sub_%X" % K] = K; dummy_names.add(K)
+    crefs, renames, out = run()
+    assert crefs == [] and renames == [] and "1 left alone" in out, out
+    dummy_names.clear(); del names["sub_%X" % K]
 
     # A fresh database where the planned name is already used elsewhere (IDA refuses it), a page that has no name and
     # one with only a name IDA made up: those two are renamed.

@@ -7,6 +7,7 @@ Three actions under Edit > Plugins:
     entry to its hook page and the page to its handler (code xrefs) and names the hook pages by role.
 """
 import base64
+import hashlib
 import itertools
 import json
 import traceback
@@ -525,12 +526,15 @@ def scan_current_input():
     """(image, findings) for the ELF open in IDA, which is plain data: the database is only annotated. None if there
     is nothing to show."""
     path = ida_nalt.get_input_file_path()
-    if not path or not os.path.isfile(path):
+    picked = not path or not os.path.isfile(path)
+    if picked:
         path = ida_kernwin.ask_file(False, "*.elf", "kernel.elf exported by MemLens")
         if not path:
             return None
     with open(path, "rb") as handle:
         blob = handle.read()
+    if picked and not same_as_database(path, blob):
+        return None
     try:
         if patchscan.on_disk_kernel(blob):
             raise ValueError("this is a kernel file from disk, whose entry bytes are not what ran")
@@ -546,6 +550,20 @@ def scan_current_input():
     except patchscan.BAD_ELF as error:
         ida_kernwin.warning("MemLens needs the kernel.elf it exported: %s" % error)
         return None
+
+
+def same_as_database(path, blob):
+    """True when blob is the file the database was made from (its SHA-256 as the database stored it), or when the user
+    says to go on anyway. Comments, xrefs and names from another file would land on the wrong addresses."""
+    stored = ida_nalt.retrieve_input_file_sha256()
+    if not stored:
+        return True  # nothing to compare with
+    digest = hashlib.sha256(blob)
+    if bytes(stored) in (digest.digest(), digest.hexdigest().encode()):
+        return True
+    text = ("%s is not the file this database was made from (its SHA-256 differs), so comments, xrefs and names "
+            "would go to the wrong addresses. Use it anyway?" % os.path.basename(path))
+    return ida_kernwin.ask_yn(ida_kernwin.ASKBTN_NO, text.replace("%", "%%")) == ida_kernwin.ASKBTN_YES
 
 
 def add_comment(address, text):

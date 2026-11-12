@@ -45,6 +45,7 @@ idc.get_first_seg = lambda: idc.BADADDR  # no per-CPU sections unless a case add
 idc.get_next_seg = lambda ea: idc.BADADDR
 idc.SetType = lambda ea, d: calls.append(("settype", ea, d)) or True
 nalt = types.ModuleType("ida_nalt"); nalt.get_input_file_path = lambda: ""
+nalt.retrieve_input_file_sha256 = lambda: None  # no stored hash: nothing to compare a picked file with
 # Hook chain: xrefs and names are recorded; flag values as in the IDA 9.1-9.4 stubs (ida_xref.pyi, ida_name.pyi).
 xref = types.ModuleType("ida_xref"); xref.fl_CN, xref.fl_JN, xref.XREF_USER = 17, 19, 32
 xref.add_cref = lambda frm, to, kind: calls.append(("cref", frm, to, kind)) or True

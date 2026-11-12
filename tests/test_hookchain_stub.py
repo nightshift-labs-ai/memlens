@@ -162,6 +162,23 @@ with tempfile.TemporaryDirectory() as work:
     assert crefs == [] and renames == [] and "getblob broke" in out and "hook chain not added" in out, out
     lines = {line[1]: line for line in (m._open_list.OnGetLine(n) for n in range(m._open_list.OnGetSize()))}
     assert lines["traced_a"][3:] == ["memlens_target_%x" % F, "function_trace_call (ftrace)"] and len(lines) == 6, lines
+    # The input file is missing and the user picks a kernel.elf: if its SHA-256 is not the database's, MemLens asks
+    # before writing anything (default No); the same file goes ahead without a question.
+    import hashlib
+    kw = g["kw"]
+    database(blob)
+    asked = []
+    kw.ask_file = lambda *a: path
+    kw.ask_yn = lambda default, text: asked.append((default, text)) or kw.ASKBTN_NO
+    nalt.get_input_file_path = lambda: "/nonexistent/kernel.elf"
+    nalt.retrieve_input_file_sha256 = lambda: hashlib.sha256(b"another file").digest()
+    del calls[:]
+    assert m.FindPatches().activate(None) == 0 and not [c for c in calls if c[0] in ("cref", "setname", "cmt")], calls
+    assert len(asked) == 1 and asked[0][0] == kw.ASKBTN_NO and "SHA-256" in asked[0][1] and "%" not in asked[0][1], asked
+    nalt.retrieve_input_file_sha256 = lambda: hashlib.sha256(blob).digest()
+    crefs, renames, out = run()
+    assert len(asked) == 1 and len(crefs) == 7, (asked, crefs)
+    nalt.get_input_file_path = lambda: path
 print("hook chain stub test OK (hand-made ELF; fake IDA modules)")
 
 for path in sys.argv[1:2]:

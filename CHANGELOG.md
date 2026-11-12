@@ -2,7 +2,7 @@
 
 Taken from the GitHub release notes. Newest first.
 
-## Unreleased
+## v0.3.26 (2026-11-14)
 
 - `patchscan.py` on a missing or unreadable file prints one line (`patchscan: cannot read ...`) instead of a traceback.
 - README: the sample commands are the ones that print the samples (`objdump -d --disassemble=<name>`; patchscan's stderr line and tab columns stated); Volatility pinned to 2.28.2 (the version tested) in Install and Export it yourself; the same Export steps for Windows PowerShell (marked untested); export time stated as 25-50 s.

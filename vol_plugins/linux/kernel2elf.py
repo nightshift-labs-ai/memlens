@@ -16,6 +16,11 @@ from volatility3.framework.configuration import requirements
 from volatility3.framework.renderers import format_hints
 from volatility3.framework.symbols.linux.utilities import modules as linux_utilities_modules
 
+try:  # Volatility 2.19+ (tested with 2.28.2); without it the export has no BPF names, and nothing else changes
+    from volatility3.framework.symbols.linux import kallsyms as linux_kallsyms
+except ImportError:
+    linux_kallsyms = None
+
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 import patchscan  # noqa: E402  (lives in the plugin's root folder)
 
@@ -42,6 +47,33 @@ def canonical(address: int) -> int:
     """Volatility layers mask addresses to 48 bits; kernel pointers in memory are sign-extended."""
     address &= 0xFFFFFFFFFFFFFFFF
     return address | 0xFFFF000000000000 if address & (1 << 47) else address
+
+
+def bpf_symbols(ksyms, skip) -> List[Tuple[str, int, int]]:
+    """(ELF name, address, size) for Volatility's BPF kallsyms (programs, trampolines, dispatchers): 'bpf.' + the
+    kernel's name, as module symbols are named, at the sign-extended address (Kallsyms masks it to 48 bits). None at an
+    address in skip: a hook target keeps the exporter's memlens_target_ label, so it stays a copied hook page."""
+    named = []
+    for ksym in ksyms:
+        address = canonical(int(ksym.address))
+        if address not in skip:
+            named.append(("bpf.%s" % ksym.name, address, int(ksym.size)))
+    return named
+
+
+def page_runs(ranges, covered) -> List[Tuple[int, int]]:
+    """Page-aligned (start, end) runs that cover the (start, end) ranges, leaving out every page covered(page) says
+    is already in the ELF. An empty range still gets its page."""
+    pages = set()
+    for start, end in ranges:
+        pages.update(range(start & ~(PAGE - 1), max(end, start + 1), PAGE))
+    runs: List[Tuple[int, int]] = []
+    for page in sorted(page for page in pages if not covered(page)):
+        if runs and runs[-1][1] == page:
+            runs[-1] = (runs[-1][0], page + PAGE)
+        else:
+            runs.append((page, page + PAGE))
+    return runs
 
 
 class Elf:
@@ -232,11 +264,13 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
                     vollog.info("symbols of %s are partly unreadable", name)
                 yield (0, ("module", name, format_hints.Hex(canonical(base)), symbols if written else 0))
 
-        for target in self._hook_targets(elf):
+        targets = self._hook_targets(elf)
+        for target in targets:
             copied = self._add_range(elf, layer, target & ~(PAGE - 1), (target & ~(PAGE - 1)) + 2 * PAGE, ".hook.%x" % target, SHF_ALLOC | SHF_EXEC)
             if copied:
                 elf.add_symbol("%s%x" % (patchscan.TARGET_PREFIX, target), target, 0, STT_FUNC)
                 yield (0, ("hook target", "memlens_target", format_hints.Hex(target), copied))
+        yield from self._bpf(elf, layer, self._bpf_kallsyms(kernel.layer_name), set(targets))
 
         finished = io.BytesIO()
         elf.write(finished)
@@ -319,6 +353,32 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
             for index, (value, name) in enumerate(variables):
                 elf.add_symbol("cpu%d.%s" % (cpu, name), base + value - start, values[index + 1] - value, STT_OBJECT)
             yield (0, ("percpu", "cpu%d" % cpu, format_hints.Hex(base), len(variables)))
+
+    def _bpf_kallsyms(self, layer_name) -> list:
+        """Volatility's BPF kallsyms (Kallsyms.get_bpf_symbols), or [] when this Volatility or this kernel has none.
+        get_ftrace_symbols is not used: it also returns stale names of freed module __init code, which can sit inside
+        a live ftrace trampoline."""
+        if linux_kallsyms is None:
+            vollog.info("this Volatility has no Kallsyms API (2.19 or newer has it): no BPF names")
+            return []
+        try:
+            return list(linux_kallsyms.Kallsyms(self.context, layer_name, self.config["kernel"]).get_bpf_symbols() or [])
+        except Exception as error:  # an optional extra: the export must not fail because the BPF list cannot be read
+            vollog.warning("BPF names left out: Volatility's Kallsyms could not read them (%s)", error)
+            return []
+
+    def _bpf(self, elf, layer, ksyms, hook_targets) -> Iterator:
+        """BPF programs, trampolines and dispatchers: their names as symbols (bpf_symbols) and the JIT pages that hold
+        them, where the ELF does not have those pages yet (a hook page copied before keeps its section)."""
+        named = bpf_symbols(ksyms, hook_targets)
+        for name, address, size in named:
+            elf.add_symbol(name, address, size, STT_FUNC)
+        ranges = [(canonical(int(ksym.address)), canonical(int(ksym.address)) + int(ksym.size)) for ksym in ksyms]
+        for start, end in page_runs(ranges, lambda page: elf.section_index(page) != 0):
+            copied = self._add_range(elf, layer, start, end, ".bpf.%x" % start, SHF_ALLOC | SHF_EXEC)
+            if copied:
+                yield (0, ("bpf pages", ".bpf.%x" % start, format_hints.Hex(start), copied))
+        yield (0, ("bpf symbols", "bpf", format_hints.Hex(0), sum(1 for _, address, _ in named if elf.section_index(address))))
 
     @staticmethod
     def _hook_targets(elf) -> List[int]:

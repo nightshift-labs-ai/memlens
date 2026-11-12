@@ -215,6 +215,11 @@ with tempfile.TemporaryDirectory() as t:
     probs = m.export_problems(same)
     assert len(probs) == 1 and "same address" in probs[0] and "All 2 per-CPU" in probs[0], probs
     assert m.export_problems(b"") == [], "no rows at all (unknown output) must not be called a failure"
+    rep = m.report({"stats": {"structs": 9734, "unions": 1715, "enums": 2149, "bitfields_as_storage": 0, "skipped": 2,
+                              "globals_declared": 79, "globals_typed": 33500, "globals_failed": 0, "globals_not_in_database": 1},
+                    "rejected": [], "missing": [], "wrong_size": []})
+    assert "declarations generated from the ISF: 9,734 structs, 1,715 unions, 2,149 enums, 2 skipped\n" in rep, rep
+    assert "{" not in rep and "globals_typed" not in rep, rep
     table = m.PatchList([(0x10, "fn", "what", "tgt", 0x20)])
     assert table.OnGetSize() == 1 and table.OnGetLine(0) == ["10", "fn", "what", "tgt"]
     assert table.OnSelectLine(0) == (0,) and ("jump", 0x10) in calls

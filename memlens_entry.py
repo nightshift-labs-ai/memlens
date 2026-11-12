@@ -260,7 +260,15 @@ def report(result):
     """The import summary, so a user can see exactly what did and did not arrive."""
     stats = result["stats"]
     lines = ["[MemLens] CANCELLED %s: the counts below are partial" % result["cancelled"]] if result.get("cancelled") else []
-    lines.append("[MemLens] declarations generated from the ISF: %s" % stats)
+    parts = ["{:,} structs".format(stats.get("structs", 0)), "{:,} unions".format(stats.get("unions", 0)),
+             "{:,} enums".format(stats.get("enums", 0))]
+    if stats.get("bitfields_as_storage"):
+        parts.append("{:,} bitfields kept as raw storage bytes".format(stats["bitfields_as_storage"]))
+    if stats.get("skipped"):
+        parts.append("{:,} skipped".format(stats["skipped"]))
+    if stats.get("resized"):
+        parts.append("{:,} resized to the ISF size".format(stats["resized"]))
+    lines.append("[MemLens] declarations generated from the ISF: %s" % ", ".join(parts))
     if "globals_declared" in stats:
         lines.append("[MemLens] typed %d of the %d globals the ISF declares, plus %d per-CPU variables in every CPU's copy; "
                      "%d failed; %d have no symbol in this database (address 0 in the ISF, or outside exported memory)"

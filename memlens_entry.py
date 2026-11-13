@@ -400,6 +400,27 @@ def kernel_not_found(out, err):
 # Volatility's own warning for an AVML image when it cannot load the snappy library (volatility3/framework/layers/avml.py).
 AVML_WITHOUT_SNAPPY = "AVML file detected, but snappy library could not be found"
 ISF_README = "README, \"An ISF for your own image\""
+# the community ISF index as tools/find_isf.py --download caches it; read only, IDA never downloads it
+INDEX_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "memlens", "banners_plain.json")
+
+
+def isf_index_text(banners):
+    """One paragraph for a failed export with no ISF or the wrong one: the ready-made ISF for one of the image's kernel
+    version lines from the cached community index, or that none is there, or how to look them up (tools/find_isf.py)."""
+    try:
+        with open(INDEX_CACHE, encoding="utf-8") as handle:
+            index = {key.strip(): urls for key, urls in json.load(handle).items()}
+    except (OSError, ValueError, AttributeError):
+        helper = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools", "find_isf.py")
+        return ("To look these kernel version lines up in the community ISF index (Abyss-W4tcher/volatility3-symbols): "
+                "python3 %s <image> --download (it fetches the index once; MemLens itself never downloads it)." % helper)
+    for banner in banners:
+        urls = index.get(banner.strip())
+        if urls:
+            return ("A ready-made ISF for this image's kernel, from the community index tools/find_isf.py downloaded: %s"
+                    % urls[0])
+    return ("None of these kernel version lines is in the community index tools/find_isf.py downloaded: build the ISF "
+            "with dwarf2json (%s)." % ISF_README)
 SHOWN_BANNERS = 3
 
 
@@ -602,7 +623,8 @@ def kernel_hint(check, isf_given):
     if not isf_given:
         return ["It found no symbols for this image's kernel. Without an ISF it only uses the Linux symbol files it already "
                 "has, and a fresh pip install has none. Get the ISF built for this image's kernel: its linux_banner must be "
-                "one of the lines below (%s). Then run Export again with it." % ISF_README, banner_lines(banners)]
+                "one of the lines below (%s). Then run Export again with it." % ISF_README, banner_lines(banners),
+                isf_index_text(banners)]
     isf_line, problem = check.get("isf_banner"), check.get("isf_problem")
     if isf_line is None:
         return ["The file you chose as the ISF cannot be compared with the image: %s. Volatility picks a Linux ISF by "
@@ -617,7 +639,8 @@ def kernel_hint(check, isf_given):
         return ["The ISF you chose was built for another kernel: its kernel version line is in this image only as a copy "
                 "(for example in the system log of an earlier boot), not as the kernel stores it (followed by a newline "
                 "and a NUL byte), which is what Volatility looks for. Use the ISF built for the image's kernel (%s)."
-                % ISF_README, "ISF: %s\n%s" % (isf_line, banner_lines(banners, isf_line, " (the ISF's, only a copy)"))]
+                % ISF_README, "ISF: %s\n%s" % (isf_line, banner_lines(banners, isf_line, " (the ISF's, only a copy)")),
+                isf_index_text([b for b in banners if b != isf_line])]
     if isf_line in banners:
         return ["This image holds the ISF's kernel version line, but MemLens could not check whether it is there as the "
                 "kernel stores it (followed by a newline and a NUL byte), which is what Volatility looks for: %s. So "
@@ -627,7 +650,7 @@ def kernel_hint(check, isf_given):
                 "ISF: %s\n%s" % (isf_line, banner_lines(banners, isf_line))]
     return ["The ISF you chose was built for another kernel: its kernel version line (linux_banner) is not in this image, "
             "and Volatility picks a Linux ISF by finding that exact line. Use the ISF built for the image's kernel (%s)."
-            % ISF_README, "ISF: %s\n%s" % (isf_line, banner_lines(banners))]
+            % ISF_README, "ISF: %s\n%s" % (isf_line, banner_lines(banners)), isf_index_text(banners)]
 
 
 def export_failure_text(stdout, stderr, isf_given, check=None):

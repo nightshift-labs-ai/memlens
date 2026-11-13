@@ -254,6 +254,22 @@ with tempfile.TemporaryDirectory() as work:
     assert text.index("ISF: ") < text.index("Image: ") and "An ISF for your own image" in text, text
     assert "(the ISF's)" not in text and "is the running kernel" not in text, text
     assert "\nUnsatisfied requirement" in text and "\n2.28.2" not in text, text  # Volatility's tail from a line start
+    # the community ISF index (judge s178 item 4): no cached index -> the helper is named; a cached one -> the URL or
+    # "not in the index"; never a download from IDA
+    m.INDEX_CACHE = os.path.join(work, "no-index.json")
+    assert "tools/find_isf.py" in text.replace(os.sep, "/") and "--download" in text, text
+    with open(os.path.join(work, "index.json"), "w") as handle:
+        json.dump({D13_LINE: ["https://example.invalid/d13.json.xz"]}, handle)
+    m.INDEX_CACHE = os.path.join(work, "index.json")
+    dialogs, log, _ = run("export_trace_wrong_isf", "banners_trace", d12)
+    assert "A ready-made ISF for this image's kernel" in dialogs[0] and "https://example.invalid/d13.json.xz" in dialogs[0], \
+        dialogs[0]
+    with open(m.INDEX_CACHE, "w") as handle:
+        json.dump({"Linux version 1.0 (x) #1": ["https://example.invalid/other.json.xz"]}, handle)
+    dialogs, log, _ = run("export_trace_wrong_isf", "banners_trace", d12)
+    assert "None of these kernel version lines is in the community index" in dialogs[0] and "example.invalid" not in dialogs[0], \
+        dialogs[0]
+    m.INDEX_CACHE = os.path.join(work, "no-index.json")
     assert any("looking for the image's kernel version" in w for w in waits), waits
     assert any(c[0] == "msg" and c[1].startswith("[MemLens] banners.Banners (exit 0):") and D13_LINE in c[1] for c in calls)
     # The demo kernel.elf (ELF type EXEC) given as the image with the wrong ISF (recorded): not a memory image, said

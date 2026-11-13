@@ -436,6 +436,8 @@ for name, record, text, address in (
          "kprobe kp_off on modprobe+0x4 (tracefs kprobe event; pre_handler kprobe_dispatcher)", DISPATCH),
         ("hidden", probe("hidden", KRETPRE, ret_handler=0xffffffffc0400000), "kretprobe handler at 0xffffffffc0400000 (no symbol)", None),
         ("postonly", probe("postonly", KRETPRE, ret_handler=0), "kretprobe on postonly (no handler)", KRETPRE),
+        # review s180 NIT 2: no handler but an entry_handler: the owner is the entry_handler
+        ("modprobe", probe("modprobe", KRETPRE, ret_handler=0, ret_entry=RETH), "evilmod.kp_ret (kretprobe entry_handler)", RETH),
         # A record without ret_handler (an export from before this change) reads as it did: the kernel's helper.
         ("modprobe", probe("modprobe", KRETPRE), "pre_handler_kretprobe (kprobe pre_handler)", KRETPRE)):
     rowner, rrow = at_site(name, [record])

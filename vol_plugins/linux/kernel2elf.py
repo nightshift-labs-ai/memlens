@@ -128,6 +128,11 @@ def kprobe_layout(kernel):
         layout["rp_handler"] = offset("kretprobe", "handler") - offset("kretprobe", "kp")
     except (exceptions.SymbolError, IndexError, AttributeError):
         pass
+    layout["rp_entry"] = None  # kretprobe.entry_handler: the owner of a kretprobe whose handler is NULL
+    try:
+        layout["rp_entry"] = offset("kretprobe", "entry_handler") - offset("kretprobe", "kp")
+    except (exceptions.SymbolError, IndexError, AttributeError):
+        pass
     try:
         base = -offset("trace_kprobe", "rp") - offset("kretprobe", "kp") + offset("trace_kprobe", "tp")
         if kernel.get_type("trace_probe").has_member("event"):  # 5.4 and later: tp.event -> trace_probe_event, call inside
@@ -194,6 +199,13 @@ def kprobe_list(layer, layout) -> List[dict]:
                 found["ret_handler"] = canonical(pointer(probe + layout["rp_handler"]))
             except exceptions.InvalidAddressException:
                 found["ret_handler"] = None
+            if found["ret_handler"] == 0 and layout.get("rp_entry") is not None:
+                try:
+                    entry = canonical(pointer(probe + layout["rp_entry"]))
+                except exceptions.InvalidAddressException:
+                    entry = 0
+                if entry:
+                    found["ret_entry"] = entry
             traced = layout["kret_dispatcher"] is not None and found["ret_handler"] == canonical(layout["kret_dispatcher"])
         if layout["event"] and traced:
             found["event"] = None

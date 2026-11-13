@@ -423,7 +423,8 @@ def kprobe_records(data):
         clean.update(symbol=printable(record.get("symbol")), event=printable(record.get("event")),
                      tracefs=record.get("tracefs") if isinstance(record.get("tracefs"), bool) else None,
                      flags=record["flags"] if type(record.get("flags")) is int else None,
-                     ret_handler=record["ret_handler"] if type(record.get("ret_handler")) is int else None)
+                     ret_handler=record["ret_handler"] if type(record.get("ret_handler")) is int else None,
+                     ret_entry=record["ret_entry"] if type(record.get("ret_entry")) is int else None)
         probes.setdefault(clean["addr"], []).append(clean)
     return probes
 
@@ -615,6 +616,11 @@ def kprobe_text(image, record):
         if record["event"]:
             how = {True: "tracefs kretprobe event", False: "made by perf_event_open, not a tracefs event"}.get(record["tracefs"], "kretprobe event")
             return "kretprobe %s on %s (%s; handler %s)" % (record["event"], where, how, at(image, ret))
+        if not ret and record.get("ret_entry"):  # no handler, only an entry_handler: that is whose it is
+            entry = record["ret_entry"]
+            if image.symbol_at(entry) is None:
+                return "kretprobe entry_handler at %#x (no symbol)" % entry
+            return "%s (kretprobe entry_handler)" % at(image, entry)
         if not ret:
             return "kretprobe on %s (no handler)" % where
         if image.symbol_at(ret) is None:
@@ -642,7 +648,7 @@ def kprobe_owner(image, site, owner):
         return None
     enabled = [record for record in records if not (record.get("flags") or 0) & KPROBE_OFF]
     records = enabled or records
-    handler = records[0].get("ret_handler") or records[0]["pre_handler"] or records[0]["post_handler"]
+    handler = records[0].get("ret_handler") or records[0].get("ret_entry") or records[0]["pre_handler"] or records[0]["post_handler"]
     return Owner(", ".join(kprobe_text(image, record) + (" (disabled)" if (record.get("flags") or 0) & KPROBE_OFF else "")
                            for record in records), handler if handler and image.segment(handler) else None,
                  "kprobe", list(owner.refs) if owner else [])

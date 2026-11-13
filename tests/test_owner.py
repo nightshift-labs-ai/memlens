@@ -424,7 +424,7 @@ EXPECTED = {
     "vfs_getattr": ("function_trace_call (ftrace_ops global_ops)", "function_trace_call", 0xdd, "global_ops"),
     "do_sys_openat2": ("kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)", "kprobe_ftrace_handler", 0x162, "kprobe_ftrace_ops"),
 }
-# An export with the kernel's kprobe list (.memlens.kprobes, exports made with v0.3.29 or later) names the probe instead:
+# An export with the kernel's kprobe list (.memlens.kprobes, in exports newer than v0.3.28) names the probe instead:
 # tests/vm/scenario_ftrace_d13.sh made it with 'p:memlens_kp do_sys_openat2'. The ftrace_ops references stay.
 EXPECTED_KPROBE = {"do_sys_openat2": ("kprobe memlens_kp on do_sys_openat2 (tracefs kprobe event; pre_handler kprobe_dispatcher)",
                                       "kprobe_dispatcher")}

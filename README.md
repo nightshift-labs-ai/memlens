@@ -40,6 +40,8 @@ v/bin/vol -q -p <memlens>/vol_plugins -s symbols -o out -f trace.elf linux.kerne
 python3 <memlens>/patchscan.py out/kernel.elf
 ```
 
+A fresh export also holds the kernel's kprobe list (the section `.memlens.kprobes`), so `python3 <memlens>/patchscan.py --links out/kernel.elf` names the probe on `do_sys_openat2`: `kprobe memlens_kp on do_sys_openat2 (tracefs kprobe event; pre_handler kprobe_dispatcher)`. The demo `kernel.elf` is older and shows `kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)` there.
+
 On Windows the same steps in PowerShell would be the following (we have no Windows machine, so these lines are not tested; `7z` is 7-Zip):
 
 ```
@@ -100,7 +102,7 @@ flowchart LR
 - **Every kernel type**: all structs, unions and enums from a Volatility 3 ISF, as one C header with exact layouts.
 - **Typed globals**: kernel data symbols get their real type, so `init_task` becomes a `struct task_struct`.
 - **Per-CPU variables, one copy per CPU**: each CPU's live copy (`cpu0.runqueues`, `cpu1.pcpu_hot`, ...), typed like the globals.
-- **Patched kernel functions**: entries rewritten by ftrace, kprobes, BPF trampolines or hook code, and syscall slots that leave the handlers, with the hook's owner when the memory shows it (the BPF program, the `ftrace_ops` and its callback, or a module's callback; for a kprobe that is the kernel's kprobe layer, not the code that set the probe).
+- **Patched kernel functions**: entries rewritten by ftrace, kprobes, BPF trampolines or hook code, and syscall slots that leave the handlers, with the hook's owner when the memory shows it (the BPF program, the `ftrace_ops` and its callback, or a module's callback; for an ftrace-based kprobe, in an export newer than v0.3.28, the probe itself: its tracefs event name or the module function its `pre_handler` is, for a kretprobe its `handler`).
 
 The full description of each is under [Details](docs/OUTPUT.md#details).
 

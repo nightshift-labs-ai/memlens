@@ -5,6 +5,7 @@ The ELF holds the virtual memory of the kernel image and of loaded modules, at t
 """
 import bisect
 import io
+import json
 import logging
 import os
 import struct
@@ -87,15 +88,173 @@ def page_runs(ranges, covered) -> List[Tuple[int, int]]:
     return runs
 
 
+MAX_KPROBES = 100000  # struct kprobes walked at most: a cycle or a torn list in a smeared capture must end
+MAX_KPROBE_STRING = 512  # KSYM_NAME_LEN; tracefs event names are at most 64 (MAX_EVENT_NAME_LEN)
+
+
+def kprobe_layout(kernel):
+    """What the kprobe walk (kprobe_list) needs, every offset from the ISF, or None when the ISF has no kprobe_table or
+    struct kprobe (a kernel without CONFIG_KPROBES): the table's address, bucket count and bucket size, the offsets of
+    struct kprobe's members (flags None when absent), kprobe_dispatcher and aggr_pre_handler (None when absent), event (the steps from a struct
+    kprobe to its trace_kprobe's event name: at each step add the offset and read a pointer; container_of over
+    trace_kprobe.rp.kp first) and tracefs (the offset of that trace_kprobe's dyn_event list head), both None without
+    struct trace_kprobe."""
+    def offset(type_name, *members):
+        template = kernel.get_type(type_name)
+        return sum(template.relative_child_offset(member) for member in members)
+
+    def symbol(name):
+        try:
+            return kernel.get_symbol(name).address + kernel.offset
+        except exceptions.SymbolError:
+            return None
+    try:
+        table = kernel.get_symbol("kprobe_table")
+        layout = {"table": table.address + kernel.offset, "count": int(table.type.vol.count), "head": kernel.get_type("hlist_head").size,
+                  "first": offset("hlist_head", "first"), "next": offset("hlist_node", "next"), "list_next": offset("list_head", "next")}
+        for member in ("hlist", "list", "addr", "symbol_name", "offset", "pre_handler", "post_handler"):
+            layout[member] = offset("kprobe", member)
+    except (exceptions.SymbolError, IndexError, AttributeError, TypeError):
+        return None
+    layout.update(dispatcher=symbol("kprobe_dispatcher"), aggregate=symbol("aggr_pre_handler"), event=None, tracefs=None, flags=None)
+    try:  # unsigned int flags: KPROBE_FLAG_GONE 1, KPROBE_FLAG_DISABLED 2 (a tracefs event that is defined but not enabled)
+        layout["flags"] = offset("kprobe", "flags")
+    except (IndexError, AttributeError):
+        pass
+    # A kretprobe's struct kprobe has pre_handler pre_handler_kretprobe (register_kretprobe); the owner's function is the
+    # kretprobe's handler (rp_handler: its offset from kretprobe.kp), kretprobe_dispatcher for a trace_kprobe 'r:' event.
+    layout.update(kret_pre=symbol("pre_handler_kretprobe"), kret_dispatcher=symbol("kretprobe_dispatcher"), rp_handler=None)
+    try:
+        layout["rp_handler"] = offset("kretprobe", "handler") - offset("kretprobe", "kp")
+    except (exceptions.SymbolError, IndexError, AttributeError):
+        pass
+    try:
+        base = -offset("trace_kprobe", "rp") - offset("kretprobe", "kp") + offset("trace_kprobe", "tp")
+        if kernel.get_type("trace_probe").has_member("event"):  # 5.4 and later: tp.event -> trace_probe_event, call inside
+            layout["event"] = [base + offset("trace_probe", "event"), offset("trace_probe_event", "call") + offset("trace_event_call", "name")]
+        else:  # before 5.4 the trace_event_call is inside trace_probe
+            layout["event"] = [base + offset("trace_probe", "call") + offset("trace_event_call", "name")]
+        container = -offset("trace_kprobe", "rp") - offset("kretprobe", "kp")
+        if kernel.get_type("trace_kprobe").has_member("devent"):  # 5.0 and later: on dyn_event_list when tracefs made it
+            layout["tracefs"] = container + offset("trace_kprobe", "devent") + offset("dyn_event", "list")
+        else:  # before 5.0: on probe_list
+            layout["tracefs"] = container + offset("trace_kprobe", "list")
+    except (exceptions.SymbolError, IndexError, AttributeError):
+        layout["event"] = layout["tracefs"] = None
+    return layout
+
+
+def read_string(layer, address, limit=MAX_KPROBE_STRING):
+    """The NUL-terminated string at address in kernel memory when it is printable ASCII (patchscan.printable), else None:
+    a NULL or unreadable pointer, no NUL within limit bytes, or other bytes."""
+    data = b""
+    while address and len(data) < limit:
+        at = address + len(data)
+        try:
+            piece = layer.read(at, min(limit - len(data), PAGE - (at & (PAGE - 1))))
+        except exceptions.InvalidAddressException:
+            return None
+        end = piece.find(b"\0")
+        if end >= 0:
+            return patchscan.printable((data + piece[:end]).decode("ascii", "replace"))
+        data += piece
+    return None
+
+
+def kprobe_list(layer, layout) -> List[dict]:
+    """The registered kprobes, sorted by probed address: each kprobe_table bucket's hlist of struct kprobe, and in place of
+    an aggregate probe (pre_handler aggr_pre_handler: several probes on one address) the probes on its list. A record
+    (patchscan.kprobe_records) has the struct's address (kprobe), the probed address (addr), symbol and offset as
+    registered, pre_handler and post_handler (0 for none), flags (kprobe.flags; left out when the ISF has no such member); a kretprobe's
+    (pre_handler pre_handler_kretprobe) also has ret_handler (kretprobe.handler, None when unreadable). A probe whose pre_handler is
+    kprobe_dispatcher, or a kretprobe whose ret_handler is kretprobe_dispatcher, is a trace_kprobe,
+    and its record also has the event name (event) and whether the event is on tracefs' list (tracefs: False for a
+    probe perf_event_open made). A probe that cannot be read is left out; the walk stops at a loop."""
+    def pointer(address):
+        return struct.unpack("<Q", layer.read(address, 8))[0]
+
+    def record(probe):
+        try:
+            addr, symbol = pointer(probe + layout["addr"]), pointer(probe + layout["symbol_name"])
+            pre, post = pointer(probe + layout["pre_handler"]), pointer(probe + layout["post_handler"])
+            offset = struct.unpack("<I", layer.read(probe + layout["offset"], 4))[0]
+            flags = None if layout.get("flags") is None else struct.unpack("<I", layer.read(probe + layout["flags"], 4))[0]
+        except exceptions.InvalidAddressException:
+            return None
+        found = {"kprobe": canonical(probe), "addr": canonical(addr), "symbol": read_string(layer, symbol), "offset": offset,
+                 "pre_handler": canonical(pre), "post_handler": canonical(post)}
+        if flags is not None:
+            found["flags"] = flags
+        traced = layout["dispatcher"] is not None and canonical(pre) == canonical(layout["dispatcher"])
+        if layout.get("kret_pre") is not None and layout.get("rp_handler") is not None and canonical(pre) == canonical(layout["kret_pre"]):
+            try:
+                found["ret_handler"] = canonical(pointer(probe + layout["rp_handler"]))
+            except exceptions.InvalidAddressException:
+                found["ret_handler"] = None
+            traced = layout["kret_dispatcher"] is not None and found["ret_handler"] == canonical(layout["kret_dispatcher"])
+        if layout["event"] and traced:
+            found["event"] = None
+            try:
+                at = probe
+                for step in layout["event"]:
+                    at = pointer(at + step)
+                found["event"] = read_string(layer, at)
+                head = probe + layout["tracefs"]
+                found["tracefs"] = pointer(head + layout["list_next"]) != head
+            except (exceptions.InvalidAddressException, TypeError):
+                pass
+        return found
+
+    records, seen = [], set()
+    for bucket in range(layout["count"]):
+        try:
+            node = pointer(layout["table"] + bucket * layout["head"] + layout["first"])
+        except exceptions.InvalidAddressException:
+            continue
+        while node and len(seen) < MAX_KPROBES:
+            probe = node - layout["hlist"]
+            if probe in seen:
+                break
+            seen.add(probe)
+            found = record(probe)
+            if found is None:
+                break
+            if layout["aggregate"] is not None and found["pre_handler"] == canonical(layout["aggregate"]):
+                head = probe + layout["list"]
+                try:
+                    member = pointer(head + layout["list_next"])
+                    while member and member != head and member - layout["list"] not in seen and len(seen) < MAX_KPROBES:
+                        seen.add(member - layout["list"])
+                        found_member = record(member - layout["list"])
+                        if found_member is not None:
+                            records.append(found_member)
+                        member = pointer(member + layout["list_next"])
+                except exceptions.InvalidAddressException:
+                    pass
+            else:
+                records.append(found)
+            try:
+                node = pointer(node + layout["next"])
+            except exceptions.InvalidAddressException:
+                break
+    return sorted(records, key=lambda found: (found["addr"], found["kprobe"]))
+
+
 class Elf:
-    """Minimal ELF64 little-endian x86-64 writer: loadable sections plus a symbol table."""
+    """Minimal ELF64 little-endian x86-64 writer: loadable sections plus a symbol table, and non-alloc sections that are
+    not loaded (add_info), whose headers come after .shstrtab so that every other index stays where it was."""
 
     def __init__(self):
         self.sections: List[Tuple[str, int, int, bytes]] = []
         self.symbols: List[Tuple[str, int, int, int]] = []
+        self.info: List[Tuple[str, bytes]] = []
 
     def add_section(self, name, addr, flags, data):
         self.sections.append((name, canonical(addr), flags, data))
+
+    def add_info(self, name, data):
+        """A section that is not loaded (no SHF_ALLOC, no program header, address 0), such as .memlens.kprobes."""
+        self.info.append((name, data))
 
     def add_symbol(self, name, addr, size, kind):
         self.symbols.append((name, canonical(addr), size, kind))
@@ -119,7 +278,7 @@ class Elf:
                 covered = start + len(data)
         self.sections = sections
         shnames, name_offsets = bytearray(b"\0"), {}
-        for name in [s[0] for s in sections] + [".symtab", ".strtab", ".shstrtab"]:
+        for name in [s[0] for s in sections] + [".symtab", ".strtab", ".shstrtab"] + [name for name, _ in self.info]:
             name_offsets[name] = len(shnames)
             shnames += name.encode() + b"\0"
 
@@ -145,13 +304,14 @@ class Elf:
             cursor += len(data)
         symoff, stroff = cursor, cursor + len(symtab)
         shstroff = stroff + len(strtab)
-        shoff = shstroff + len(shnames)
+        infooff = shstroff + len(shnames)
+        shoff = infooff + sum(len(data) for _, data in self.info)
         shoff += -shoff % 8
 
         # Entry = the first executable section (kernel text), never the per-CPU data that sits below the kernel image.
         entry = next((addr for _, addr, flags, _ in sections if flags & SHF_EXEC), sections[0][1] if sections else 0)
         out.write(b"\x7fELF\x02\x01\x01" + b"\0" * 9)
-        out.write(struct.pack("<HHIQQQIHHHHHH", 2, 62, 1, entry, 64, shoff, 0, 64, 56, count, 64, count + 4, count + 3))
+        out.write(struct.pack("<HHIQQQIHHHHHH", 2, 62, 1, entry, 64, shoff, 0, 64, 56, count, 64, count + 4 + len(self.info), count + 3))
         for (name, addr, flags, data), offset in zip(sections, layout):
             pflags = 4 | (2 if flags & SHF_WRITE else 0) | (1 if flags & SHF_EXEC else 0)
             out.write(struct.pack("<IIQQQQQQ", 1, pflags, offset, addr, addr, len(data), len(data), PAGE))
@@ -163,7 +323,9 @@ class Elf:
         out.write(bytes(symtab))
         out.write(bytes(strtab))
         out.write(bytes(shnames))
-        out.write(b"\0" * (shoff - (shstroff + len(shnames))))
+        for _, data in self.info:
+            out.write(data)
+        out.write(b"\0" * (shoff - (infooff + sum(len(data) for _, data in self.info))))
 
         def header(name, kind, flags, addr, offset, size, link=0, info=0, align=1, entsize=0):
             out.write(struct.pack("<IIQQQQIIQQ", name, kind, flags, addr, offset, size, link, info, align, entsize))
@@ -174,6 +336,9 @@ class Elf:
         header(name_offsets[".symtab"], 2, 0, 0, symoff, len(symtab), count + 2, 1, 8, 24)
         header(name_offsets[".strtab"], 3, 0, 0, stroff, len(strtab))
         header(name_offsets[".shstrtab"], 3, 0, 0, shstroff, len(shnames))
+        for name, data in self.info:
+            header(name_offsets[name], 1, 0, 0, infooff, len(data))
+            infooff += len(data)
 
 
 class Kernel2Elf(interfaces.plugins.PluginInterface):
@@ -282,6 +447,7 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
                 elf.add_symbol("%s%x" % (patchscan.TARGET_PREFIX, target), target, 0, STT_FUNC)
                 yield (0, ("hook target", "memlens_target", format_hints.Hex(target), copied))
         yield from self._bpf(elf, layer, self._bpf_kallsyms(kernel.layer_name), set(targets))
+        yield from self._kprobes(kernel, layer, elf)
 
         finished = io.BytesIO()
         elf.write(finished)
@@ -393,6 +559,18 @@ class Kernel2Elf(interfaces.plugins.PluginInterface):
             if copied:
                 yield (0, ("bpf pages", ".bpf.%x" % start, format_hints.Hex(start), copied))
         yield (0, ("bpf symbols", "bpf", format_hints.Hex(0), sum(1 for _, address, _ in named if elf.section_index(address))))
+
+    @staticmethod
+    def _kprobes(kernel, layer, elf) -> Iterator:
+        """The kernel's registered kprobes (kprobe_list) as JSON in the non-alloc section .memlens.kprobes, from which
+        patchscan names the owner of a kprobe hook page; nothing when the ISF has no kprobe_table or struct kprobe."""
+        layout = kprobe_layout(kernel)
+        if layout is None:
+            vollog.info("no kprobe_table or struct kprobe in this kernel's symbols: no kprobe list")
+            return
+        records = kprobe_list(layer, layout)
+        elf.add_info(patchscan.KPROBES_SECTION, json.dumps({"version": 1, "kprobes": records}, sort_keys=True, separators=(",", ":")).encode())
+        yield (0, ("kprobes", patchscan.KPROBES_SECTION, format_hints.Hex(canonical(layout["table"])), len(records)))
 
     @staticmethod
     def _hook_targets(elf) -> List[int]:

@@ -4,6 +4,9 @@
 the plugin's own run_cancellable. Checks our logic only; this is not a test in real IDA or with a real Volatility run."""
 import base64, json, os, runpy, stat, struct, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__))
+if os.name == "nt":  # the fake `vol` below is a shebang script, which Windows cannot run (review s179 MINOR 10)
+    print("export failure stub test SKIPPED (its fake vol is a shell script: run it on Linux or macOS)")
+    sys.exit(0)
 FIX = os.path.join(HERE, "fixtures", "vol-2.28.2")
 
 g = runpy.run_path(os.path.join(HERE, "test_plugin_stub.py"))

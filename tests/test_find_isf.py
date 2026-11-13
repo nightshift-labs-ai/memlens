@@ -71,4 +71,71 @@ with tempfile.TemporaryDirectory() as tmp:
         assert rc == 2 and "%s-compressed" % tool in out and "decompress" in out, (name, rc, out)
     rc, out = run(os.path.join(tmp, "missing.raw"), "--index", index)
     assert rc == 2, (rc, out)
+    # review s179 MINOR 7: only "Linux version <digits>.<digits>.<digits>" is a banner (Volatility's rule), so prose and
+    # the kernel's own format string are not printed
+    prose = os.path.join(tmp, "prose.raw")
+    with open(prose, "wb") as handle:
+        handle.write(b"\0" * 64 + b"Linux version of the popular PasswordSafe (x) manager\n\0" + UBUNTU.encode() + b"\n\0")
+    with open(index, "w") as handle:
+        json.dump(entries, handle)
+    rc, out = run(prose, "--index", index)
+    assert rc == 0 and "PasswordSafe" not in out and out.count("banner: ") == 1, (rc, out)
+    # review s179 MINOR 6: errors exit 2 with a message (never a traceback, never 1 = "a miss")
+    for bad, why in ((os.path.join(tmp, "no-such-index.json"), "missing"), (image, "not JSON"), (None, "a JSON list")):
+        if bad is None:
+            bad = os.path.join(tmp, "list.json")
+            with open(bad, "w") as handle:
+                json.dump([UBUNTU], handle)
+        rc, out = run(UBUNTU, "--index", bad)
+        assert rc == 2 and "Traceback" not in out and "cannot read the index" in out, (why, rc, out)
+    for argv in ((UBUNTU, "--index"), (UBUNTU, "--index", "--download"), (UBUNTU, "--bogus")):
+        rc, out = run(*argv)
+        assert rc == 2 and "Traceback" not in out, (argv, rc, out)
+    rc, out = run("--help")
+    assert rc == 0 and "find_isf.py" in out, (rc, out)
+    # --download: a network error or an interrupted download leaves no cache file (it downloads to .part first)
+    import importlib.util
+    import urllib.error
+    spec = importlib.util.spec_from_file_location("find_isf", TOOL)
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    tool.CACHE = os.path.join(tmp, "cache", "banners_plain.json")
+
+    def no_network(*_args, **_kwargs):
+        raise urllib.error.URLError("no network in the test")
+
+    class Torn:  # a response that breaks after the first bytes
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def __init__(self):
+            self.calls = 0
+
+        def read(self, *_args):
+            self.calls += 1
+            if self.calls > 1:
+                raise OSError("connection reset")
+            return b'{"Linux version 6'
+
+    class Good(Torn):
+        def read(self, *_args):
+            self.calls += 1
+            return json.dumps(entries).encode() if self.calls == 1 else b""
+
+    import contextlib
+    import io
+    for opener, want_rc, want_cache in ((no_network, 2, False), (lambda *a, **k: Torn(), 2, False),
+                                        (lambda *a, **k: Good(), 0, True)):
+        tool.urllib.request.urlopen = opener
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = tool.main([UBUNTU, "--download"])
+        assert rc == want_rc, (opener, rc, buf.getvalue())
+        assert os.path.isfile(tool.CACHE) == want_cache, (opener, buf.getvalue())
+        assert not os.path.exists(tool.CACHE + ".part"), opener
+        if want_cache:
+            assert "ISF: " + URL in buf.getvalue(), buf.getvalue()
 print("find_isf test OK (5-entry index: hit, miss with the dwarf2json hint, two banners, journal copy, format string)")

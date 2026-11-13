@@ -461,9 +461,9 @@ for path in sys.argv[1:]:
                      for link in sorted(links, key=lambda link: link.target) if link.owner], lines
     for link in known:
         text, func, slot, ops = EXPECTED[link.function]
-        owner, how = link.owner, "ftrace_ops"
+        owner, how, owned_by = link.owner, "ftrace_ops", func
         if link.site in image.kprobes and link.function in EXPECTED_KPROBE:
-            (text, func), how = EXPECTED_KPROBE[link.function], "kprobe"
-        assert owner.text == text and owner.how == how and owner.address == image.by_name[func][0], (link, owner)
-        assert owner.refs == [(link.target + slot, image.by_name[ops][0], "data"), (image.by_name[ops][0], owner.address, "data")], owner
+            (text, owned_by), how = EXPECTED_KPROBE[link.function], "kprobe"
+        assert owner.text == text and owner.how == how and owner.address == image.by_name[owned_by][0], (link, owner)
+        assert owner.refs == [(link.target + slot, image.by_name[ops][0], "data"), (image.by_name[ops][0], image.by_name[func][0], "data")], owner
         print("%s: %s -> %s" % (path, link.function, owner.text))

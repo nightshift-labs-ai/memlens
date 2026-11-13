@@ -3,7 +3,8 @@
 
     python3 tests/run_all.py                                  # everything that needs no demo kernel
     MEMLENS_DEMO_ELF=kernel.elf python3 tests/run_all.py      # also the parts that check the demo export
-    python3 tests/run_all.py --ida-stubs <folder with ida_*.pyi>   # also check every IDA API name MemLens uses
+    python3 tests/run_all.py --ida-stubs <folder with ida_*.pyi>   # also tests/check_ida_names.py (IDA's stubs)
+    python3 tests/run_all.py --ida-sdk <SDK src/plugins/idapython>  # also tests/check_ida_api.py (api_contents.brief)
 
 The demo kernel.elf is in the demo-data release (see the README's Try it). Needs Python 3.8+; a few tests use cc,
 objdump or xz when they are installed and say SKIP when not. Exit status 1 when any test fails.
@@ -29,13 +30,15 @@ def status(rc, out):
 
 
 def main(argv):
-    stubs = None
-    if "--ida-stubs" in argv:
-        i = argv.index("--ida-stubs")
-        if i + 1 >= len(argv) or not os.path.isdir(argv[i + 1]):
-            print("usage: python3 tests/run_all.py [--ida-stubs <folder with ida_*.pyi>]", file=sys.stderr)
-            return 2
-        stubs = argv[i + 1]
+    folders = {}
+    for flag in ("--ida-stubs", "--ida-sdk"):
+        if flag in argv:
+            i = argv.index(flag)
+            if i + 1 >= len(argv) or not os.path.isdir(argv[i + 1]):
+                print("usage: python3 tests/run_all.py [--ida-stubs <folder with ida_*.pyi>] "
+                      "[--ida-sdk <IDA SDK src/plugins/idapython>]", file=sys.stderr)
+                return 2
+            folders[flag] = argv[i + 1]
     demo = os.environ.get("MEMLENS_DEMO_ELF", "")
     if demo and not os.path.isfile(demo):
         print("MEMLENS_DEMO_ELF=%s: no such file" % demo, file=sys.stderr)
@@ -46,8 +49,10 @@ def main(argv):
         if demo and name == "test_findpatches_stub.py" and os.path.isfile("/bin/ls"):
             extra = ["/bin/ls", demo]  # a stripped program, then the demo export (still scanned)
         runs.append((name, [name] + extra))
-    if stubs:
-        runs += [("check_ida_api.py", ["check_ida_api.py", stubs]), ("check_ida_names.py", ["check_ida_names.py", stubs])]
+    if "--ida-sdk" in folders:
+        runs.append(("check_ida_api.py", ["check_ida_api.py", folders["--ida-sdk"]]))
+    if "--ida-stubs" in folders:
+        runs.append(("check_ida_names.py", ["check_ida_names.py", folders["--ida-stubs"]]))
     rows, failed = [], []
     for name, args in runs:
         start = time.time()

@@ -407,7 +407,8 @@ def kprobe_records(data):
     probe at a function's ftrace site that site), pre_handler and post_handler (0 if none), symbol and offset (as the probe
     was registered), and for a trace_kprobe (pre_handler kprobe_dispatcher) event and tracefs (True when the event is on
     tracefs' dynamic event list, False for one perf_event_open made), and flags (kprobe.flags; None in exports that do
-    not have it). Malformed records are left out."""
+    not have it), and for a kretprobe (pre_handler pre_handler_kretprobe) ret_handler (kretprobe.handler; None for
+    other probes and in exports that do not have it). Malformed records are left out."""
     try:
         records = json.loads(data.decode("utf-8"))["kprobes"] if data else []
     except (ValueError, KeyError, TypeError, AttributeError, RecursionError):  # RecursionError: deeply nested JSON
@@ -421,7 +422,8 @@ def kprobe_records(data):
         clean = {key: int(record.get(key) or 0) for key in ("addr", "pre_handler", "post_handler", "offset")}
         clean.update(symbol=printable(record.get("symbol")), event=printable(record.get("event")),
                      tracefs=record.get("tracefs") if isinstance(record.get("tracefs"), bool) else None,
-                     flags=record["flags"] if type(record.get("flags")) is int else None)
+                     flags=record["flags"] if type(record.get("flags")) is int else None,
+                     ret_handler=record["ret_handler"] if type(record.get("ret_handler")) is int else None)
         probes.setdefault(clean["addr"], []).append(clean)
     return probes
 
@@ -603,10 +605,21 @@ KPROBE_KIND = "kprobe via ftrace"
 
 def kprobe_text(image, record):
     """The Owner text for one kprobe record (kprobe_records): a trace_kprobe by its event name, else the function its
-    pre_handler (or, without one, its post_handler) is, as a module's probe reads: evilmod.kp_pre (kprobe pre_handler)."""
+    pre_handler (or, without one, its post_handler) is, as a module's probe reads: evilmod.kp_pre (kprobe pre_handler).
+    A kretprobe reads 'kretprobe <event> on <function> (...)' or '<module>.<handler> (kretprobe handler)'."""
     where = record["symbol"] or at(image, record["addr"])
     if record["symbol"] and record["offset"]:
         where += "+%#x" % record["offset"]
+    ret = record.get("ret_handler")
+    if ret is not None:  # a kretprobe: its pre_handler is the kernel's pre_handler_kretprobe, its handler says whose it is
+        if record["event"]:
+            how = {True: "tracefs kretprobe event", False: "made by perf_event_open, not a tracefs event"}.get(record["tracefs"], "kretprobe event")
+            return "kretprobe %s on %s (%s; handler %s)" % (record["event"], where, how, at(image, ret))
+        if not ret:
+            return "kretprobe on %s (no handler)" % where
+        if image.symbol_at(ret) is None:
+            return "kretprobe handler at %#x (no symbol)" % ret
+        return "%s (kretprobe handler)" % at(image, ret)
     if record["event"]:
         how = {True: "tracefs kprobe event", False: "made by perf_event_open, not a tracefs event"}.get(record["tracefs"], "kprobe event")
         return "kprobe %s on %s (%s; pre_handler %s)" % (record["event"], where, how, at(image, record["pre_handler"]))
@@ -622,14 +635,14 @@ def kprobe_text(image, record):
 def kprobe_owner(image, site, owner):
     """An Owner naming the kprobe(s) the export's kprobe list has at site (the patched instruction, where an ftrace-based
     probe sits), or None. It keeps owner's references (the trampoline's ftrace_ops path to kprobe_ftrace_handler); its
-    address is the first probe's handler when that is in the ELF. A disabled probe (flags GONE or DISABLED: a tracefs event
+    address is the first probe's handler (a kretprobe's: its kretprobe handler) when that is in the ELF. A disabled probe (flags GONE or DISABLED: a tracefs event
     that is defined but not enabled) is left out when an enabled probe sits at site, else it reads '... (disabled)'."""
     records = image.kprobes.get(site)
     if not records:
         return None
     enabled = [record for record in records if not (record.get("flags") or 0) & KPROBE_OFF]
     records = enabled or records
-    handler = records[0]["pre_handler"] or records[0]["post_handler"]
+    handler = records[0].get("ret_handler") or records[0]["pre_handler"] or records[0]["post_handler"]
     return Owner(", ".join(kprobe_text(image, record) + (" (disabled)" if (record.get("flags") or 0) & KPROBE_OFF else "")
                            for record in records), handler if handler and image.segment(handler) else None,
                  "kprobe", list(owner.refs) if owner else [])

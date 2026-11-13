@@ -133,7 +133,8 @@ def trace_kprobe(at, event, on_list=True, **probe):
     mem.put(tpe, b"\0" * 248)
     mem.put(at + 208 + 16, q(tpe))                           # tp.event
     mem.put(tpe + 80 + 24, q(string(at + 0x800, event)))      # call.name
-    return kprobe(at + 24, pre=DISPATCH, **probe)
+    probe.setdefault("pre", DISPATCH)
+    return kprobe(at + 24, **probe)
 
 
 SYM1, SYM2, SYM3 = string(HEAP + 0x9000, "do_sys_openat2"), string(HEAP + 0x9100, "vfs_read"), string(HEAP + 0x9200, "__x64_sys_kill")
@@ -182,6 +183,36 @@ noflags = dict(T, kprobe=Type(128, {name: at for name, at in T["kprobe"].fields.
 assert k.kprobe_layout(Kernel(noflags, SYMBOLS))["flags"] is None
 assert k.kprobe_list(mem, k.kprobe_layout(Kernel(noflags, SYMBOLS))) == [{key: value for key, value in record.items() if key != "flags"}
                                                                          for record in records]
+# kretprobes (review s179 MINOR 1). Linux 6.12: register_kretprobe sets rp->kp.pre_handler = pre_handler_kretprobe
+# (kernel/kprobes.c), and an 'r:' event sets tk->rp.handler = kretprobe_dispatcher (kernel/trace/trace_kprobe.c). The
+# record gets ret_handler (kretprobe.handler, at kp + 128 here); with kretprobe_dispatcher, the event name as for a kprobe.
+KRET_PRE, KRET_DISPATCH, RETH, VFS_WRITE = 0xffffffff81200800, 0xffffffff81200c00, 0xffffffffc0100300, 0xffffffff8e660004
+KSYMBOLS = dict(SYMBOLS, pre_handler_kretprobe=KRET_PRE, kretprobe_dispatcher=KRET_DISPATCH)
+rmem = Memory()
+rmem.pages = {page: bytearray(data) for page, data in mem.pages.items()}
+mem, saved = rmem, mem
+TK3, MODRET = HEAP + 0x70000, 0xffffffffc0102200  # a tracefs 'r:' event; a module's static struct kretprobe
+trace_kprobe(TK3, "r_vfs_write", addr=VFS_WRITE, symbol=string(HEAP + 0x9400, "vfs_write"), bucket=20, pre=KRET_PRE + SHIFT)
+mem.put(TK3 + 24 + 128, q(KRET_DISPATCH + SHIFT))  # tk->rp.handler
+kprobe(MODRET, VFS_WRITE + 0x100, KRET_PRE + SHIFT, bucket=21, flags=8)
+mem.put(MODRET + 128, q(RETH))  # rp.handler: the module's function
+mem = saved
+rlayout = k.kprobe_layout(Kernel(T, KSYMBOLS))
+assert (rlayout["kret_pre"], rlayout["kret_dispatcher"], rlayout["rp_handler"]) == (KRET_PRE + SHIFT, KRET_DISPATCH + SHIFT, 128), rlayout
+rrecords = k.kprobe_list(rmem, rlayout)
+assert [r for r in rrecords if r["kprobe"] in (TK3 + 24, MODRET)] == [
+    {"kprobe": TK3 + 24, "addr": VFS_WRITE, "symbol": "vfs_write", "offset": 0, "pre_handler": KRET_PRE + SHIFT, "post_handler": 0,
+     "flags": 0, "ret_handler": KRET_DISPATCH + SHIFT, "event": "r_vfs_write", "tracefs": True},
+    {"kprobe": MODRET, "addr": VFS_WRITE + 0x100, "symbol": None, "offset": 0, "pre_handler": KRET_PRE + SHIFT, "post_handler": 0,
+     "flags": 8, "ret_handler": RETH}], rrecords
+assert [r for r in rrecords if r["kprobe"] not in (TK3 + 24, MODRET)] == records, rrecords  # the kprobes as before
+read = ps.kprobe_records(json.dumps({"version": 1, "kprobes": rrecords}).encode())
+assert (read[VFS_WRITE][0]["ret_handler"], read[VFS_WRITE + 0x100][0]["ret_handler"], read[OPENAT2][0]["ret_handler"]) == (
+    KRET_DISPATCH + SHIFT, RETH, None), read
+# An ISF without those symbols or without kretprobe.handler: no ret_handler and no event for a kretprobe, as before.
+assert all("ret_handler" not in r and r.get("event") is None for r in k.kprobe_list(rmem, layout) if r["kprobe"] in (TK3 + 24, MODRET))
+nohandler = k.kprobe_layout(Kernel(dict(T, kretprobe=Type(168, {"kp": 0})), KSYMBOLS))
+assert nohandler["rp_handler"] is None and all("ret_handler" not in r for r in k.kprobe_list(rmem, nohandler)), nohandler
 # No kprobe_table or struct kprobe (CONFIG_KPROBES off): no list at all.
 assert k.kprobe_layout(Kernel(T, {})) is None
 assert k.kprobe_layout(Kernel({name: t for name, t in T.items() if name != "kprobe"}, SYMBOLS)) is None

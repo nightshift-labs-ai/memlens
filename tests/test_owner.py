@@ -407,6 +407,36 @@ downer, drow = flagged(lambda record: 2)
 assert downer == ps.Owner("kprobe memlens_kp on traced (tracefs kprobe event; pre_handler kprobe_dispatcher) (disabled), "
                           "evilmod.kp_pre (kprobe pre_handler) (disabled)", DISPATCH, "kprobe", KREFS("traced")), downer
 assert flagged(lambda record: 8)[0] == kowners["traced"], flagged(lambda record: 8)
+# kretprobes (review s179 MINOR 1): every kretprobe's pre_handler is the kernel's pre_handler_kretprobe, so the export
+# also writes ret_handler (kretprobe.handler): kretprobe_dispatcher for a trace_kprobe 'r:' event (named by its event),
+# else the module's function. Jump to owner goes to that handler.
+KRETPRE, KRETDISPATCH, RETH = KTEXT + 0x1700, KTEXT + 0x1800, MTEXT + 0x300
+rsymbols = ksymbols + [("pre_handler_kretprobe", KRETPRE, 0x80, FUNC), ("kretprobe_dispatcher", KRETDISPATCH, 0x80, FUNC),
+                       ("evilmod.kp_ret", RETH, 0x80, FUNC)]
+
+
+def at_site(name, records):
+    """(Owner, list row) of the kprobe page at name's entry when the section holds records at that site."""
+    others = [record for record in probes if record["addr"] != KSITES[name]]
+    blob = build(segments, rsymbols, [(ps.KPROBES_SECTION, json.dumps({"version": 1, "kprobes": others + records}).encode())])
+    image = ps.Image(blob)
+    links = {link.function: link for link in ps.hook_links(image, ps.scan(blob, image))}
+    rows = {row[1]: row for row in ps.list_rows(image, ps.scan(blob, image), list(links.values()), {})}
+    return links[name].owner, rows[name]
+
+
+for name, record, text, address in (
+        ("traced", probe("traced", KRETPRE, event="r_traced", tracefs=True, ret_handler=KRETDISPATCH),
+         "kretprobe r_traced on traced (tracefs kretprobe event; handler kretprobe_dispatcher)", KRETDISPATCH),
+        ("perfprobe", probe("perfprobe", KRETPRE, event="r_perf", tracefs=False, ret_handler=KRETDISPATCH),
+         "kretprobe r_perf on perfprobe (made by perf_event_open, not a tracefs event; handler kretprobe_dispatcher)", KRETDISPATCH),
+        ("modprobe", probe("modprobe", KRETPRE, ret_handler=RETH), "evilmod.kp_ret (kretprobe handler)", RETH),
+        ("hidden", probe("hidden", KRETPRE, ret_handler=0xffffffffc0400000), "kretprobe handler at 0xffffffffc0400000 (no symbol)", None),
+        ("postonly", probe("postonly", KRETPRE, ret_handler=0), "kretprobe on postonly (no handler)", KRETPRE),
+        # A record without ret_handler (an export from before this change) reads as it did: the kernel's helper.
+        ("modprobe", probe("modprobe", KRETPRE), "pre_handler_kretprobe (kprobe pre_handler)", KRETPRE)):
+    rowner, rrow = at_site(name, [record])
+    assert rowner == ps.Owner(text, address, "kprobe", KREFS(name)) and rrow[6:] == (text, address), (name, rowner, rrow)
 # No probe recorded at that site (a probe registered after the capture's list was read, or a section without it): the
 # ftrace_ops owner, as before.
 assert kowners["unlisted"] == ps.Owner("kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)", KHANDLER, "ftrace_ops",

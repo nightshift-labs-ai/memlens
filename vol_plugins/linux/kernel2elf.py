@@ -121,6 +121,13 @@ def kprobe_layout(kernel):
         layout["flags"] = offset("kprobe", "flags")
     except (IndexError, AttributeError):
         pass
+    # A kretprobe's struct kprobe has pre_handler pre_handler_kretprobe (register_kretprobe); the owner's function is the
+    # kretprobe's handler (rp_handler: its offset from kretprobe.kp), kretprobe_dispatcher for a trace_kprobe 'r:' event.
+    layout.update(kret_pre=symbol("pre_handler_kretprobe"), kret_dispatcher=symbol("kretprobe_dispatcher"), rp_handler=None)
+    try:
+        layout["rp_handler"] = offset("kretprobe", "handler") - offset("kretprobe", "kp")
+    except (exceptions.SymbolError, IndexError, AttributeError):
+        pass
     try:
         base = -offset("trace_kprobe", "rp") - offset("kretprobe", "kp") + offset("trace_kprobe", "tp")
         if kernel.get_type("trace_probe").has_member("event"):  # 5.4 and later: tp.event -> trace_probe_event, call inside
@@ -158,7 +165,9 @@ def kprobe_list(layer, layout) -> List[dict]:
     """The registered kprobes, sorted by probed address: each kprobe_table bucket's hlist of struct kprobe, and in place of
     an aggregate probe (pre_handler aggr_pre_handler: several probes on one address) the probes on its list. A record
     (patchscan.kprobe_records) has the struct's address (kprobe), the probed address (addr), symbol and offset as
-    registered, pre_handler and post_handler (0 for none), flags (kprobe.flags; left out when the ISF has no such member); a probe whose pre_handler is kprobe_dispatcher is a trace_kprobe,
+    registered, pre_handler and post_handler (0 for none), flags (kprobe.flags; left out when the ISF has no such member); a kretprobe's
+    (pre_handler pre_handler_kretprobe) also has ret_handler (kretprobe.handler, None when unreadable). A probe whose pre_handler is
+    kprobe_dispatcher, or a kretprobe whose ret_handler is kretprobe_dispatcher, is a trace_kprobe,
     and its record also has the event name (event) and whether the event is on tracefs' list (tracefs: False for a
     probe perf_event_open made). A probe that cannot be read is left out; the walk stops at a loop."""
     def pointer(address):
@@ -176,7 +185,14 @@ def kprobe_list(layer, layout) -> List[dict]:
                  "pre_handler": canonical(pre), "post_handler": canonical(post)}
         if flags is not None:
             found["flags"] = flags
-        if layout["event"] and layout["dispatcher"] is not None and canonical(pre) == canonical(layout["dispatcher"]):
+        traced = layout["dispatcher"] is not None and canonical(pre) == canonical(layout["dispatcher"])
+        if layout.get("kret_pre") is not None and layout.get("rp_handler") is not None and canonical(pre) == canonical(layout["kret_pre"]):
+            try:
+                found["ret_handler"] = canonical(pointer(probe + layout["rp_handler"]))
+            except exceptions.InvalidAddressException:
+                found["ret_handler"] = None
+            traced = layout["kret_dispatcher"] is not None and found["ret_handler"] == canonical(layout["kret_dispatcher"])
+        if layout["event"] and traced:
             found["event"] = None
             try:
                 at = probe

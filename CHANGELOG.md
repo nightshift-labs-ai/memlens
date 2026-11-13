@@ -2,6 +2,10 @@
 
 Taken from the GitHub release notes. Newest first.
 
+## Unreleased
+
+- README: a shorter front door (6,105 to 1,740 words: what it does, Status, Install, Try it, a short real before/after from the demo, Usage, Limits); the full demo output and Details moved to `docs/OUTPUT.md`, Usage in full, Without IDA and Headless to `docs/USAGE.md`, When the export fails and An ISF for your own image to `docs/EXPORT.md` (the README keeps that heading, which the export dialog names, with a link), What was verified to `docs/VERIFICATION.md` and the full Limits to `docs/LIMITS.md`; the text was moved, not rewritten.
+
 ## v0.3.28 (2026-11-16)
 
 - **Who hooked it: an Owner for a copied hook page when the memory shows it.** For an ftrace trampoline MemLens reads the `ftrace_ops` pointer the trampoline loads (stored right after its `ret`) and that ops' `func`. On the demo `kernel.elf` that gives `function_trace_call (ftrace_ops global_ops)` and `kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)`. It also names a module's callback when the trampoline calls `ftrace_ops_assist_func` (ops flagged RECURSION or RCU), tested on hand-made ELFs only: `evilmod.fh_ftrace_thunk (ftrace_ops evilmod.hooks+0x20)`. Ops outside the ELF are shown by address (`no symbol: heap`).

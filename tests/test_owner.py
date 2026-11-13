@@ -440,6 +440,12 @@ for name, record, text, address in (
         ("modprobe", probe("modprobe", KRETPRE), "pre_handler_kretprobe (kprobe pre_handler)", KRETPRE)):
     rowner, rrow = at_site(name, [record])
     assert rowner == ps.Owner(text, address, "kprobe", KREFS(name)) and rrow[6:] == (text, address), (name, rowner, rrow)
+# review s180 NIT 3: a kretprobe event whose tracefs state is unknown (mutant M8), and a crafted JSON true as flags,
+# which is not a number and so not GONE (mutant M11: isinstance(True, int) would make it a disabled probe)
+rowner, _ = at_site("traced", [probe("traced", KRETPRE, event="r_unk", ret_handler=KRETDISPATCH)])
+assert rowner.text == "kretprobe r_unk on traced (kretprobe event; handler kretprobe_dispatcher)", rowner
+assert at_site("modprobe", [probe("modprobe", PRE, POST, flags=True)]) == at_site("modprobe", [probe("modprobe", PRE, POST)])
+assert "(disabled)" not in at_site("modprobe", [probe("modprobe", PRE, POST, flags=True)])[0].text
 # No probe recorded at that site (a probe registered after the capture's list was read, or a section without it): the
 # ftrace_ops owner, as before.
 assert kowners["unlisted"] == ps.Owner("kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)", KHANDLER, "ftrace_ops",

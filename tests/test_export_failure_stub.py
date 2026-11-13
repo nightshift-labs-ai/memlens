@@ -143,6 +143,7 @@ sys.exit(step["exit"])
 ''' % sys.executable
 
 with tempfile.TemporaryDirectory() as work:
+    m.INDEX_CACHE = os.path.join(work, "no-index.json")  # never the user's ~/.cache copy (review s179 MAJOR 1)
     bindir = os.path.join(work, "bin")
     os.mkdir(bindir)
     vol = os.path.join(bindir, "vol")

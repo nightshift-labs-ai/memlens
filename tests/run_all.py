@@ -40,6 +40,7 @@ def main(argv):
                 return 2
             folders[flag] = argv[i + 1]
     demo = os.environ.get("MEMLENS_DEMO_ELF", "")
+    demo = os.path.abspath(demo) if demo else ""  # the tests run from the repository folder (review s179 MAJOR 2)
     if demo and not os.path.isfile(demo):
         print("MEMLENS_DEMO_ELF=%s: no such file" % demo, file=sys.stderr)
         return 2
@@ -57,7 +58,7 @@ def main(argv):
     for name, args in runs:
         start = time.time()
         run = subprocess.run([sys.executable, "-I", os.path.join(HERE, args[0])] + args[1:], cwd=os.path.dirname(HERE),
-                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+                             env=dict(os.environ, MEMLENS_DEMO_ELF=demo), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
         result, parts = status(run.returncode, run.stdout)
         last = (run.stdout.strip().splitlines() or [""])[-1]
         note = " (%d optional part%s skipped)" % (parts, "s" if parts > 1 else "") if parts and result == "PASS" else ""

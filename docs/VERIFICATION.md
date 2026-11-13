@@ -2,7 +2,7 @@
 
 Part of the MemLens documentation; start with the [README](../README.md).
 
-`python3 tests/run_all.py` runs every test below one after another and prints a pass / skip / fail table (exit status 1 when one fails); `MEMLENS_DEMO_ELF=kernel.elf` adds the checks on the demo export, `--ida-stubs <folder>` and `--ida-sdk <folder>` the IDA name checks (`tests/check_ida_names.py`, `tests/check_ida_api.py`).
+`python3 tests/run_all.py` runs every `tests/test_*.py` below one after another (not `check_layout.py`, `check_elf.sh` or the Ghidra script, which need their own inputs) and prints a pass / skip / fail table (exit status 1 when one fails); `MEMLENS_DEMO_ELF=kernel.elf` adds the checks on the demo export, `--ida-stubs <folder>` and `--ida-sdk <folder>` the IDA name checks (`tests/check_ida_names.py`, `tests/check_ida_api.py`).
 
 Memory images were captured from QEMU guests; addresses differ per boot because of KASLR.
 

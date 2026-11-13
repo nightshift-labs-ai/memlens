@@ -139,7 +139,7 @@ All limits, with measurements: [docs/LIMITS.md](docs/LIMITS.md).
 - When the export fails: [docs/EXPORT.md](docs/EXPORT.md#when-the-export-fails)
 - An ISF for your own image: [docs/EXPORT.md](docs/EXPORT.md#an-isf-for-your-own-image)
 - What was verified (Ghidra, binutils, gcc, the tests): [docs/VERIFICATION.md](docs/VERIFICATION.md)
-- Run every test: `python3 tests/run_all.py` (no IDA, no packages; with `MEMLENS_DEMO_ELF=kernel.elf` it also checks the demo export: 13 passed on the demo `kernel.elf`)
+- Run every test: `python3 tests/run_all.py` (no IDA, no packages; with `MEMLENS_DEMO_ELF=kernel.elf` it also checks the demo export: 14 passed on the demo `kernel.elf`)
 - Limits in full: [docs/LIMITS.md](docs/LIMITS.md)
 - The exporter on its own, as a Volatility 3 plugin: [docs/README-kernel2elf.md](docs/README-kernel2elf.md), [docs/WRITEUP-kernel2elf.md](docs/WRITEUP-kernel2elf.md)
 

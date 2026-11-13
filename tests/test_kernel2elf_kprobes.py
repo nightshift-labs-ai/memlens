@@ -6,7 +6,7 @@ docs/OUTPUT.md and was made with Volatility 2.28.2.
 
 usage: python3 tests/test_kernel2elf_kprobes.py
 """
-import hashlib, io, json, os, struct, sys, types
+import hashlib, io, json, os, signal, struct, sys, types
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
 
@@ -228,7 +228,20 @@ mem.put(TABLE + SHIFT + 8 * 11, q(0xffff888100000000))     # bucket 11 -> unmapp
 kprobe(HEAP + 0x50000, VFS_READ + 0x200, PRE, symbol=0xffff888100000000, bucket=12)  # symbol_name unreadable
 mem.put(HEAP + 0x60000, b"bad\x01name\0")
 kprobe(HEAP + 0x50400, VFS_READ + 0x300, PRE, symbol=HEAP + 0x60000, bucket=13)     # not printable
+# The aggregate's ring is torn too: P2's list.next points back at P1, not at the aggregate's head, so the ring never
+# returns to head (review s179 MINOR 4). The walk must end and list P1 and P2 once; an alarm turns a hang into a failure.
+mem.put(P2 + 16, q(P1 + 16))
+
+
+def hung(signum, frame):
+    raise AssertionError("kprobe_list did not end on a torn aggregate ring")
+
+
+signal.signal(signal.SIGALRM, hung)
+signal.alarm(20)
 trecords = k.kprobe_list(torn, layout)
+signal.alarm(0)
+assert [r["kprobe"] for r in trecords].count(P1) == 1 and [r["kprobe"] for r in trecords].count(P2) == 1, trecords
 assert len(trecords) == 8 and [r["symbol"] for r in trecords if r["addr"] in (VFS_READ + 0x100, VFS_READ + 0x200, VFS_READ + 0x300)] == [
     None, None, None], trecords
 mem = saved

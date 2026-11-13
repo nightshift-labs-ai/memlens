@@ -308,6 +308,13 @@ with tempfile.TemporaryDirectory() as work:
     assert "fresh pip install has none" in text and "An ISF for your own image" in text, text
     assert text.count("\nImage: ") == 3 and "\nImage: " + D13_LINE + "\n" in text and "ISF:" not in text, text
     assert "is the running kernel" not in text, text
+    assert "tools/find_isf.py" in text.replace(os.sep, "/"), text  # no cached index: the helper is named
+    m.INDEX_CACHE = os.path.join(work, "index-noisf.json")
+    with open(m.INDEX_CACHE, "w") as handle:
+        json.dump({D13_LINE: ["https://example.invalid/d13-noisf.json.xz"]}, handle)
+    text = run("export_trace_no_isf", "banners_trace", None)[0][0]
+    assert "A ready-made ISF for this image's kernel" in text and "https://example.invalid/d13-noisf.json.xz" in text, text
+    m.INDEX_CACHE = os.path.join(work, "no-index.json")
 
     # The ISF's line is in the image yet Volatility failed (not recorded: the real export with this ISF succeeds).
     D13_EXACT = base64.b64decode(D13)

@@ -23,7 +23,7 @@ python3 patchscan.py [--links] [--isf <isf.json.xz>] kernel.elf
 
 ## Headless, with idalib
 
-IDA 9.0 or newer; set up the `idapro` module as Hex-Rays describes. After `hcli plugin install memlens` the script is in the plugin's folder, `$IDAUSR/plugins/memlens` (by default `~/.idapro/plugins/memlens` on Linux and macOS, `%APPDATA%\Hex-Rays\IDA Pro\plugins\memlens` on Windows):
+IDA 9.0 or newer (the IDA names MemLens uses are checked against the IDA 9.1 to 9.4 Python stubs and the 9.5 SDK's API list; 9.0 itself is not checked); set up the `idapro` module as Hex-Rays describes. After `hcli plugin install memlens` the script is in the plugin's folder, `$IDAUSR/plugins/memlens` (by default `~/.idapro/plugins/memlens` on Linux and macOS, `%APPDATA%\Hex-Rays\IDA Pro\plugins\memlens` on Windows):
 
 ```
 python3 ~/.idapro/plugins/memlens/tools/memlens_headless.py kernel.elf <isf.json.xz> [--no-analysis] [--any-kernel]

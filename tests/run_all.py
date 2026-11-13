@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+"""Run every MemLens test, one after another, and print a pass / skip / fail table.
+
+    python3 tests/run_all.py                                  # everything that needs no demo kernel
+    MEMLENS_DEMO_ELF=kernel.elf python3 tests/run_all.py      # also the parts that check the demo export
+    python3 tests/run_all.py --ida-stubs <folder with ida_*.pyi>   # also check every IDA API name MemLens uses
+
+The demo kernel.elf is in the demo-data release (see the README's Try it). Needs Python 3.8+; a few tests use cc,
+objdump or xz when they are installed and say SKIP when not. Exit status 1 when any test fails.
+"""
+import os
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+# tests that take the demo kernel.elf as their first argument (without it they skip the demo part)
+KERNEL_TESTS = {"test_demo_injection.py", "test_demo_percpu_index.py", "test_hookchain.py", "test_hookchain_stub.py",
+                "test_owner.py"}
+
+
+def status(rc, out):
+    """FAIL (exit status not 0), SKIP (the whole test skipped: its last line says SKIPPED) or PASS, with the number of
+    optional parts it skipped (its 'SKIP: ...' lines)."""
+    if rc != 0:
+        return "FAIL", 0
+    lines = out.strip().splitlines() or [""]
+    return ("SKIP" if "SKIPPED" in lines[-1] else "PASS"), sum(1 for line in lines if line.startswith("SKIP: "))
+
+
+def main(argv):
+    stubs = None
+    if "--ida-stubs" in argv:
+        i = argv.index("--ida-stubs")
+        if i + 1 >= len(argv) or not os.path.isdir(argv[i + 1]):
+            print("usage: python3 tests/run_all.py [--ida-stubs <folder with ida_*.pyi>]", file=sys.stderr)
+            return 2
+        stubs = argv[i + 1]
+    demo = os.environ.get("MEMLENS_DEMO_ELF", "")
+    if demo and not os.path.isfile(demo):
+        print("MEMLENS_DEMO_ELF=%s: no such file" % demo, file=sys.stderr)
+        return 2
+    runs = []
+    for name in sorted(n for n in os.listdir(HERE) if n.startswith("test_") and n.endswith(".py")):
+        extra = [demo] if demo and name in KERNEL_TESTS else []
+        if demo and name == "test_findpatches_stub.py" and os.path.isfile("/bin/ls"):
+            extra = ["/bin/ls", demo]  # a stripped program, then the demo export (still scanned)
+        runs.append((name, [name] + extra))
+    if stubs:
+        runs += [("check_ida_api.py", ["check_ida_api.py", stubs]), ("check_ida_names.py", ["check_ida_names.py", stubs])]
+    rows, failed = [], []
+    for name, args in runs:
+        start = time.time()
+        run = subprocess.run([sys.executable, "-I", os.path.join(HERE, args[0])] + args[1:], cwd=os.path.dirname(HERE),
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        result, parts = status(run.returncode, run.stdout)
+        last = (run.stdout.strip().splitlines() or [""])[-1]
+        note = " (%d optional part%s skipped)" % (parts, "s" if parts > 1 else "") if parts and result == "PASS" else ""
+        rows.append((result, name, time.time() - start, last))
+        print("%-4s %-28s %6.1f s  %s%s" % (result, name, time.time() - start, last[:90], note), flush=True)
+        if result == "FAIL":
+            failed.append((name, run.stdout))
+    for name, out in failed:
+        print("\n== %s output (last 30 lines)\n%s" % (name, "\n".join(out.splitlines()[-30:])))
+    counts = {k: sum(1 for r in rows if r[0] == k) for k in ("PASS", "SKIP", "FAIL")}
+    print("\n%d passed, %d skipped, %d failed%s" % (counts["PASS"], counts["SKIP"], counts["FAIL"],
+                                                   "" if demo else " (MEMLENS_DEMO_ELF not set: demo parts skipped)"))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -4,6 +4,7 @@ Taken from the GitHub release notes. Newest first.
 
 ## Unreleased
 
+- New `tests/run_all.py`: runs every test one after another and prints a pass / skip / fail table; exit status 1 when one fails. On the demo `kernel.elf` (`MEMLENS_DEMO_ELF`): 13 passed, 0 skipped.
 - README: a shorter front door (6,105 to 1,740 words: what it does, Status, Install, Try it, a short real before/after from the demo, Usage, Limits); the full demo output and Details moved to `docs/OUTPUT.md`, Usage in full, Without IDA and Headless to `docs/USAGE.md`, When the export fails and An ISF for your own image to `docs/EXPORT.md` (the README keeps that heading, which the export dialog names, with a link), What was verified to `docs/VERIFICATION.md` and the full Limits to `docs/LIMITS.md`; the moved text is unchanged apart from links and heading levels, and the README adds short summaries that link to it.
 
 ## v0.3.28 (2026-11-16)

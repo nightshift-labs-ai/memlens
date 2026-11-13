@@ -2,6 +2,8 @@
 
 Part of the MemLens documentation; start with the [README](../README.md).
 
+`python3 tests/run_all.py` runs every test below one after another and prints a pass / skip / fail table (exit status 1 when one fails); `MEMLENS_DEMO_ELF=kernel.elf` adds the checks on the demo export, `--ida-stubs <folder>` the IDA name checks.
+
 Memory images were captured from QEMU guests; addresses differ per boot because of KASLR.
 
 | Kernel | Symbols in ELF | From modules | Loaded by Ghidra 12.2: functions disassembled at the right address, per-CPU data at the ELF address |

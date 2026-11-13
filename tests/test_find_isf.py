@@ -61,6 +61,14 @@ with tempfile.TemporaryDirectory() as tmp:
         handle.write(b"\0" * 1000)
     rc, out = run(empty, "--index", index)
     assert rc == 1 and "no 'Linux version ...' banner" in out, (rc, out)
+    import lzma, gzip  # noqa: E401 (compressed images: say so instead of "no banner", review s179 MINOR 5)
+    for name, data, tool in (("image.raw.xz", lzma.compress(b"x" * 100), "xz"), ("image.raw.gz", gzip.compress(b"x" * 100), "gzip"),
+                             ("image.raw.bz2", b"BZh91AY&SY" + bytes(50), "bzip2")):
+        packed = os.path.join(tmp, name)
+        with open(packed, "wb") as handle:
+            handle.write(data)
+        rc, out = run(packed, "--index", index)
+        assert rc == 2 and "%s-compressed" % tool in out and "decompress" in out, (name, rc, out)
     rc, out = run(os.path.join(tmp, "missing.raw"), "--index", index)
     assert rc == 2, (rc, out)
 print("find_isf test OK (5-entry index: hit, miss with the dwarf2json hint, two banners, journal copy, format string)")

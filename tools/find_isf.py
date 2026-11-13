@@ -42,6 +42,16 @@ def banners_in(path):
     return sorted(order, key=lambda b: -counts[b])
 
 
+COMPRESSED = ((b"\xfd7zXZ\x00", "xz", "xz -dk"), (b"\x1f\x8b", "gzip", "gzip -dk"), (b"BZh", "bzip2", "bzip2 -dk"))
+
+
+def compression(path):
+    """(kind, command) when the file starts like an xz, gzip or bzip2 file, else None (banners cannot be read there)."""
+    with open(path, "rb") as handle:
+        head = handle.read(6)
+    return next(((kind, command) for magic, kind, command in COMPRESSED if head.startswith(magic)), None)
+
+
 def load_index(path):
     with open(path, encoding="utf-8") as handle:
         return {key.strip(): urls for key, urls in json.load(handle).items()}
@@ -89,6 +99,11 @@ def main(argv):
     banners = [target.strip()] if target.startswith("Linux version ") else banners_in(target) if os.path.isfile(target) else None
     if banners is None:
         print("find_isf: %s is neither a file nor a 'Linux version ...' banner" % target, file=sys.stderr)
+        return 2
+    packed = compression(target) if not banners and os.path.isfile(target) else None
+    if packed:
+        print("find_isf: %s is %s-compressed, so its banners cannot be read: decompress it first (%s %s), then run "
+              "find_isf.py on the result" % (target, packed[0], packed[1], target))
         return 2
     if not banners:
         print("find_isf: no 'Linux version ...' banner in %s (is it a Linux memory image?)" % target)

@@ -303,4 +303,15 @@ empty = Memory(); empty.put(TABLE + SHIFT, b"\0" * 64 * 8)
 elf3 = k.Elf()
 elf3.add_section(".text", 0xffffffff81000000, k.SHF_ALLOC | k.SHF_EXEC, b"\xcc" * 0x1000)
 assert list(plugin._kprobes(kernel, empty, elf3)) == [(0, ("kprobes", ps.KPROBES_SECTION, TABLE + SHIFT, 0))]
+# review s180 NIT 1: a probe whose 4 flags bytes cannot be read is still listed (without flags), and its bucket's walk
+# goes on to the next probe
+torn = Memory(); torn.put(TABLE + SHIFT, b"\0" * 64 * 8)
+EDGE, NEXT = HEAP + 0x40000 - 120, HEAP + 0x50000  # EDGE's flags (+120) fall on a page that is not mapped
+for at, nxt in ((EDGE, NEXT), (NEXT, 0)):
+    torn.put(at, q(nxt) + b"\0" * 112)  # hlist.next, then the rest up to flags
+    torn.put(at + 40, q(OPENAT2) + q(0) + struct.pack("<I", 0) + b"\0" * 4 + q(PRE) + q(0))
+torn.put(NEXT + 120, struct.pack("<I", 8) + b"\0" * 4)
+torn.put(TABLE + SHIFT + 8 * 5, q(EDGE))
+got = k.kprobe_list(torn, layout)
+assert [r["kprobe"] for r in got] == [EDGE, NEXT] and "flags" not in got[0] and got[1]["flags"] == 8, got
 print("kernel2elf kprobe test OK (fake volatility3 modules and memory layer: %d probes, the 6.12 and pre-5.4 layouts)" % len(records))

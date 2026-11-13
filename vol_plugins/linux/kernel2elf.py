@@ -165,7 +165,7 @@ def kprobe_list(layer, layout) -> List[dict]:
     """The registered kprobes, sorted by probed address: each kprobe_table bucket's hlist of struct kprobe, and in place of
     an aggregate probe (pre_handler aggr_pre_handler: several probes on one address) the probes on its list. A record
     (patchscan.kprobe_records) has the struct's address (kprobe), the probed address (addr), symbol and offset as
-    registered, pre_handler and post_handler (0 for none), flags (kprobe.flags; left out when the ISF has no such member); a kretprobe's
+    registered, pre_handler and post_handler (0 for none), flags (kprobe.flags; left out when the ISF has no such member or its 4 bytes cannot be read); a kretprobe's
     (pre_handler pre_handler_kretprobe) also has ret_handler (kretprobe.handler, None when unreadable). A probe whose pre_handler is
     kprobe_dispatcher, or a kretprobe whose ret_handler is kretprobe_dispatcher, is a trace_kprobe,
     and its record also has the event name (event) and whether the event is on tracefs' list (tracefs: False for a
@@ -178,9 +178,12 @@ def kprobe_list(layer, layout) -> List[dict]:
             addr, symbol = pointer(probe + layout["addr"]), pointer(probe + layout["symbol_name"])
             pre, post = pointer(probe + layout["pre_handler"]), pointer(probe + layout["post_handler"])
             offset = struct.unpack("<I", layer.read(probe + layout["offset"], 4))[0]
-            flags = None if layout.get("flags") is None else struct.unpack("<I", layer.read(probe + layout["flags"], 4))[0]
         except exceptions.InvalidAddressException:
             return None
+        try:  # unreadable flags: the record without them (as an older export), not a lost probe
+            flags = None if layout.get("flags") is None else struct.unpack("<I", layer.read(probe + layout["flags"], 4))[0]
+        except exceptions.InvalidAddressException:
+            flags = None
         found = {"kprobe": canonical(probe), "addr": canonical(addr), "symbol": read_string(layer, symbol), "offset": offset,
                  "pre_handler": canonical(pre), "post_handler": canonical(post)}
         if flags is not None:

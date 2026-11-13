@@ -2,7 +2,7 @@
 
 Taken from the GitHub release notes. Newest first.
 
-## v0.3.28 (unreleased)
+## v0.3.28 (2026-11-16)
 
 - **Who hooked it: an Owner for a copied hook page when the memory shows it.** For an ftrace trampoline MemLens reads the `ftrace_ops` pointer the trampoline loads (stored right after its `ret`) and that ops' `func`. On the demo `kernel.elf` that gives `function_trace_call (ftrace_ops global_ops)` and `kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)`. It also names a module's callback when the trampoline calls `ftrace_ops_assist_func` (ops flagged RECURSION or RCU), tested on hand-made ELFs only: `evilmod.fh_ftrace_thunk (ftrace_ops evilmod.hooks+0x20)`. Ops outside the ELF are shown by address (`no symbol: heap`).
 - For a BPF trampoline the owner is the program, the call right after `__bpf_prog_enter*`: `BPF program at 0xffffffffc0004664` on the demo `kernel.elf`, `BPF program at 0xffffffffc0043958` on an Ubuntu 24.04 export. Only a BPF name or an address with no symbol is called a BPF program. A kernel function in that place is labelled for what it is: the interpreter (`__bpf_prog_run32 (BPF interpreter: the program is not JIT-compiled)`) or the cgroup LSM shim (`__cgroup_bpf_run_lsm_current (cgroup LSM shim: runs each cgroup's programs, not named here)`); any other function reads `<name> (called by the BPF trampoline)`. Tested on hand-made ELFs only.

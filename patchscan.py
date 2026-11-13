@@ -33,7 +33,7 @@ FTRACE_OWN = {"ftrace_caller", "ftrace_regs_caller", "ftrace_call", "ftrace_regs
 
 
 TARGET_PREFIX = "memlens_target_"  # labels the exporter gives to hook targets it copied in
-# The exporter's list of the kernel's registered kprobes (kprobe_table), JSON in a non-alloc section; exports before
+# The exporter's list of the kernel's registered kprobes (kprobe_table), JSON in a non-alloc section; exports from
 # v0.3.28 and older do not have it (kprobe_records).
 KPROBES_SECTION = ".memlens.kprobes"
 # Offset of func in struct ftrace_ops: 0 in the ISFs of Linux 6.1, 6.8, 6.12 and 7.0 we checked. Image.ftrace_ops_func
@@ -408,7 +408,7 @@ def kprobe_records(data):
     tracefs' dynamic event list, False for one perf_event_open made). Malformed records are left out."""
     try:
         records = json.loads(data.decode("utf-8"))["kprobes"] if data else []
-    except (ValueError, KeyError, TypeError, AttributeError):
+    except (ValueError, KeyError, TypeError, AttributeError, RecursionError):  # RecursionError: deeply nested JSON
         return {}
     probes = {}
     for record in records if isinstance(records, list) else []:

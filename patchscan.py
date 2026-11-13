@@ -7,6 +7,7 @@ of a function, or one made by something that leaves the entry bytes alone, is no
 """
 import bisect
 import collections
+import json
 import os
 import re
 import struct
@@ -32,6 +33,9 @@ FTRACE_OWN = {"ftrace_caller", "ftrace_regs_caller", "ftrace_call", "ftrace_regs
 
 
 TARGET_PREFIX = "memlens_target_"  # labels the exporter gives to hook targets it copied in
+# The exporter's list of the kernel's registered kprobes (kprobe_table), JSON in a non-alloc section; exports before
+# v0.3.29 do not have it (kprobe_records).
+KPROBES_SECTION = ".memlens.kprobes"
 # Offset of func in struct ftrace_ops: 0 in the ISFs of Linux 6.1, 6.8, 6.12 and 7.0 we checked. Image.ftrace_ops_func
 # takes it from an ISF when one is at hand (ftrace_ops_func_offset): patchscan.py --isf, and in IDA the ISF that Apply
 # kernel types imported.
@@ -73,6 +77,7 @@ class Image:
         self.addresses = [symbol[0] for symbol in self.symbols]
         self.by_name = {symbol[2]: symbol for symbol in self.symbols}
         self.ftrace_ops_func = FTRACE_OPS_FUNC  # where ops->func is read (page_owner)
+        self.kprobes = kprobe_records(section_data(blob, KPROBES_SECTION))  # {probed address: [record, ...]}
 
     def segment(self, address):
         index = bisect.bisect_right(self.starts, address) - 1
@@ -371,6 +376,53 @@ def section_names(blob):
     return names
 
 
+def section_data(blob, wanted):
+    """The bytes of the ELF section called wanted, or None (no such section, or a section table that cannot be read)."""
+    try:
+        shoff = struct.unpack_from("<Q", blob, 40)[0]
+        shnum, shstrndx = struct.unpack_from("<HH", blob, 60)
+        if not shoff or shstrndx >= shnum or shoff + 64 * shnum > len(blob):
+            return None
+        strings = struct.unpack_from("<Q", blob, shoff + 64 * shstrndx + 24)[0]
+        for index in range(shnum):
+            start = strings + struct.unpack_from("<I", blob, shoff + 64 * index)[0]
+            end = blob.find(b"\0", start)
+            if end >= 0 and blob[start:end] == wanted.encode():
+                offset, size = struct.unpack_from("<QQ", blob, shoff + 64 * index + 24)
+                return blob[offset:offset + size] if offset + size <= len(blob) else None
+    except BAD_ELF:
+        return None
+    return None
+
+
+def printable(text):
+    """text when it is a str of printable ASCII (it was read from kernel memory), else None."""
+    return text if isinstance(text, str) and text and all(" " <= c <= "~" for c in text) else None
+
+
+def kprobe_records(data):
+    """{probed address: [record, ...]} from the exporter's .memlens.kprobes JSON (data), in the order written; {} when
+    there is none (an export before v0.3.29) or it cannot be read. A record is a dict: addr (the probed instruction, for a
+    probe at a function's ftrace site that site), pre_handler and post_handler (0 if none), symbol and offset (as the probe
+    was registered), and for a trace_kprobe (pre_handler kprobe_dispatcher) event and tracefs (True when the event is on
+    tracefs' dynamic event list, False for one perf_event_open made). Malformed records are left out."""
+    try:
+        records = json.loads(data.decode("utf-8"))["kprobes"] if data else []
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return {}
+    probes = {}
+    for record in records if isinstance(records, list) else []:
+        if not isinstance(record, dict) or not all(isinstance(record.get(key, 0), int) for key in ("addr", "pre_handler", "post_handler", "offset")):
+            continue
+        if not record.get("addr"):
+            continue
+        clean = {key: int(record.get(key) or 0) for key in ("addr", "pre_handler", "post_handler", "offset")}
+        clean.update(symbol=printable(record.get("symbol")), event=printable(record.get("event")),
+                     tracefs=record.get("tracefs") if isinstance(record.get("tracefs"), bool) else None)
+        probes.setdefault(clean["addr"], []).append(clean)
+    return probes
+
+
 def on_disk_kernel(blob):
     """True for a kernel file from disk, which a memory export never is."""
     return bool(section_names(blob) & ON_DISK_SECTIONS)
@@ -543,6 +595,45 @@ def page_owner(image, page, handler_site, handler, handler_name, kind):
     return owner
 
 
+KPROBE_KIND = "kprobe via ftrace"
+
+
+def kprobe_text(image, record):
+    """The Owner text for one kprobe record (kprobe_records): a trace_kprobe by its event name, else the function its
+    pre_handler (or, without one, its post_handler) is, as a module's probe reads: evilmod.kp_pre (kprobe pre_handler)."""
+    where = record["symbol"] or at(image, record["addr"])
+    if record["symbol"] and record["offset"]:
+        where += "+%#x" % record["offset"]
+    if record["event"]:
+        how = {True: "tracefs kprobe event", False: "made by perf_event_open, not a tracefs event"}.get(record["tracefs"], "kprobe event")
+        return "kprobe %s on %s (%s; pre_handler %s)" % (record["event"], where, how, at(image, record["pre_handler"]))
+    for role in ("pre_handler", "post_handler"):
+        handler = record[role]
+        if handler:
+            if image.symbol_at(handler) is None:
+                return "kprobe %s at %#x (no symbol)" % (role, handler)
+            return "%s (kprobe %s)" % (at(image, handler), role)
+    return "kprobe on %s (no handler)" % where
+
+
+def kprobe_owner(image, site, owner):
+    """An Owner naming the kprobe(s) the export's kprobe list has at site (the patched instruction, where an ftrace-based
+    probe sits), or None. It keeps owner's references (the trampoline's ftrace_ops path to kprobe_ftrace_handler); its
+    address is the first probe's handler when that is in the ELF."""
+    records = image.kprobes.get(site)
+    if not records:
+        return None
+    handler = records[0]["pre_handler"] or records[0]["post_handler"]
+    return Owner(", ".join(kprobe_text(image, record) for record in records), handler if handler and image.segment(handler) else None,
+                 "kprobe", list(owner.refs) if owner else [])
+
+
+def entry_owner(image, site, page, handler_site, handler, handler_name, kind):
+    """page_owner, except that a kprobe page reached from site is owned by the probe the export lists there."""
+    owner = page_owner(image, page, handler_site, handler, handler_name, kind)
+    return (kind == KPROBE_KIND and kprobe_owner(image, site, owner)) or owner
+
+
 def transfer_site(image, entry, target):
     """(address, 'call' or 'jmp') of the instruction at a patched entry that sends control to target, or None.
 
@@ -589,7 +680,7 @@ def hook_links(image, findings):
             continue
         page = copied_page(image, target)
         handler = page_handler(image, target if page else None)
-        links.append(Link(entry, name, site[0], site[1], target, page, *handler, page_owner(image, target, *handler) if page else None))
+        links.append(Link(entry, name, site[0], site[1], target, page, *handler, entry_owner(image, site[0], target, *handler) if page else None))
     return links
 
 
@@ -623,9 +714,30 @@ def hook_xrefs(links):
     return sorted(xrefs)
 
 
+def merged_owner(owners):
+    """One Owner for a page from its links' owners (in link order): the one they share, or, when the links differ (a kprobe
+    page that several probed functions share), their texts joined with '; ', the first one's address and how, and all
+    their references."""
+    distinct = []
+    for owner in owners:
+        if owner is not None and owner not in distinct:
+            distinct.append(owner)
+    if len(distinct) < 2:
+        return distinct[0] if distinct else None
+    texts = []
+    for owner in distinct:
+        if owner.text not in texts:
+            texts.append(owner.text)
+    return Owner("; ".join(texts), distinct[0].address, distinct[0].how, sorted({ref for owner in distinct for ref in owner.refs}))
+
+
 def page_owners(links):
-    """{page address: Owner} for the copied hook pages of the links that have an owner."""
-    return {link.target: link.owner for link in links if link.page and link.owner is not None}
+    """{page address: Owner} for the copied hook pages of the links that have an owner (merged_owner)."""
+    pages = {}
+    for link in links:
+        if link.page:
+            pages.setdefault(link.target, []).append(link.owner)
+    return {page: owner for page, owner in ((page, merged_owner(owners)) for page, owners in pages.items()) if owner is not None}
 
 
 def ida_safe(text):
@@ -671,15 +783,16 @@ def page_comments(links):
     for link in links:
         if link.page:
             pages.setdefault(link.target, (link, set()))[1].add(link.function)
-    comments = {}
+    comments, owners = {}, page_owners(links)
     for page, (link, functions) in sorted(pages.items()):
         callers = sorted(functions)
         text = "MemLens: hook page no module owns, copied from memory (exporter label %s%x); reached from %s" % (
             TARGET_PREFIX, page, ", ".join(callers[:5]) + (" and %d more" % (len(callers) - 5) if len(callers) > 5 else ""))
         if link.handler_name:
             text += "; first named call: %s%s" % (link.handler_name, " (%s)" % link.kind if link.kind else "")
-        if link.owner is not None and link.owner.how != MODULE_CALLBACK:  # that one is in the comment already
-            text += "; owner: %s" % link.owner.text
+        owner = owners.get(page)
+        if owner is not None and owner.how != MODULE_CALLBACK:  # that one is in the comment already
+            text += "; owner: %s" % owner.text
         comments[page] = text
     return comments
 

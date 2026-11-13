@@ -18,28 +18,39 @@ import patchscan as ps
 FUNC, OBJECT = 0x12, 0x11  # st_info: global function, global object
 
 
-def build(segments, symbols):
-    """segments [(address, bytes, p_flags)], symbols [(name, address, size, st_info)] -> ELF bytes."""
+def build(segments, symbols, sections=()):
+    """segments [(address, bytes, p_flags)], symbols [(name, address, size, st_info)], sections [(name, bytes)] (non-alloc,
+    as the exporter's .memlens.kprobes) -> ELF bytes."""
     strtab, symtab = bytearray(b"\0"), bytearray(b"\0" * 24)
     for name, address, size, info in symbols:
         symtab += struct.pack("<IBBHQQ", len(strtab), info, 0, 1, address, size)
+        strtab += name.encode() + b"\0"
+    named = []
+    for name, data in sections:  # their names go into strtab, which is also the section name table here
+        named.append((len(strtab), data))
         strtab += name.encode() + b"\0"
     offset = 64 + 56 * len(segments)
     placed = []
     for address, data, flags in segments:
         placed.append((address, data, flags, offset))
         offset += len(data)
-    sy = offset; st = sy + len(symtab); sh = st + len(strtab)
+    sy = offset; st = sy + len(symtab); extra = st + len(strtab)
+    sh = extra + sum(len(data) for _, data in named)
     out = bytearray(b"\x7fELF\x02\x01\x01" + b"\0" * 9)
-    out += struct.pack("<HHIQQQIHHHHHH", 2, 62, 1, segments[0][0], 64, sh, 0, 64, 56, len(segments), 64, 3, 2)
+    out += struct.pack("<HHIQQQIHHHHHH", 2, 62, 1, segments[0][0], 64, sh, 0, 64, 56, len(segments), 64, 3 + len(named), 2)
     for address, data, flags, where in placed:
         out += struct.pack("<IIQQQQQQ", 1, flags, where, address, address, len(data), len(data), 4096)
     for _, data, _, _ in placed:
         out += data
     out += symtab + strtab
+    for _, data in named:
+        out += data
     out += struct.pack("<IIQQQQIIQQ", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     out += struct.pack("<IIQQQQIIQQ", 0, 2, 0, 0, sy, len(symtab), 2, 1, 8, 24)
     out += struct.pack("<IIQQQQIIQQ", 0, 3, 0, 0, st, len(strtab), 0, 0, 1, 0)
+    for name_at, data in named:
+        out += struct.pack("<IIQQQQIIQQ", name_at, 1, 0, 0, extra, len(data), 0, 0, 1, 0)
+        extra += len(data)
     return bytes(out)
 
 
@@ -319,11 +330,104 @@ assert bowners["unexported"] == ps.Owner("BPF program at %#x" % UNEXPORTED_PROG,
 print("BPF owner tests OK (hand-made ELF: %d BPF trampolines, %d with a program)" % (
     len(blinks), sum(1 for owner in bowners.values() if owner)))
 
+# kprobes (judge s178 item 5): an ftrace-based kprobe's trampoline calls kprobe_ftrace_handler through kprobe_ftrace_ops,
+# the same for every probe, so the ftrace_ops owner cannot say whose probe it is. An export made with this version holds
+# the kernel's kprobe list (kprobe_table) as JSON in the non-alloc section .memlens.kprobes; a probe registered at the
+# patched instruction (kprobe.addr is the ftrace site) is then the owner: a tracefs event by its name (pre_handler
+# kprobe_dispatcher: the exporter read the trace_kprobe), else the module function its pre_handler is. Hand-made ELFs:
+# none of our captures has a module's kprobe.
+ktext, kdata, mtext = bytearray(b"\xcc" * 0x2000), bytearray(0x1000), bytearray(b"\xcc" * 0x1000)
+hooks = bytearray(b"\x90" * 0x2000)
+KHANDLER, DISPATCH = KTEXT + 0x1200, KTEXT + 0x1600
+KOPS = KDATA + 0x300
+PRE, POST = MTEXT + 0x100, MTEXT + 0x200
+KPAGES = {name: HOOKS + 0x400 * index for index, name in enumerate(("traced", "modprobe", "perfprobe", "unlisted", "hidden", "postonly"))}
+KPAGES["shared_a"] = KPAGES["shared_b"] = HOOKS + 0x1800  # shared_a first: its entry comes first
+KSLOTS = {name: trampoline(page, KHANDLER, KOPS) for name, page in KPAGES.items()}
+KENTRIES = {name: KTEXT + 0x40 * index for index, name in enumerate(KPAGES)}
+KSITES = {}
+for name, entry in KENTRIES.items():
+    endbr = b"" if name == "traced" else b"\xf3\x0f\x1e\xfa"  # do_sys_openat2 on the demo has no endbr64: call at the entry
+    put(ktext, KTEXT, entry, endbr + rel32(entry + len(endbr), KPAGES[name]))
+    KSITES[name] = entry + len(endbr)  # the ftrace site: kprobe.addr of a probe on that function
+put(kdata, KDATA, KOPS, struct.pack("<Q", KHANDLER))
+ksymbols = [(name, entry, 0x40, FUNC) for name, entry in KENTRIES.items()]
+ksymbols += [("kprobe_ftrace_handler", KHANDLER, 0x100, FUNC), ("kprobe_dispatcher", DISPATCH, 0x100, FUNC),
+             ("kprobe_ftrace_ops", KOPS, 0xd8, OBJECT), ("linux_banner", KDATA, 0x20, OBJECT),
+             ("evilmod.kp_pre", PRE, 0x80, FUNC), ("evilmod.kp_post", POST, 0x80, FUNC)]
+ksymbols += [("%s%x" % (ps.TARGET_PREFIX, page), page, 0, FUNC) for page in sorted(set(KPAGES.values()))]
+
+
+def probe(name, pre, post=0, **extra):
+    record = {"kprobe": 0xffff888004a1c000 + 0x100 * len(name), "addr": KSITES[name], "symbol": name, "offset": 0,
+              "pre_handler": pre, "post_handler": post}
+    record.update(extra)
+    return record
+
+
+probes = [probe("traced", DISPATCH, event="memlens_kp", tracefs=True), probe("modprobe", PRE, POST),
+          probe("perfprobe", DISPATCH, event="perfprobe", tracefs=False), probe("hidden", 0xffffffffc0400000),
+          probe("postonly", 0, POST), probe("shared_a", DISPATCH, event="kp_a", tracefs=True),
+          probe("shared_b", DISPATCH, event="kp_b", tracefs=True)]
+probes.append(dict(probe("traced", PRE), kprobe=0xffff888004a1d000))  # a second probe on the same address (aggregated)
+segments = [(KTEXT, ktext, 5), (KDATA, kdata, 6), (MTEXT, mtext, 5), (HOOKS, hooks, 5)]
+section = json.dumps({"version": 1, "kprobes": probes}, sort_keys=True, separators=(",", ":")).encode()
+kblob = build(segments, ksymbols, [(ps.KPROBES_SECTION, section)])
+kimage = ps.Image(kblob)
+klinks = {link.function: link for link in ps.hook_links(kimage, ps.scan(kblob, kimage))}
+assert set(klinks) == set(KPAGES) and all(link.kind == "kprobe via ftrace" for link in klinks.values()), klinks
+kowners = {name: link.owner for name, link in klinks.items()}
+KREFS = lambda name: [(KSLOTS[name], KOPS, D), (KOPS, KHANDLER, D)]  # the trampoline's ftrace_ops path stays
+assert kowners["traced"] == ps.Owner("kprobe memlens_kp on traced (tracefs kprobe event; pre_handler kprobe_dispatcher), "
+                                     "evilmod.kp_pre (kprobe pre_handler)", DISPATCH, "kprobe", KREFS("traced")), kowners["traced"]
+assert kowners["modprobe"] == ps.Owner("evilmod.kp_pre (kprobe pre_handler)", PRE, "kprobe", KREFS("modprobe")), kowners["modprobe"]
+assert kowners["perfprobe"] == ps.Owner("kprobe perfprobe on perfprobe (made by perf_event_open, not a tracefs event; "
+                                        "pre_handler kprobe_dispatcher)", DISPATCH, "kprobe", KREFS("perfprobe")), kowners["perfprobe"]
+assert kowners["hidden"] == ps.Owner("kprobe pre_handler at 0xffffffffc0400000 (no symbol)", None, "kprobe", KREFS("hidden")), kowners
+assert kowners["postonly"] == ps.Owner("evilmod.kp_post (kprobe post_handler)", POST, "kprobe", KREFS("postonly")), kowners["postonly"]
+# No probe recorded at that site (a probe registered after the capture's list was read, or a section without it): the
+# ftrace_ops owner, as before.
+assert kowners["unlisted"] == ps.Owner("kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)", KHANDLER, "ftrace_ops",
+                                       KREFS("unlisted")), kowners["unlisted"]
+# One trampoline serves every function only kprobe_ftrace_ops hooks: each entry gets its own probe; the page lists both.
+assert kowners["shared_a"].text.startswith("kprobe kp_a on shared_a") and kowners["shared_b"].text.startswith("kprobe kp_b on shared_b")
+shared = KPAGES["shared_a"]
+assert ps.page_owners(list(klinks.values()))[shared].text == "%s; %s" % (kowners["shared_a"].text, kowners["shared_b"].text)
+assert ps.page_comments(list(klinks.values()))[shared].endswith("; owner: %s; %s" % (kowners["shared_a"].text, kowners["shared_b"].text))
+krows = {row[1]: row for row in ps.list_rows(kimage, ps.scan(kblob, kimage), list(klinks.values()), {})}
+assert krows["traced"][4:] == ("kprobe_ftrace_handler (kprobe via ftrace)", KHANDLER, kowners["traced"].text, DISPATCH), krows["traced"]
+assert krows["shared_b"][6:] == (kowners["shared_b"].text, DISPATCH), krows["shared_b"]
+# Old exports (no section) and a section that cannot be read: exactly the owners from before.
+for blob_without in (build(segments, ksymbols), build(segments, ksymbols, [(ps.KPROBES_SECTION, b"{not json")]),
+                     build(segments, ksymbols, [(ps.KPROBES_SECTION, b'{"kprobes": [{"addr": "x"}, 7]}')])):
+    oimage = ps.Image(blob_without)
+    olinks = ps.hook_links(oimage, ps.scan(blob_without, oimage))
+    assert len(olinks) == len(KPAGES) and all(link.owner == ps.Owner("kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)",
+               KHANDLER, "ftrace_ops", KREFS(link.function)) for link in olinks), olinks
+    assert oimage.kprobes == {}, oimage.kprobes
+# A probe counts only at its own site and only on a kprobe page: on a page of another kind the page's owner stays.
+assert ps.kprobe_owner(kimage, KSITES["traced"] + 1, None) is None
+handler = ps.page_handler(kimage, KPAGES["traced"])[:3]
+assert ps.entry_owner(kimage, KSITES["traced"], KPAGES["traced"], *handler, "ftrace") == ps.page_owner(
+    kimage, KPAGES["traced"], *handler, "ftrace") == kowners["unlisted"]._replace(refs=KREFS("traced")), handler
+with tempfile.TemporaryDirectory() as work:
+    path = os.path.join(work, "kernel.elf")
+    with open(path, "wb") as handle:
+        handle.write(kblob)
+    lines, out = owner_lines(path)
+    assert ["%#x" % KPAGES["traced"], "%#x" % DISPATCH, kowners["traced"].text] in lines, lines
+    assert len([line for line in out.splitlines() if line.startswith("xref")]) == len(ps.hook_xrefs(list(klinks.values()))), out
+print("kprobe owner tests OK (hand-made ELF: %d probes in .memlens.kprobes, %d kprobe pages)" % (len(probes), len(set(KPAGES.values()))))
+
 # Real exports: the ftrace_ops each trampoline loads (CheckFtrace lists the same ops and callbacks on the demo image).
 EXPECTED = {
     "vfs_getattr": ("function_trace_call (ftrace_ops global_ops)", "function_trace_call", 0xdd, "global_ops"),
     "do_sys_openat2": ("kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)", "kprobe_ftrace_handler", 0x162, "kprobe_ftrace_ops"),
 }
+# An export with the kernel's kprobe list (.memlens.kprobes, exports made with v0.3.29 or later) names the probe instead:
+# tests/vm/scenario_ftrace_d13.sh made it with 'p:memlens_kp do_sys_openat2'. The ftrace_ops references stay.
+EXPECTED_KPROBE = {"do_sys_openat2": ("kprobe memlens_kp on do_sys_openat2 (tracefs kprobe event; pre_handler kprobe_dispatcher)",
+                                      "kprobe_dispatcher")}
 # BPF trampolines: the program call's offset in the page, the kernel's name for the program (an export with BPF names
 # has it as bpf.<name>), and the program's address in the exports without BPF names that we know (page -> program):
 # the demo kernel.elf and the Ubuntu 24.04 export.
@@ -357,7 +461,9 @@ for path in sys.argv[1:]:
                      for link in sorted(links, key=lambda link: link.target) if link.owner], lines
     for link in known:
         text, func, slot, ops = EXPECTED[link.function]
-        owner = link.owner
-        assert owner.text == text and owner.how == "ftrace_ops" and owner.address == image.by_name[func][0], (link, owner)
+        owner, how = link.owner, "ftrace_ops"
+        if link.site in image.kprobes and link.function in EXPECTED_KPROBE:
+            (text, func), how = EXPECTED_KPROBE[link.function], "kprobe"
+        assert owner.text == text and owner.how == how and owner.address == image.by_name[func][0], (link, owner)
         assert owner.refs == [(link.target + slot, image.by_name[ops][0], "data"), (image.by_name[ops][0], owner.address, "data")], owner
         print("%s: %s -> %s" % (path, link.function, owner.text))

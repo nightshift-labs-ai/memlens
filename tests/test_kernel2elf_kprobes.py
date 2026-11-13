@@ -216,6 +216,21 @@ assert (read[VFS_WRITE][0]["ret_handler"], read[VFS_WRITE + 0x100][0]["ret_handl
     KRET_DISPATCH + SHIFT, RETH, None), read
 # An ISF without those symbols or without kretprobe.handler: no ret_handler and no event for a kretprobe, as before.
 assert all("ret_handler" not in r and r.get("event") is None for r in k.kprobe_list(rmem, layout) if r["kprobe"] in (TK3 + 24, MODRET))
+# review s180 NIT 2: a kretprobe with only an entry_handler (handler 0) records it as ret_entry (kretprobe.entry_handler,
+# here at kp + 136); a kretprobe with a handler, or an ISF without entry_handler, gets no ret_entry
+emem = Memory()
+emem.pages = {page: bytearray(data) for page, data in rmem.pages.items()}
+MODENTRY, ENTRYH = 0xffffffffc0102400, 0xffffffffc0102600
+mem, saved = emem, mem
+kprobe(MODENTRY, VFS_WRITE + 0x200, KRET_PRE + SHIFT, bucket=22, flags=8)
+mem.put(MODENTRY + 136, q(ENTRYH))
+mem = saved
+elayout = k.kprobe_layout(Kernel(dict(T, kretprobe=Type(168, {"kp": 0, "handler": 128, "entry_handler": 136})), KSYMBOLS))
+erecords = {r["kprobe"]: r for r in k.kprobe_list(emem, elayout)}
+assert erecords[MODENTRY]["ret_handler"] == 0 and erecords[MODENTRY]["ret_entry"] == ENTRYH, erecords[MODENTRY]
+assert "ret_entry" not in erecords[MODRET] and "ret_entry" not in erecords[TK3 + 24], erecords
+assert "ret_entry" not in {r["kprobe"]: r for r in k.kprobe_list(emem, rlayout)}[MODENTRY]
+assert ps.kprobe_records(json.dumps({"version": 1, "kprobes": list(erecords.values())}).encode())[VFS_WRITE + 0x200][0]["ret_entry"] == ENTRYH
 nohandler = k.kprobe_layout(Kernel(dict(T, kretprobe=Type(168, {"kp": 0})), KSYMBOLS))
 assert nohandler["rp_handler"] is None and all("ret_handler" not in r for r in k.kprobe_list(rmem, nohandler)), nohandler
 # A name that ends 8 bytes before an unmapped page is read: read_string reads up to the page end, not 512 bytes at once

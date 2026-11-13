@@ -153,7 +153,7 @@ mem.put(AGG + 16, q(P1 + 16)); mem.put(P1 + 16, q(P2 + 16)); mem.put(P2 + 16, q(
 
 kernel = Kernel(T, SYMBOLS)
 layout = k.kprobe_layout(kernel)
-assert layout["table"] == TABLE + SHIFT and layout["count"] == 64 and layout["head"] == 8, layout
+assert layout["table"] == TABLE + SHIFT and layout["count"] == 64 and layout["head"] == 8 and layout["first"] == 0, layout
 assert (layout["dispatcher"], layout["aggregate"]) == (DISPATCH, AGGR_K), layout
 assert layout["event"] == [-24 + 208 + 16, 80 + 24] and layout["tracefs"] == -24 + 0, layout  # container_of rp.kp, then tp.event
 records = k.kprobe_list(mem, layout)
@@ -167,6 +167,11 @@ expected = [
     {"kprobe": P2, "addr": 0xffffffff8e700004, "symbol": "evil_target", "offset": 4, "pre_handler": 0, "post_handler": POST, "flags": 0}]
 assert sorted(records, key=lambda r: (r["addr"], r["kprobe"])) == sorted(expected, key=lambda r: (r["addr"], r["kprobe"])), records
 assert records == sorted(records, key=lambda r: (r["addr"], r["kprobe"])), records  # written in a stable order
+
+# The bucket read adds hlist_head.first's offset from the ISF (review s179 NIT 4): a layout whose first sits 8 bytes in,
+# with the table 8 bytes lower, reads the same buckets.
+assert k.kprobe_list(mem, dict(layout, table=layout["table"] - 8, first=8)) == records
+assert k.kprobe_layout(Kernel(dict(T, hlist_head=Type(8, {})), SYMBOLS)) is None  # an ISF without hlist_head.first
 
 # Linux before 5.4: struct trace_probe embeds its trace_event_call (no event pointer); before 5.0 trace_kprobe has a list
 # instead of devent. The path to the name comes from the ISF either way.

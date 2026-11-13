@@ -111,7 +111,7 @@ def kprobe_layout(kernel):
     try:
         table = kernel.get_symbol("kprobe_table")
         layout = {"table": table.address + kernel.offset, "count": int(table.type.vol.count), "head": kernel.get_type("hlist_head").size,
-                  "next": offset("hlist_node", "next"), "list_next": offset("list_head", "next")}
+                  "first": offset("hlist_head", "first"), "next": offset("hlist_node", "next"), "list_next": offset("list_head", "next")}
         for member in ("hlist", "list", "addr", "symbol_name", "offset", "pre_handler", "post_handler"):
             layout[member] = offset("kprobe", member)
     except (exceptions.SymbolError, IndexError, AttributeError, TypeError):
@@ -208,7 +208,7 @@ def kprobe_list(layer, layout) -> List[dict]:
     records, seen = [], set()
     for bucket in range(layout["count"]):
         try:
-            node = pointer(layout["table"] + bucket * layout["head"])
+            node = pointer(layout["table"] + bucket * layout["head"] + layout["first"])
         except exceptions.InvalidAddressException:
             continue
         while node and len(seen) < MAX_KPROBES:

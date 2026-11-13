@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """kernel2elf's BPF part (names from Volatility's Kallsyms.get_bpf_symbols, and the BPF JIT pages), against FAKE
 volatility3 modules and a fake memory layer: no Volatility and no memory image needed. Checks our logic only; the real
-run is described in README ("What you get") and was made with Volatility 2.28.2.
+run is described in docs/OUTPUT.md ("What you get") and was made with Volatility 2.28.2.
 
 usage: python3 tests/test_kernel2elf_bpf.py
 """

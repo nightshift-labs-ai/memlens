@@ -1,6 +1,6 @@
 # MemLens
 
-Reverse engineer a Linux kernel **as it was running**, from a memory image, in IDA. A memory image holds the live kernel: its modules and its patched code. MemLens exports it as `kernel.elf`, an ordinary ELF with the kernel and every loaded module at their real (KASLR) addresses and a full symbol table; with the kernel's Volatility 3 ISF it types it in IDA and lists the kernel functions someone hooked (ftrace, kprobes, BPF trampolines or hook code), with the hook code copied from memory, its handler and, when the memory shows it, who put the hook there.
+Reverse engineer a Linux kernel **as it was running**, from a memory image, in IDA. A memory image holds the live kernel: its modules and its patched code. MemLens exports it as `kernel.elf`, an ordinary ELF with the kernel and every loaded module at their real (KASLR) addresses and a full symbol table; with the kernel's Volatility 3 ISF it types it in IDA and lists the kernel functions someone hooked (ftrace, kprobes, BPF trampolines or hook code), with the hook code copied from memory and, when its role is known, its handler and who put the hook there.
 
 ## Status: read this first
 
@@ -61,7 +61,7 @@ We have no IDA, so there are no IDA screenshots. These excerpts are real output 
 
 **Before:** `trace.elf`, the 1 GB memory image of the demo VM (not part of the demo zip), is an ELF core: 5 `LOAD` segments at physical addresses, no symbol table, no code sections.
 
-**After:** `kernel.elf`, an ordinary ELF: the kernel and its loaded modules at their live addresses, 234,081 symbols, one copy of the per-CPU variables per CPU. With the kernel's ISF, MemLens types it in IDA (every struct, union, enum and typed global) and lists the functions someone hooked. `objdump` excerpt of `kernel.elf` (`vfs_getattr`'s entry was rewritten by ftrace; the hook page was copied from memory):
+**After:** `kernel.elf`, an ordinary ELF: the kernel and its loaded modules at their live addresses, 234,081 symbols, one copy of the per-CPU variables per CPU. With the kernel's ISF, MemLens types it in IDA (every struct, union and enum, and the typed globals that have a symbol) and lists the functions someone hooked. `objdump` excerpt of `kernel.elf` (`vfs_getattr`'s entry was rewritten by ftrace; the hook page was copied from memory):
 
 ```
 ffffffff8e64e370 <vfs_getattr>:
@@ -124,7 +124,7 @@ The export dialog points here. The ISF must come from exactly the kernel that wa
 - x86-64 Linux only.
 - Bitfields are kept as raw bytes, with their names and positions in a comment.
 - Function pointers become `void *`.
-- No function prototypes: an ISF gives functions no parameter types. Our companion plugin [btf2ida](https://github.com/nightshift-labs-ai/btf2ida) applies them from the kernel's BTF (not tried together with MemLens in IDA).
+- No function prototypes: an ISF gives functions no parameter types. Most kernels also carry BTF, which has them; our companion plugin [btf2ida](https://github.com/nightshift-labs-ai/btf2ida) applies them by name (91.8% of kernel functions on the demo; not tried together with MemLens in IDA).
 - Kernel symbols that are not mapped in the image, such as freed init code, are left out.
 
 All limits, with measurements: [docs/LIMITS.md](docs/LIMITS.md).

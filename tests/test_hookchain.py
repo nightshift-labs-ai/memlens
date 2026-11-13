@@ -210,7 +210,7 @@ assert flinks == {"rexmov": (15, "jmp", PG, "function_trace_call"), "nop_push": 
 print("hook chain tests OK (hand-made ELFs: %d links, %d xrefs, %d pages renamed; packed trampolines; patchscan.py --links)" % (
     len(links), len(xrefs), len(names)))
 
-# Real exports. Offsets from the entry and from the page, as seen in objdump on the demo (README "What you get").
+# Real exports. Offsets from the entry and from the page, as seen in objdump on the demo (docs/OUTPUT.md "What you get").
 EXPECTED = {
     "vfs_getattr": (4, 0x94, "function_trace_call", "ftrace", "ftrace_tramp_vfs_getattr"),
     "do_sys_openat2": (0, 0xd9, "kprobe_ftrace_handler", "kprobe via ftrace", "kprobe_ftrace_tramp_do_sys_openat2"),

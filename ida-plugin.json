@@ -14,8 +14,7 @@
       "linux",
       "kernel",
       "memory-forensics",
-      "volatility",
-      "rootkit"
+      "volatility"
     ],
     "urls": {
       "repository": "https://github.com/nightshift-labs-ai/memlens"

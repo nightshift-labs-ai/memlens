@@ -95,7 +95,7 @@ MAX_KPROBE_STRING = 512  # KSYM_NAME_LEN; tracefs event names are at most 64 (MA
 def kprobe_layout(kernel):
     """What the kprobe walk (kprobe_list) needs, every offset from the ISF, or None when the ISF has no kprobe_table or
     struct kprobe (a kernel without CONFIG_KPROBES): the table's address, bucket count and bucket size, the offsets of
-    struct kprobe's members, kprobe_dispatcher and aggr_pre_handler (None when absent), event (the steps from a struct
+    struct kprobe's members (flags None when absent), kprobe_dispatcher and aggr_pre_handler (None when absent), event (the steps from a struct
     kprobe to its trace_kprobe's event name: at each step add the offset and read a pointer; container_of over
     trace_kprobe.rp.kp first) and tracefs (the offset of that trace_kprobe's dyn_event list head), both None without
     struct trace_kprobe."""
@@ -116,7 +116,11 @@ def kprobe_layout(kernel):
             layout[member] = offset("kprobe", member)
     except (exceptions.SymbolError, IndexError, AttributeError, TypeError):
         return None
-    layout.update(dispatcher=symbol("kprobe_dispatcher"), aggregate=symbol("aggr_pre_handler"), event=None, tracefs=None)
+    layout.update(dispatcher=symbol("kprobe_dispatcher"), aggregate=symbol("aggr_pre_handler"), event=None, tracefs=None, flags=None)
+    try:  # unsigned int flags: KPROBE_FLAG_GONE 1, KPROBE_FLAG_DISABLED 2 (a tracefs event that is defined but not enabled)
+        layout["flags"] = offset("kprobe", "flags")
+    except (IndexError, AttributeError):
+        pass
     try:
         base = -offset("trace_kprobe", "rp") - offset("kretprobe", "kp") + offset("trace_kprobe", "tp")
         if kernel.get_type("trace_probe").has_member("event"):  # 5.4 and later: tp.event -> trace_probe_event, call inside
@@ -154,7 +158,7 @@ def kprobe_list(layer, layout) -> List[dict]:
     """The registered kprobes, sorted by probed address: each kprobe_table bucket's hlist of struct kprobe, and in place of
     an aggregate probe (pre_handler aggr_pre_handler: several probes on one address) the probes on its list. A record
     (patchscan.kprobe_records) has the struct's address (kprobe), the probed address (addr), symbol and offset as
-    registered, pre_handler and post_handler (0 for none); a probe whose pre_handler is kprobe_dispatcher is a trace_kprobe,
+    registered, pre_handler and post_handler (0 for none), flags (kprobe.flags; left out when the ISF has no such member); a probe whose pre_handler is kprobe_dispatcher is a trace_kprobe,
     and its record also has the event name (event) and whether the event is on tracefs' list (tracefs: False for a
     probe perf_event_open made). A probe that cannot be read is left out; the walk stops at a loop."""
     def pointer(address):
@@ -165,10 +169,13 @@ def kprobe_list(layer, layout) -> List[dict]:
             addr, symbol = pointer(probe + layout["addr"]), pointer(probe + layout["symbol_name"])
             pre, post = pointer(probe + layout["pre_handler"]), pointer(probe + layout["post_handler"])
             offset = struct.unpack("<I", layer.read(probe + layout["offset"], 4))[0]
+            flags = None if layout.get("flags") is None else struct.unpack("<I", layer.read(probe + layout["flags"], 4))[0]
         except exceptions.InvalidAddressException:
             return None
         found = {"kprobe": canonical(probe), "addr": canonical(addr), "symbol": read_string(layer, symbol), "offset": offset,
                  "pre_handler": canonical(pre), "post_handler": canonical(post)}
+        if flags is not None:
+            found["flags"] = flags
         if layout["event"] and layout["dispatcher"] is not None and canonical(pre) == canonical(layout["dispatcher"]):
             found["event"] = None
             try:

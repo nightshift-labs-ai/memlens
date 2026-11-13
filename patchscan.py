@@ -36,6 +36,7 @@ TARGET_PREFIX = "memlens_target_"  # labels the exporter gives to hook targets i
 # The exporter's list of the kernel's registered kprobes (kprobe_table), JSON in a non-alloc section; exports from
 # v0.3.28 and older do not have it (kprobe_records).
 KPROBES_SECTION = ".memlens.kprobes"
+KPROBE_OFF = 1 | 2  # kprobe.flags KPROBE_FLAG_GONE | KPROBE_FLAG_DISABLED (include/linux/kprobes.h)
 # Offset of func in struct ftrace_ops: 0 in the ISFs of Linux 6.1, 6.8, 6.12 and 7.0 we checked. Image.ftrace_ops_func
 # takes it from an ISF when one is at hand (ftrace_ops_func_offset): patchscan.py --isf, and in IDA the ISF that Apply
 # kernel types imported.
@@ -405,7 +406,8 @@ def kprobe_records(data):
     there is none (an export from v0.3.28 or older) or it cannot be read. A record is a dict: addr (the probed instruction, for a
     probe at a function's ftrace site that site), pre_handler and post_handler (0 if none), symbol and offset (as the probe
     was registered), and for a trace_kprobe (pre_handler kprobe_dispatcher) event and tracefs (True when the event is on
-    tracefs' dynamic event list, False for one perf_event_open made). Malformed records are left out."""
+    tracefs' dynamic event list, False for one perf_event_open made), and flags (kprobe.flags; None in exports that do
+    not have it). Malformed records are left out."""
     try:
         records = json.loads(data.decode("utf-8"))["kprobes"] if data else []
     except (ValueError, KeyError, TypeError, AttributeError, RecursionError):  # RecursionError: deeply nested JSON
@@ -418,7 +420,8 @@ def kprobe_records(data):
             continue
         clean = {key: int(record.get(key) or 0) for key in ("addr", "pre_handler", "post_handler", "offset")}
         clean.update(symbol=printable(record.get("symbol")), event=printable(record.get("event")),
-                     tracefs=record.get("tracefs") if isinstance(record.get("tracefs"), bool) else None)
+                     tracefs=record.get("tracefs") if isinstance(record.get("tracefs"), bool) else None,
+                     flags=record["flags"] if type(record.get("flags")) is int else None)
         probes.setdefault(clean["addr"], []).append(clean)
     return probes
 
@@ -619,12 +622,16 @@ def kprobe_text(image, record):
 def kprobe_owner(image, site, owner):
     """An Owner naming the kprobe(s) the export's kprobe list has at site (the patched instruction, where an ftrace-based
     probe sits), or None. It keeps owner's references (the trampoline's ftrace_ops path to kprobe_ftrace_handler); its
-    address is the first probe's handler when that is in the ELF."""
+    address is the first probe's handler when that is in the ELF. A disabled probe (flags GONE or DISABLED: a tracefs event
+    that is defined but not enabled) is left out when an enabled probe sits at site, else it reads '... (disabled)'."""
     records = image.kprobes.get(site)
     if not records:
         return None
+    enabled = [record for record in records if not (record.get("flags") or 0) & KPROBE_OFF]
+    records = enabled or records
     handler = records[0]["pre_handler"] or records[0]["post_handler"]
-    return Owner(", ".join(kprobe_text(image, record) for record in records), handler if handler and image.segment(handler) else None,
+    return Owner(", ".join(kprobe_text(image, record) + (" (disabled)" if (record.get("flags") or 0) & KPROBE_OFF else "")
+                           for record in records), handler if handler and image.segment(handler) else None,
                  "kprobe", list(owner.refs) if owner else [])
 
 

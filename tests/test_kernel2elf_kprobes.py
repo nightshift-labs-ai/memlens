@@ -112,10 +112,11 @@ def string(address, text):
     return address
 
 
-def kprobe(at, addr, pre, post=0, symbol=None, offset=0, bucket=None, after=None):
+def kprobe(at, addr, pre, post=0, symbol=None, offset=0, bucket=None, after=None, flags=0):
     """A struct kprobe at at, linked first into kprobe_table[bucket] or after the kprobe 'after' (hlist)."""
     mem.put(at, b"\0" * 128)
     mem.put(at + 40, q(addr) + q(symbol or 0) + struct.pack("<I", offset) + b"\0" * 4 + q(pre) + q(post))
+    mem.put(at + 120, struct.pack("<I", flags))  # kprobe.flags
     if bucket is not None:
         mem.put(TABLE + SHIFT + 8 * bucket, q(at))  # head.first -> kprobe.hlist (offset 0)
     if after is not None:
@@ -139,9 +140,9 @@ SYM1, SYM2, SYM3 = string(HEAP + 0x9000, "do_sys_openat2"), string(HEAP + 0x9100
 TK1 = HEAP + 0x10000
 trace_kprobe(TK1, "memlens_kp", addr=OPENAT2, symbol=SYM1, bucket=5)
 TK2 = HEAP + 0x20000
-trace_kprobe(TK2, "p_vfs_read_0", on_list=False, addr=VFS_READ, symbol=SYM2, bucket=9)
+trace_kprobe(TK2, "p_vfs_read_0", on_list=False, addr=VFS_READ, symbol=SYM2, bucket=9, flags=2 | 8)  # DISABLED | FTRACE
 MODPROBE = 0xffffffffc0102040  # a module's static struct kprobe, second in bucket 5
-kprobe(MODPROBE, KILL, PRE, POST, symbol=SYM3, after=TK1 + 24)
+kprobe(MODPROBE, KILL, PRE, POST, symbol=SYM3, after=TK1 + 24, flags=8)
 # Two probes on one address: the table holds the aggregate probe (pre_handler aggr_pre_handler), whose list holds both.
 AGG, P1, P2 = HEAP + 0x30000, HEAP + 0x30200, HEAP + 0x30400
 kprobe(AGG, 0xffffffff8e700004, AGGR_K, bucket=63)
@@ -157,12 +158,12 @@ assert layout["event"] == [-24 + 208 + 16, 80 + 24] and layout["tracefs"] == -24
 records = k.kprobe_list(mem, layout)
 expected = [
     {"kprobe": TK1 + 24, "addr": OPENAT2, "symbol": "do_sys_openat2", "offset": 0, "pre_handler": DISPATCH, "post_handler": 0,
-     "event": "memlens_kp", "tracefs": True},
+     "event": "memlens_kp", "tracefs": True, "flags": 0},
     {"kprobe": TK2 + 24, "addr": VFS_READ, "symbol": "vfs_read", "offset": 0, "pre_handler": DISPATCH, "post_handler": 0,
-     "event": "p_vfs_read_0", "tracefs": False},
-    {"kprobe": MODPROBE, "addr": KILL, "symbol": "__x64_sys_kill", "offset": 0, "pre_handler": PRE, "post_handler": POST},
-    {"kprobe": P1, "addr": 0xffffffff8e700004, "symbol": None, "offset": 0, "pre_handler": PRE, "post_handler": 0},
-    {"kprobe": P2, "addr": 0xffffffff8e700004, "symbol": "evil_target", "offset": 4, "pre_handler": 0, "post_handler": POST}]
+     "event": "p_vfs_read_0", "tracefs": False, "flags": 2 | 8},
+    {"kprobe": MODPROBE, "addr": KILL, "symbol": "__x64_sys_kill", "offset": 0, "pre_handler": PRE, "post_handler": POST, "flags": 8},
+    {"kprobe": P1, "addr": 0xffffffff8e700004, "symbol": None, "offset": 0, "pre_handler": PRE, "post_handler": 0, "flags": 0},
+    {"kprobe": P2, "addr": 0xffffffff8e700004, "symbol": "evil_target", "offset": 4, "pre_handler": 0, "post_handler": POST, "flags": 0}]
 assert sorted(records, key=lambda r: (r["addr"], r["kprobe"])) == sorted(expected, key=lambda r: (r["addr"], r["kprobe"])), records
 assert records == sorted(records, key=lambda r: (r["addr"], r["kprobe"])), records  # written in a stable order
 
@@ -176,6 +177,11 @@ assert old_layout["event"] == [-16 + 200 + 88 + 24] and old_layout["tracefs"] ==
 bare = dict(T); del bare["trace_kprobe"]
 assert k.kprobe_layout(Kernel(bare, SYMBOLS))["event"] is None
 assert [r.get("event") for r in k.kprobe_list(mem, k.kprobe_layout(Kernel(bare, SYMBOLS)))] == [None] * 5
+# An ISF whose struct kprobe has no flags member: the records have no flags key (patchscan then counts them as enabled).
+noflags = dict(T, kprobe=Type(128, {name: at for name, at in T["kprobe"].fields.items() if name != "flags"}))
+assert k.kprobe_layout(Kernel(noflags, SYMBOLS))["flags"] is None
+assert k.kprobe_list(mem, k.kprobe_layout(Kernel(noflags, SYMBOLS))) == [{key: value for key, value in record.items() if key != "flags"}
+                                                                         for record in records]
 # No kprobe_table or struct kprobe (CONFIG_KPROBES off): no list at all.
 assert k.kprobe_layout(Kernel(T, {})) is None
 assert k.kprobe_layout(Kernel({name: t for name, t in T.items() if name != "kprobe"}, SYMBOLS)) is None
@@ -211,6 +217,7 @@ assert json.loads(data) == {"version": 1, "kprobes": records}, data
 assert data == json.dumps({"version": 1, "kprobes": records}, sort_keys=True, separators=(",", ":")).encode()
 image = ps.Image(blob)
 assert image.kprobes[OPENAT2][0]["event"] == "memlens_kp" and len(image.kprobes[0xffffffff8e700004]) == 2, image.kprobes
+assert image.kprobes[VFS_READ][0]["flags"] == 2 | 8 and image.kprobes[KILL][0]["flags"] == 8, image.kprobes  # read back
 assert image.segment(0xffffffff81000000) and len(image.segments) == 1 and image.by_name["_text"][0] == 0xffffffff81000000
 assert ".memlens.kprobes" in ps.section_names(blob) and ".symtab" in ps.section_names(blob)
 # Not loaded: no program header for it, and its section header has no SHF_ALLOC and address 0.

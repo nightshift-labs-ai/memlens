@@ -385,6 +385,28 @@ assert kowners["perfprobe"] == ps.Owner("kprobe perfprobe on perfprobe (made by 
                                         "pre_handler kprobe_dispatcher)", DISPATCH, "kprobe", KREFS("perfprobe")), kowners["perfprobe"]
 assert kowners["hidden"] == ps.Owner("kprobe pre_handler at 0xffffffffc0400000 (no symbol)", None, "kprobe", KREFS("hidden")), kowners
 assert kowners["postonly"] == ps.Owner("evilmod.kp_post (kprobe post_handler)", POST, "kprobe", KREFS("postonly")), kowners["postonly"]
+# Disabled probes (review s179 MINOR 2): a tracefs event is registered with KPROBE_FLAG_DISABLED (2) until it is enabled
+# and sits in kprobe_table all the while. With an enabled probe at the same site the disabled one is left out, so the
+# Owner names the module's handler and Jump to owner goes there; with only disabled probes each reads '(disabled)'.
+# flags 8 (KPROBE_FLAG_FTRACE) alone is an enabled probe; a record without flags (older exports) counts as enabled.
+def flagged(flags_of):
+    records = [dict(record, flags=flags_of(record)) if record["addr"] == KSITES["traced"] else record for record in probes]
+    blob = build(segments, ksymbols, [(ps.KPROBES_SECTION, json.dumps({"version": 1, "kprobes": records}).encode())])
+    image = ps.Image(blob)
+    links = {link.function: link for link in ps.hook_links(image, ps.scan(blob, image))}
+    rows = {row[1]: row for row in ps.list_rows(image, ps.scan(blob, image), list(links.values()), {})}
+    return links["traced"].owner, rows["traced"]
+
+
+EVILPRE = ps.Owner("evilmod.kp_pre (kprobe pre_handler)", PRE, "kprobe", KREFS("traced"))
+downer, drow = flagged(lambda record: 2 | 8 if record.get("event") else 8)  # the tracefs event (first by address) is off
+assert downer == EVILPRE and drow[6:] == (EVILPRE.text, PRE), (downer, drow)
+downer, drow = flagged(lambda record: 1 if record.get("event") else 0)  # KPROBE_FLAG_GONE: its module went away
+assert downer == EVILPRE and drow[6:] == (EVILPRE.text, PRE), (downer, drow)
+downer, drow = flagged(lambda record: 2)
+assert downer == ps.Owner("kprobe memlens_kp on traced (tracefs kprobe event; pre_handler kprobe_dispatcher) (disabled), "
+                          "evilmod.kp_pre (kprobe pre_handler) (disabled)", DISPATCH, "kprobe", KREFS("traced")), downer
+assert flagged(lambda record: 8)[0] == kowners["traced"], flagged(lambda record: 8)
 # No probe recorded at that site (a probe registered after the capture's list was read, or a section without it): the
 # ftrace_ops owner, as before.
 assert kowners["unlisted"] == ps.Owner("kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)", KHANDLER, "ftrace_ops",

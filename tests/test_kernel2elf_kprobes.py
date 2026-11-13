@@ -213,6 +213,19 @@ assert (read[VFS_WRITE][0]["ret_handler"], read[VFS_WRITE + 0x100][0]["ret_handl
 assert all("ret_handler" not in r and r.get("event") is None for r in k.kprobe_list(rmem, layout) if r["kprobe"] in (TK3 + 24, MODRET))
 nohandler = k.kprobe_layout(Kernel(dict(T, kretprobe=Type(168, {"kp": 0})), KSYMBOLS))
 assert nohandler["rp_handler"] is None and all("ret_handler" not in r for r in k.kprobe_list(rmem, nohandler)), nohandler
+# A name that ends 8 bytes before an unmapped page is read: read_string reads up to the page end, not 512 bytes at once
+# (review s179 NIT 1, mutant R3). Here as a trace_kprobe's event name.
+emem = Memory()
+emem.pages = {page: bytearray(data) for page, data in mem.pages.items()}
+mem, saved = emem, mem
+EDGE = HEAP + 0x80000 - 8  # HEAP + 0x80000 is not mapped
+TK4 = HEAP + 0x7e000
+trace_kprobe(TK4, "x", addr=VFS_READ + 0x400, bucket=22)
+mem.put(EDGE, b"kp_edge\0")
+mem.put(TK4 + 0x1000 + 80 + 24, q(EDGE))  # call.name -> the name at the page's end
+mem = saved
+assert k.read_string(emem, EDGE) == "kp_edge" and k.read_string(emem, EDGE + 8) is None
+assert [r["event"] for r in k.kprobe_list(emem, layout) if r["kprobe"] == TK4 + 24] == ["kp_edge"]
 # No kprobe_table or struct kprobe (CONFIG_KPROBES off): no list at all.
 assert k.kprobe_layout(Kernel(T, {})) is None
 assert k.kprobe_layout(Kernel({name: t for name, t in T.items() if name != "kprobe"}, SYMBOLS)) is None

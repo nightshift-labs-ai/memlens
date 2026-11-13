@@ -431,6 +431,9 @@ for name, record, text, address in (
         ("perfprobe", probe("perfprobe", KRETPRE, event="r_perf", tracefs=False, ret_handler=KRETDISPATCH),
          "kretprobe r_perf on perfprobe (made by perf_event_open, not a tracefs event; handler kretprobe_dispatcher)", KRETDISPATCH),
         ("modprobe", probe("modprobe", KRETPRE, ret_handler=RETH), "evilmod.kp_ret (kretprobe handler)", RETH),
+        # A probe registered as symbol+offset (modprobe+0x4 is its ftrace site, after endbr64): 'on modprobe+0x4'.
+        ("modprobe", probe("modprobe", DISPATCH, event="kp_off", tracefs=True, offset=4),
+         "kprobe kp_off on modprobe+0x4 (tracefs kprobe event; pre_handler kprobe_dispatcher)", DISPATCH),
         ("hidden", probe("hidden", KRETPRE, ret_handler=0xffffffffc0400000), "kretprobe handler at 0xffffffffc0400000 (no symbol)", None),
         ("postonly", probe("postonly", KRETPRE, ret_handler=0), "kretprobe on postonly (no handler)", KRETPRE),
         # A record without ret_handler (an export from before this change) reads as it did: the kernel's helper.

@@ -416,6 +416,7 @@ def isf_index_text(banners):
                 "python3 %s <image> --download (it fetches the index once; MemLens itself never downloads it)." % helper)
     for banner in banners:
         urls = index.get(banner.strip())
+        urls = [u for u in urls if isinstance(u, str)] if isinstance(urls, list) else []  # a damaged cache: no crash
         if urls:
             return ("A ready-made ISF for this image's kernel, from the community index tools/find_isf.py downloaded: %s"
                     % urls[0])

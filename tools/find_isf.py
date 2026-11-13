@@ -67,6 +67,7 @@ def report(banners, index):
     for banner in banners:
         out.append("banner: %s" % banner)
         urls = index.get(banner.strip())
+        urls = [u for u in urls if isinstance(u, str)] if isinstance(urls, list) else []  # a damaged index: a miss
         if urls:
             found = True
             for url in urls:

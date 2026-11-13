@@ -50,6 +50,12 @@ with tempfile.TemporaryDirectory() as tmp:
     assert rc == 0 and "ISF: " + URL in out, (rc, out)
     rc, out = run(UBUNTU.replace("#147-Ubuntu", "#148-Ubuntu"), "--index", index)  # another build: a miss, Ubuntu hint
     assert rc == 1 and "linux-image-unsigned-6.8.0-147-generic-dbgsym" in out, (rc, out)
+    with open(index, "w") as handle:  # values that are not lists of URLs: a miss, no crash, no "ISF: h"
+        json.dump({UBUNTU: "https://example.invalid/x.json.xz", DEBIAN: {"a": 1}}, handle)
+    rc, out = run(UBUNTU, "--index", index)
+    assert rc == 1 and "ISF: " not in out and "dwarf2json" in out, (rc, out)
+    rc, out = run(DEBIAN, "--index", index)
+    assert rc == 1 and "Traceback" not in out, (rc, out)
     empty = os.path.join(tmp, "empty.raw")
     with open(empty, "wb") as handle:
         handle.write(b"\0" * 1000)

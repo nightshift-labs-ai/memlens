@@ -334,6 +334,19 @@ with tempfile.TemporaryDirectory() as work:
         in text and "fits" not in text and "An ISF for your own image" in text, text
     assert "\nISF: " + D12_LINE + "\n" in text and "\nImage: " + D12_LINE + " (the ISF's, only a copy)\n" in text, text
     assert text.count("\nImage: ") == 4 and "4 different" in text and "... and" not in text, text
+    # review s179 MINOR 2: the cached index never recommends the very ISF that just failed (its line is only a copy)
+    m.INDEX_CACHE = os.path.join(work, "index-copy.json")
+    with open(m.INDEX_CACHE, "w") as handle:
+        json.dump({D12_LINE: ["https://example.invalid/d12.json.xz"]}, handle)
+    text = run("export_journal_copy_wrong_isf", "banners_journal_copy", d12, image_bytes=copy)[0][0]
+    assert "example.invalid/d12" not in text and "None of these kernel version lines" in text, text
+    # review s179 MINOR 3: a hit on a line that is not the image's most frequent one says which line it is
+    with open(m.INDEX_CACHE, "w") as handle:
+        json.dump({journal[1]: ["https://example.invalid/second.json.xz"]}, handle)
+    text = run("export_journal_copy_wrong_isf", "banners_journal_copy", d12, image_bytes=copy)[0][0]
+    assert "https://example.invalid/second.json.xz" in text and "for this image's kernel" not in text, text
+    assert "for the line " + journal[1] + " (not the image's most frequent line" in text, text
+    m.INDEX_CACHE = os.path.join(work, "no-index.json")
     # The same image holding the Debian 12 line as a kernel stores it: the ISF fits (whatever its rank in the list).
     text = run("export_journal_copy_wrong_isf", "banners_journal_copy", d12, image_bytes=copy + D12_EXACT)[0][0]
     assert "holds the ISF's kernel version line as the kernel stores it" in text and "another kernel" not in text, text

@@ -411,17 +411,23 @@ def isf_index_text(banners):
         with open(INDEX_CACHE, encoding="utf-8") as handle:
             index = {key.strip(): urls for key, urls in json.load(handle).items()}
     except (OSError, ValueError, AttributeError):
-        helper = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools", "find_isf.py")
+        helper = os.path.join(HERE, "tools", "find_isf.py")
         return ("To look these kernel version lines up in the community ISF index (Abyss-W4tcher/volatility3-symbols): "
-                "python3 %s <image> --download (it fetches the index once; MemLens itself never downloads it)." % helper)
+                'python3 "%s" <image> --download (it fetches the index once; MemLens itself never downloads it).' % helper)
+    try:
+        fetched = " on %s" % time.strftime("%Y-%m-%d", time.localtime(os.path.getmtime(INDEX_CACHE)))
+    except (OSError, ValueError, OverflowError):
+        fetched = ""
+    source = "the community index that tools/find_isf.py downloaded%s" % fetched  # the date tells a stale cache apart
     for banner in banners:
         urls = index.get(banner.strip())
         urls = [u for u in urls if isinstance(u, str)] if isinstance(urls, list) else []  # a damaged cache: no crash
-        if urls:
-            return ("A ready-made ISF for this image's kernel, from the community index tools/find_isf.py downloaded: %s"
-                    % urls[0])
-    return ("None of these kernel version lines is in the community index tools/find_isf.py downloaded: build the ISF "
-            "with dwarf2json (%s)." % ISF_README)
+        if urls and banner == banners[0]:
+            return "A ready-made ISF for this image's kernel, from %s: %s" % (source, urls[0])
+        if urls:  # review s179 MINOR 3: name the line, which may be a copy from an earlier boot
+            return ("A ready-made ISF for the line %s (not the image's most frequent line; it may be a copy from an "
+                    "earlier boot), from %s: %s" % (banner, source, urls[0]))
+    return "None of these kernel version lines is in %s: build the ISF with dwarf2json (%s)." % (source, ISF_README)
 SHOWN_BANNERS = 3
 
 

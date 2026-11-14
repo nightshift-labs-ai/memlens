@@ -2,7 +2,7 @@
 
 Part of the MemLens documentation; start with the [README](../README.md).
 
-`python3 tests/run_all.py` runs every `tests/test_*.py` below one after another (not `check_layout.py`, `check_elf.sh` or the Ghidra script, which need their own inputs) and prints a pass / skip / fail table (exit status 1 when one fails; each test gets 600 seconds); `MEMLENS_DEMO_ELF=kernel.elf` adds the checks on the demo export (and `MEMLENS_ISF` defaults to the `*.json.xz` next to it), `MEMLENS_TESTHOOK_ELF=<kernel.elf>` passes the second sample's export (memlens-demo-testhook.zip) to `tests/test_owner.py` and `tests/test_hookchain.py` too, `tests/check_run_all.py` checks the runner itself, `--ida-stubs <folder>` and `--ida-sdk <folder>` the IDA name checks (`tests/check_ida_names.py`, `tests/check_ida_api.py`).
+`python3 tests/run_all.py` runs every `tests/test_*.py` below one after another (not `check_layout.py`, `check_elf.sh` or the Ghidra script, which need their own inputs) and prints a pass / skip / fail table (exit status 1 when one fails; each test gets 600 seconds); `MEMLENS_DEMO_ELF=kernel.elf` adds the checks on the demo export (and `MEMLENS_ISF` defaults to the `*.json.xz` next to it), `MEMLENS_TESTHOOK_ELF=<kernel.elf>` passes the second sample's export (memlens-demo-testhook.zip) to `tests/test_owner.py` and `tests/test_hookchain.py` too, `tests/check_run_all.py` checks the runner itself, `tests/check_percpu_isf.py` that `tests/test_demo_percpu_index.py` takes its ISF from `MEMLENS_ISF` and says SKIPPED when it finds none, `--ida-stubs <folder>` and `--ida-sdk <folder>` the IDA name checks (`tests/check_ida_names.py`, `tests/check_ida_api.py`).
 
 Memory images were captured from QEMU guests; addresses differ per boot because of KASLR.
 

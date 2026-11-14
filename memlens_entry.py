@@ -103,7 +103,7 @@ def apply_types(isf_path, confirm=None):
     # where Show patched kernel functions reads ops->func and ops->flags, and the FTRACE_OPS_FL_* values: when this ISF
     # has struct ftrace_ops, its keys replace those of an ISF imported before, which may be another kernel's
     layout = isf_layout(isf)
-    if layout:
+    if "ftrace_ops.func" in layout:  # the struct is there (an ISF with only the enum must not drop the offsets)
         save_layout(dict({key: value for key, value in load_layout().items() if key not in LAYOUT_KEYS}, **layout))
     generator = isf2c.Generator(isf)
 

@@ -428,14 +428,16 @@ with tempfile.TemporaryDirectory() as work:
 known_types.clear()
 
 # Apply kernel types records that layout in the database: a second ISF without the enum drops the old values (they
-# would be another kernel's), and keys it does not set stay; an ISF without struct ftrace_ops leaves the record alone.
+# would be another kernel's), and keys it does not set stay; an ISF without struct ftrace_ops leaves the record alone,
+# also when it has the enum (review s193 NIT: it must not drop the offsets an earlier ISF gave).
 with tempfile.TemporaryDirectory() as work:
     blobs.clear()
     m.save_layout({"other.key": 1})
     for isf, expected in ((FLAGS_ISF, dict(m.isf_layout(FLAGS_ISF), **{"other.key": 1})),
                           (dict(FLAGS_ISF, enums={}), {"ftrace_ops.func": 0, "ftrace_ops.flags": 16, "other.key": 1}),
                           (FLAGS_ISF, dict(m.isf_layout(FLAGS_ISF), **{"other.key": 1})),
-                          (dict(FLAGS_ISF, user_types={}, enums={}), dict(m.isf_layout(FLAGS_ISF), **{"other.key": 1}))):
+                          (dict(FLAGS_ISF, user_types={}, enums={}), dict(m.isf_layout(FLAGS_ISF), **{"other.key": 1})),
+                          (dict(FLAGS_ISF, user_types={}), dict(m.isf_layout(FLAGS_ISF), **{"other.key": 1}))):
         isf_path = os.path.join(work, "isf.json")
         with open(isf_path, "w") as handle:
             json.dump(isf, handle)

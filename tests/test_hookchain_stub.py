@@ -780,6 +780,24 @@ ENTRIES = [BASE, BASE + 0x100, BASE + 0x200]
 CHAIN = ENTRIES + [ASSIST, THUNK, KPROBE_H, PAGE, KPAGE, OPAGE]  # not the ops (data), not OUTFN (not in the ELF)
 assert ps.chain_functions(image, ps.hook_links(image, ps.scan(blob, image))) == CHAIN, [hex(ea) for ea in
     ps.chain_functions(image, ps.hook_links(image, ps.scan(blob, image)))]
+# A hook whose target lands inside another function (movabs+jmp reg to other_fn+0x20) is linked, but that address is not
+# one to make a function at (review s197): add_func there would start a function in the middle of other_fn before IDA's
+# analysis reaches other_fn. Only addresses where a symbol (or the exporter's label) starts, or that no symbol covers
+# (hooked2's target, 0x400 past the end of hooked2).
+MID_FN, HOOKED_FN, HOOKED2, BARE = BASE + 0x300, BASE + 0x400, BASE + 0x500, BASE + 0x900
+mid_code = bytearray(b"\x90" * TEXT)
+mid_code[0x400:0x40c] = b"\x48\xb8" + struct.pack("<Q", MID_FN + 0x20) + b"\xff\xe0"  # movabs rax, other_fn+0x20; jmp rax
+mid_code[0x500:0x50c] = b"\x48\xb8" + struct.pack("<Q", BARE) + b"\xff\xe0"           # movabs rax, <no symbol>; jmp rax
+mid_blob = elf(mid_code, [("other_fn", MID_FN, 0x100), ("hooked_fn", HOOKED_FN, 0x100), ("hooked2", HOOKED2, 0x100),
+                          ("linux_banner", BASE + TEXT, 0x20)], b"Linux version 6.12\0".ljust(0x40, b"\0"))
+mid_image = ps.Image(mid_blob)
+mid_links = ps.hook_links(mid_image, ps.scan(mid_blob, mid_image))
+assert [(link.entry, link.target) for link in mid_links] == [(HOOKED_FN, MID_FN + 0x20), (HOOKED2, BARE)], mid_links
+MID_CHAIN = [HOOKED_FN, HOOKED2, BARE]  # not other_fn+0x20
+assert ps.chain_functions(mid_image, mid_links) == MID_CHAIN, [hex(ea) for ea in ps.chain_functions(mid_image, mid_links)]
+good_add_func = ffuncs.add_func
+def raising_add_func(ea1, ea2=None):
+    raise RuntimeError("add_func broke")
 with tempfile.TemporaryDirectory() as work:
     path = os.path.join(work, "kernel.elf")
     with open(path, "wb") as handle:
@@ -817,8 +835,37 @@ with tempfile.TemporaryDirectory() as work:
         fidc.get_segm_attr = segments_of(image, below=0)
         crefs, renames, out = run()
         assert add_funcs() == [] and "functions created" not in out and not func_cmts(), (calls, out)
+        # add_func raises (this step never ran in IDA; review s197): the error is printed and the rest of the hook chain
+        # stays: the same report line (without the functions), the same entry comments and the same list rows (Owner
+        # column) as when add_func works, and the hook record is saved (a second run adds no xref and renames nothing).
+        database(blob)
+        fidc.get_segm_attr = segments_of(image)
+        _, _, good_out = run()
+        good_line = next(line for line in good_out.splitlines() if "hook chain:" in line)
+        good_comments, good_rows = {ea: comments.get(ea) for ea in ENTRIES}, list(m._open_list.rows)
+        assert good_line.endswith("; 9 functions created now") and any(row[6] for row in good_rows), (good_line, good_rows)
+        database(blob)
+        ffuncs.add_func = raising_add_func
+        crefs, renames, out = run()
+        assert "[MemLens] functions along the hook chain stopped by this error:\n" in out and "RuntimeError: add_func broke" in out, out
+        assert "[MemLens] hook chain stopped by this error" not in out, out
+        assert good_line[:-len("; 9 functions created now")] + "\n" in out.splitlines(True), (good_line, out)
+        assert {ea: comments.get(ea) for ea in ENTRIES} == good_comments and m._open_list.rows == good_rows, (comments, m._open_list.rows)
+        assert crefs and renames and blobs, (crefs, renames)
+        ffuncs.add_func = good_add_func
+        crefs, renames, out = run()
+        assert crefs == [] and renames == [] and add_funcs() == CHAIN, (crefs, renames, [hex(ea) for ea in add_funcs()])
+        # The mid-function target above: add_func at the two hooked entries and at the address no symbol covers only.
+        mid_path = os.path.join(work, "mid.elf")
+        with open(mid_path, "wb") as handle:
+            handle.write(mid_blob)
+        nalt.get_input_file_path = lambda: mid_path
+        database(mid_blob)
+        fidc.get_segm_attr = segments_of(mid_image)
+        _, _, out = run()
+        assert add_funcs() == MID_CHAIN and "; 3 functions created now\n" in out, ([hex(ea) for ea in add_funcs()], out)
     finally:
-        fidc.get_segm_attr, ffuncs.get_func = good_segm_attr, good_get_func
+        fidc.get_segm_attr, ffuncs.get_func, ffuncs.add_func = good_segm_attr, good_get_func, good_add_func
         refused_funcs.clear()
     nalt.get_input_file_path = lambda: ""
 print("hook chain stub test OK (hand-made ELFs; fake IDA modules)")
@@ -1117,6 +1164,24 @@ for path in sys.argv[1:]:
         print("  " + line)
         for ea in made:
             print("  add_func %#x %s" % (ea, ps.at(image, ea)))
+        # add_func raises (review s197): the error is printed, and the report line (without the functions), every comment
+        # and the list rows (Owner column) are those of the run above; not 'hook chain stopped', not the scan's lines.
+        good_comments, good_rows = dict(comments), list(m._open_list.rows)
+        database(blob)
+        ffuncs.add_func = raising_add_func
+        try:
+            _, _, out = run()
+        finally:
+            ffuncs.add_func = good_add_func
+        assert "[MemLens] functions along the hook chain stopped by this error:\n" in out and "RuntimeError: add_func broke" in out, out
+        assert line[:-len("; %d functions created now" % len(expected))] + "\n" in out.splitlines(True), (line, out)
+        assert "[MemLens] hook chain stopped by this error" not in out, out
+        assert comments == good_comments and m._open_list.rows == good_rows, (comments, m._open_list.rows)
+        owner_first = [ea for ea in hooked if comments[ea].startswith(ps.ENTRY_PREFIX + " by ")]
+        owned = [row for row in good_rows if row[6]]
+        assert len(owner_first) >= 3 and len(owned) >= 3, (owner_first, owned)
+        print("  add_func raises: the report line without the functions count, %d entry comments naming the owner first "
+              "and %d Owner cells, as when it works" % (len(owner_first), len(owned)))
         # IDA has a function at or around every chain address already: no add_func call.
         database(blob)
         functions.update({ea: ea + 1 for ea in expected[::2]})

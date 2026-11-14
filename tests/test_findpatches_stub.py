@@ -4,10 +4,10 @@ empty list that looks clean. Two inputs: a file without function symbols (/bin/l
 is installed, a small unstripped program (function symbols but no linux_banner). Also the same warning from
 patchscan.py on the command line. Then the first try on your own file (judge s194 item 5): a memory image (a hand-made
 ELF core and a LiME header), a kernel file from disk (a hand-made ELF with .altinstructions, and argv[3] when given,
-for example a stripped vmlinux) and anything else (a hand-made PE, an ARM64 ELF) each get one line that names the next
-step. argv: [stripped ELF (default /bin/ls)] [the demo kernel.elf, still scanned] [a kernel file from disk]. Fake IDA
-modules."""
-import os, runpy, shutil, struct, subprocess, sys, tempfile
+for example a stripped vmlinux) and anything else (a hand-made PE, an ARM64 ELF, a raw memory image, which has no
+header and is read with one copy in memory) each get one line that names the next step. argv: [stripped ELF
+(default /bin/ls)] [the demo kernel.elf, still scanned] [a kernel file from disk]. Fake IDA modules."""
+import os, runpy, shutil, struct, subprocess, sys, tempfile, tracemalloc
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
 import patchscan
@@ -22,7 +22,7 @@ KEYS = {"memory image": "looks like a memory image",
         "other": "MemLens works on a Linux kernel exported from a memory image"}
 NEXT = {"memory image": ["Edit > Plugins > MemLens: Export kernel from memory image", "tools/find_isf.py"],
         "from disk": ["export a kernel.elf from a memory image of that system", DEMO_URL],
-        "other": [DEMO_URL]}
+        "other": ["Edit > Plugins > MemLens: Export kernel from memory image", DEMO_URL]}  # a raw image is "other" too
 
 
 def check(target, reason):
@@ -182,5 +182,19 @@ with tempfile.TemporaryDirectory() as work:
     struct.pack_into("<H", pe, 0x84, 0x8664)
     landing(write("program.exe", bytes(pe)), "other", "PE (MZ...PE)")
     landing(write("arm64.elf", elf(2, 183, sections=[(".text", bytes(16))])), "other", "ARM64 ELF")
+    # A raw memory image (LiME format=raw, dd, VMware .vmem) has no header to tell: it is "other", whose line names
+    # Export too, and it is read like any other file, with one copy of it in memory (review s197: the first 64 bytes
+    # joined to the rest held two).
+    raw, size = os.path.join(work, "memory.raw"), 32 << 20
+    with open(raw, "wb") as handle:
+        handle.truncate(size)  # sparse zeros
+    tracemalloc.start()
+    try:
+        landing(raw, "other", "raw memory image (no header), 32 MiB")
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 1.5 * size, (peak, size)
+    print("raw memory image: peak %.1f MiB of Python memory for a %d MiB file (one copy)" % (peak / 2.0 ** 20, size >> 20))
 print("ran %d of 2 non-kernel cases; %d own-file warnings name the next step (%s)"
       % (ran, len(landed), ", ".join("%d %s" % (landed.count(k), k) for k in KEYS)))

@@ -33,6 +33,7 @@ They are drawn from `patchscan.py --links` output. They are not IDA screenshots:
 2. **PNG:** rasterised offline from the SVG with Playwright's Chromium headless shell (`chromium_headless_shell-1155`).
    - **Settings:** viewport set to the SVG's size (900 x 896), device scale 1.5, so it stays sharp on HiDPI screens. The system's monospace font is DejaVu Sans Mono here.
    - **Result:** 1350 x 1344 px, 248 KB, embedded at width 900.
+   - **Hashes:** rendered from hookchain.svg sha256 b58e2860ee7b20dbf1305c6302ae97798a02050e091ad5b677d459122c34205c; hookchain.png sha256 ec821f8f7bbb8d7415a194d6f795e28d1f70092fb70a6a91ca006ef5514b00a8. `tests/test_hookgraph.py` checks this pair (its `RENDERED`), because README.md shows the PNG: a redrawn SVG needs a new PNG, and both hashes change here and in the test. The script below gives these PNG bytes again from this SVG here; another machine's fonts may give other bytes.
    - **Script** (Node, with the `playwright` package):
 
      ```js
@@ -48,7 +49,7 @@ They are drawn from `patchscan.py --links` output. They are not IDA screenshots:
    - sha256 `4b27595469ef7cf366ac39d673d954b28b89cf2a079288635fc2b6c2e21ed750` (demo).
    - The test compares only the lines patchscan prints on stdout, so a re-uploaded zip whose file drops the stderr line still matches. On a re-export that changes `kernel.elf`, refresh these copies and hashes and redraw.
 
-To redraw after a change to patchscan, run step 1, then step 2 (device scale 1.5), then refresh the texts in step 3 from `patchscan.py --links`, then run `tests/test_hookgraph.py` with both `kernel.elf` files.
+To redraw after a change to patchscan, run step 1, then step 2 (device scale 1.5) and update its two hashes here and in the test's `RENDERED`, then refresh the texts in step 3 from `patchscan.py --links`, then run `tests/test_hookgraph.py` with both `kernel.elf` files.
 
 ## Checked by `tests/test_hookgraph.py`
 
@@ -73,7 +74,7 @@ To redraw after a change to patchscan, run step 1, then step 2 (device scale 1.5
     - An owner box removed, an arrowhead reversed, the panels swapped.
     - A heading reworded, swapped between the panels, dropped, doubled into a lane or replaced by a `--links` word.
     - The legend reworded, reordered, recoloured, extended or dropped, and a box recoloured.
-  - The PNG is the SVG's size times 1.5 and under 300 KB.
+  - The PNG is the SVG's size times 1.5 and under 300 KB, and the sha256 pair of the SVG and the PNG is the one step 2 records (the test's `RENDERED`), so a PNG not rendered from this SVG fails.
   - The snippet below has the caption and image paths that exist, README.md holds its lines as they are, and the table under it is the top panel's lanes, row by row, from the testhook `--links` text.
 - **With `MEMLENS_DEMO_ELF` and `MEMLENS_TESTHOOK_ELF`** (or both files as arguments, in any order; each is told apart by its sha256):
   - `patchscan.py --links` on each must print its sample's expected text. If it does not, the test fails and says to redraw.

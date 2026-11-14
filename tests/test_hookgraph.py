@@ -22,7 +22,9 @@ Always:
   text outside the panels, a site made bold, an owner box removed, an arrowhead reversed, the panels swapped, a panel
   too many, a heading reworded, swapped, dropped, doubled or replaced by a --links word, the legend reworded,
   reordered, recoloured, extended or dropped, a box recoloured.
-- docs/img/hookchain.png is the SVG rasterised at device scale SCALE (its size the SVG's times SCALE) and under 300 KB.
+- docs/img/hookchain.png is the SVG rasterised at device scale SCALE (its size the SVG's times SCALE) and under 300 KB,
+  and the pair (sha256 of the SVG, sha256 of the PNG) is RENDERED, which docs/img/README.md step 2 records too: a
+  redrawn SVG without a new PNG fails, and so does an edited PNG (the README shows the PNG, not the SVG).
 - docs/img/README.md has the README snippet with the caption and the image paths (which exist), README.md holds the
   snippet's lines as they are, and the Where | Handler | Owner table under the snippet is the top panel's lanes, row by
   row, from the testhook --links text.
@@ -61,6 +63,9 @@ TESTHOOK_SHA = "8d95998eacc39055c81417983f3dcdf7bea1d1c811272b13725035971dd149f9
 SAMPLES = [("testhook", os.path.join(IMG, "expected-hook-chain.testhook.txt"), TESTHOOK_SHA),  # top panel
            ("demo", os.path.join(IMG, "expected-hook-chain.demo.txt"), DEMO_SHA)]  # bottom panel
 SCALE = 1.5  # the PNG's device scale (docs/img/README.md step 2)
+# (hookchain.svg, hookchain.png) sha256: the PNG rendered from that SVG (docs/img/README.md step 2 records the same pair)
+RENDERED = ("b58e2860ee7b20dbf1305c6302ae97798a02050e091ad5b677d459122c34205c",
+            "ec821f8f7bbb8d7415a194d6f795e28d1f70092fb70a6a91ca006ef5514b00a8")
 NS = "{http://www.w3.org/2000/svg}"
 TOOL = [sys.executable, "-I", os.path.join(ROOT, "tools", "hookgraph.py")]
 PATCHSCAN = [sys.executable, "-I", os.path.join(ROOT, "patchscan.py")]
@@ -529,8 +534,13 @@ assert png[:8] == b"\x89PNG\r\n\x1a\n" and png[12:16] == b"IHDR", png[:16]
 size = struct.unpack(">II", png[16:24])
 assert abs(size[0] - width * SCALE) <= 1 and abs(size[1] - height * SCALE) <= 1, (size, width, height, SCALE)
 assert len(png) < 300 * 1024, len(png)
+assert (sha256(SVG_PATH), sha256(PNG_PATH)) == RENDERED, (
+    "docs/img/hookchain.png is not the PNG rendered from docs/img/hookchain.svg (sha256 %s, %s; recorded %s, %s): "
+    "re-render the PNG (step 2) and update the hashes" % ((sha256(SVG_PATH), sha256(PNG_PATH)) + RENDERED))
 notes = read(os.path.join(IMG, "README.md"))
 assert CAPTION in notes and "docs/img/hookchain.png" in notes and "tools/hookgraph.py" in notes, notes[:300]
+assert "rendered from hookchain.svg sha256 %s; hookchain.png sha256 %s" % RENDERED in notes, (
+    "docs/img/README.md step 2 does not record the PNG's sha256 pair: update the hashes")
 snippet = notes[notes.index("```markdown\n") + len("```markdown\n"):]
 table = snippet[snippet.index("\n```") + 4:]
 table = table[:table.index("\n#")]  # the table under the snippet, before the next heading
@@ -547,7 +557,7 @@ rows = [[re.sub(r"[`*]", "", cell).strip() for cell in line.strip().strip("|").s
 assert rows[0] == ["Where", "Handler", "Owner"], rows[:1]
 assert rows[1:] == table_rows(texts[0]), (rows[1:], table_rows(texts[0]))  # the top panel's lanes, from --links
 assert [row[0] for row in rows[1:]] == [lane.find(NS + "text").text.split("+")[0] for lane in panels[0]], rows
-print("committed picture OK (%dx%d px; %s lanes; %d mutants fail; PNG %dx%d, %d bytes; README.md holds the snippet; table = top panel)" % (
+print("committed picture OK (%dx%d px; %s lanes; %d mutants fail; PNG %dx%d, %d bytes, rendered from this SVG (sha256 pair); README.md holds the snippet; table = top panel)" % (
     width, height, "+".join(str(len(panel)) for panel in panels), len(mutants) + 2, size[0], size[1], len(png)))
 
 # 3. A hand-made kernel.elf: an ftrace page with no owner, a module callback (owner), a page whose role is unknown.

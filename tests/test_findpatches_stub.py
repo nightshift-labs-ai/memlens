@@ -90,12 +90,33 @@ else:
 
 
 # The first try on your own file (judge s194 item 5): one line with the next step, and no list.
+class Counted:
+    """A file whose reads are counted."""
+    def __init__(self, handle):
+        self.handle, self.count = handle, 0
+    def read(self, *size):
+        data = self.handle.read(*size)
+        self.count += len(data)
+        return data
+    def __enter__(self):
+        return self
+    def __exit__(self, *error):
+        self.handle.close()
+
+
 landed = []
 def landing(path, kind, what):
     nalt.get_input_file_path = lambda: path
     m._open_list = None
     del calls[:]
-    assert m.FindPatches().activate(None) == 0, what
+    opened = []
+    m.open = lambda *args: opened.append(Counted(open(*args))) or opened[-1]  # memlens_entry's open: reads counted
+    try:
+        assert m.FindPatches().activate(None) == 0, what
+    finally:
+        del m.open
+    if kind == "memory image":  # read no further than its header: a memory image can be gigabytes
+        assert sum(handle.count for handle in opened) <= 64, (what, [handle.count for handle in opened])
     ui = [c[1] for c in calls if c[0] == "ui"]
     assert len(ui) == 1, (what, ui)
     text = ui[0]

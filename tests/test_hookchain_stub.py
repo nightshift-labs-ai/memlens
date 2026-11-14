@@ -764,15 +764,15 @@ with tempfile.TemporaryDirectory() as work:
         refused_funcs.add(KPAGE)
         crefs, renames, out = run()
         assert add_funcs() == [ea for ea in CHAIN if ea != ASSIST], [hex(ea) for ea in add_funcs()]
-        assert "; 7 functions created now (1 already in a function, 1 refused by IDA)\n" in out, out
-        assert functions == dict({ASSIST - 0x10: ASSIST + 0x10}, **{ea: ea + 1 for ea in CHAIN if ea not in (ASSIST, KPAGE)}), functions
+        assert "; 7 functions created now (1 already in a function) (1 refused by IDA)\n" in out, out
+        assert functions == {ASSIST - 0x10: ASSIST + 0x10, **{ea: ea + 1 for ea in CHAIN if ea not in (ASSIST, KPAGE)}}, functions
         assert all(comments[ea].startswith(ps.ENTRY_PREFIX) for ea in ENTRIES), comments
         assert sorted(func_cmts()) == [(ea, comments[ea], False) for ea in ENTRIES], func_cmts()
         assert "stopped by this error" not in out, out
         # Second run: only the refused address is asked again; nothing else.
         crefs, renames, out = run()
         assert add_funcs() == [KPAGE] and crefs == [] and renames == [], (add_funcs(), crefs, renames)
-        assert "; 0 functions created now (8 already in a function, 1 refused by IDA)\n" in out, out
+        assert "; 0 functions created now (8 already in a function) (1 refused by IDA)\n" in out, out
         refused_funcs.clear()
         # IDA has no segment at the hook pages (idc.get_segm_attr raises there): those are skipped, nothing breaks.
         database(blob)

@@ -174,8 +174,12 @@ SEGPERM_EXEC = 1  # ida_segment.SEGPERM_EXEC
 
 
 def in_code(address):
-    """True inside an executable segment (the ELF loader sets segment permissions from the program headers)."""
-    return bool((idc.get_segm_attr(address, idc.SEGATTR_PERM) or 0) & SEGPERM_EXEC)
+    """True inside an executable segment (the ELF loader sets segment permissions from the program headers). False where
+    no segment is, where idc.get_segm_attr raises AssertionError."""
+    try:
+        return bool((idc.get_segm_attr(address, idc.SEGATTR_PERM) or 0) & SEGPERM_EXEC)
+    except AssertionError:
+        return False
 
 
 # .percpu.cpu<N>, or .percpu.cpu<N>.<k> when the exporter split a partly mapped per-CPU area into several sections.
@@ -1108,7 +1112,8 @@ def link_hooks(image, findings):
     After Apply kernel types (its layout has ftrace_ops.flags and the FTRACE_OPS_FL_* values): a comment at each such
     trampoline (not a kprobe's) and at its ops decodes the ops' flags, saying whether IPMODIFY is set; nothing is said
     without that layout. When the database has struct ftrace_ops, an ops that a module's symbol starts at gets that
-    type once (kept in HOOK_RECORD too). Returns (links, counts)."""
+    type once (kept in HOOK_RECORD too). Last, a function is made at each address on the chain where code starts and IDA
+    has none yet (make_chain_functions). Returns (links, counts)."""
     layout = load_layout()
     func_offset = layout.get("ftrace_ops.func")
     if isinstance(func_offset, int):
@@ -1118,7 +1123,8 @@ def link_hooks(image, findings):
     node, record = load_hook_record()
     done = {tuple(xref) for xref in record["xrefs"]}
     counts = dict.fromkeys(("xrefs", "xrefs_before", "xrefs_failed", "drefs", "drefs_before", "drefs_failed", "renamed",
-                            "named_before", "kept", "rename_failed", "typed", "typed_before", "type_failed"), 0)
+                            "named_before", "kept", "rename_failed", "typed", "typed_before", "type_failed", "functions",
+                            "functions_before", "functions_failed"), 0)
     for source, target, flow in patchscan.hook_xrefs(links):
         kind = "drefs" if flow == "data" else "xrefs"
         if (source, target, flow) in done:
@@ -1158,7 +1164,25 @@ def link_hooks(image, findings):
     for address, text in sorted(flags.items()):
         set_flags_comment(address, text)
     node.setblob(json.dumps(record).encode("utf-8"), 0, HOOK_RECORD_TAG)
+    make_chain_functions(image, links, counts)
     return links, counts
+
+
+def make_chain_functions(image, links, counts):
+    """A function (ida_funcs.add_func, which finds its end itself) at each address on the chain where code starts
+    (patchscan.chain_functions: hooked entry, hook page, handler, owner) that is in an executable segment and in no
+    function yet, so the chain reads as code before auto-analysis reaches it (judge s194 item 4). Nothing is deleted or
+    redefined; an address inside a function, IDA's or one made by an earlier run, is left as it is. Counted in counts:
+    functions (made now), functions_before (already in a function) and functions_failed (refused by IDA)."""
+    for address in patchscan.chain_functions(image, links):
+        if not in_code(address):
+            continue  # data, or a segment IDA did not mark executable: never made code here
+        if ida_funcs.get_func(address) is not None:
+            counts["functions_before"] += 1
+        elif ida_funcs.add_func(address):
+            counts["functions"] += 1
+        else:
+            counts["functions_failed"] += 1
 
 
 def refresh_hook_chain():
@@ -1210,6 +1234,11 @@ def link_report(links, counts):
     if typed or before or failed:  # module ftrace_ops; the line is unchanged without any
         line += "; %d module ftrace_ops typed as %s" % (typed, OPS_TYPE)
         extra = [("%d already typed by an earlier run" % before) if before else "", ("%d refused by IDA" % failed) if failed else ""]
+        line += "".join(" (%s)" % text for text in extra if text)
+    made, before, failed = (counts.get(key, 0) for key in ("functions", "functions_before", "functions_failed"))
+    if made or before or failed:  # functions along the chain (make_chain_functions); the line is unchanged without any
+        line += "; %d functions created now" % made
+        extra = [("%d already in a function" % before) if before else "", ("%d refused by IDA" % failed) if failed else ""]
         line += "".join(" (%s)" % text for text in extra if text)
     return line + "\n"
 

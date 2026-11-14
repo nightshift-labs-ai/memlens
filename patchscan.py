@@ -845,6 +845,17 @@ def hook_xrefs(links):
     return sorted(xrefs)
 
 
+def chain_functions(image, links):
+    """The addresses on the links' hook chains where code starts, sorted and without repeats: each hooked entry, the
+    target of every call or jmp that hook_xrefs gives (the hook page, its first named call, the BPF programs a trampoline
+    runs) and each owner's address (ftrace_ops->func, the kprobe's handler, the module callback). The ftrace_ops and its
+    slot are data and are not among them. Only addresses inside the ELF's loaded segments (IDA has nothing elsewhere)."""
+    addresses = {link.entry for link in links}
+    addresses.update(target for _, target, flow in hook_xrefs(links) if flow != "data")
+    addresses.update(link.owner.address for link in links if link.owner is not None and link.owner.address is not None)
+    return sorted(address for address in addresses if image.segment(address))
+
+
 def merged_owner(owners):
     """One Owner for a page from its links' owners (in link order): the one they share, or, when the links differ (a kprobe
     page that several probed functions share), their texts joined with '; ', the first one's address and how, and all

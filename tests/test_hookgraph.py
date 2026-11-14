@@ -26,8 +26,8 @@ Always:
   and the pair (sha256 of the SVG, sha256 of the PNG) is RENDERED, which docs/img/README.md step 2 records too: a
   redrawn SVG without a new PNG fails, and so does an edited PNG (the README shows the PNG, not the SVG).
 - docs/img/README.md has the README snippet with the caption and the image paths (which exist), README.md holds the
-  snippet's lines as they are, and the Where | Handler | Owner table under the snippet is the top panel's lanes, row by
-  row, from the testhook --links text.
+  snippet's lines as they are, the alt text names each panel's hooked functions in the picture's order, and the
+  Where | Handler | Owner table under the snippet is the top panel's lanes, row by row, from the testhook --links text.
 - A hand-made kernel.elf (ftrace, module callback and unknown-role pages): the tool's SVG for it passes the same check
   against a fresh `patchscan.py --links` of it, the CLI and the function give the same bytes, and the exit codes.
 With a demo kernel.elf (its sha256 is DEMO_SHA or TESTHOOK_SHA): `patchscan.py --links` on it must print its sample's
@@ -552,6 +552,13 @@ for link in re.findall(r'(?:src|href)="([^"]+)"|\]\(([^)\s]+)\)', snippet):
     target = (link[0] or link[1]).split("#")[0]  # the file part, as the README link check (docs/img/README.md) asks
     assert not target or "://" in target or os.path.exists(os.path.join(ROOT, target)), target
 assert 'width="%d"' % width in snippet, "embed the %gx PNG at the SVG's width" % SCALE
+alt = re.search(r' alt="([^"]+)"', snippet).group(1)
+for number, (start, end) in enumerate((("Top panel", "Bottom panel"), ("Bottom panel", None))):
+    part = alt[alt.index(start):alt.index(end) if end else None]  # the alt text of panel `number`
+    where = [lane.find(NS + "text").text.split("+")[0] for lane in panels[number]]  # its hooked functions, lane order
+    found = [part.find(name) for name in where]
+    assert -1 not in found and found == sorted(found), (
+        "the alt text's %s must name its hooked functions in the picture's order %s: %r" % (start, where, part))
 rows = [[re.sub(r"[`*]", "", cell).strip() for cell in line.strip().strip("|").split("|")]
         for line in table.splitlines() if line.startswith("|") and not re.match(r"^\|[-| :]+\|$", line)]
 assert rows[0] == ["Where", "Handler", "Owner"], rows[:1]

@@ -216,6 +216,10 @@ EXPECTED = {
     "do_sys_openat2": (0, 0xd9, "kprobe_ftrace_handler", "kprobe via ftrace", "kprobe_ftrace_tramp_do_sys_openat2"),
     "bpf_lsm_file_open": (4, 0x23, "__bpf_tramp_enter", "BPF trampoline", "bpf_tramp_bpf_lsm_file_open"),
     "__hid_bpf_tail_call": (0, 0x23, "__bpf_tramp_enter", "BPF trampoline", "bpf_tramp___hid_bpf_tail_call"),
+    # The test-module sample (tests/vm/testhook, memlens-demo-testhook.zip): an ftrace callback behind ftrace_ops_assist_func
+    # and a kprobe via ftrace, both set by the module memlens_testhook.
+    "__x64_sys_kill": (4, 0xd9, "ftrace_ops_assist_func", "ftrace", "ftrace_tramp___x64_sys_kill"),
+    "__x64_sys_getdents64": (4, 0xd9, "kprobe_ftrace_handler", "kprobe via ftrace", "kprobe_ftrace_tramp___x64_sys_getdents64"),
 }
 for path in sys.argv[1:]:
     image = ps.Image(open(path, "rb").read())
@@ -227,7 +231,7 @@ for path in sys.argv[1:]:
         continue
     unknown = sorted({row[1] for row in findings} - set(EXPECTED))
     if unknown:
-        print("%s: SKIPPED, no expected values for %s (EXPECTED knows the demo, Debian 13 and Ubuntu 24.04 hooks)" % (
+        print("%s: SKIPPED, no expected values for %s (EXPECTED knows the demo, Debian 13, Ubuntu 24.04 and test-module hooks)" % (
             path, ", ".join(unknown)))
         continue
     assert links and len(links) == len(findings), (path, findings)

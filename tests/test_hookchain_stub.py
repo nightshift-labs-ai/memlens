@@ -318,3 +318,17 @@ for path in sys.argv[1:2]:
     table = m._open_list
     for n in range(table.OnGetSize()):
         print("  row: " + " | ".join(table.OnGetLine(n)))
+    # Jump to owner (the list's Insert command) on a real export: each row with an owner jumps to the owner's address
+    # (review s191: the hand-made MODCB case above was the only check of OnInsertLine).
+    image = ps.Image(blob)
+    owners = {link.function: link.owner.address for link in ps.hook_links(image, ps.scan(None, image))
+              if link.owner and link.owner.address is not None}
+    jumped = 0
+    for n in range(table.OnGetSize()):
+        where = table.OnGetLine(n)[1]
+        if where in owners:
+            del calls[:]
+            table.OnInsertLine(n)
+            assert calls and calls[-1] == ("jump", owners[where]), (where, calls)
+            jumped += 1
+    print("  Jump to owner: %d of %d rows jump to their owner" % (jumped, table.OnGetSize()))

@@ -3,6 +3,7 @@
 
     python3 tests/run_all.py                                  # everything that needs no demo kernel
     MEMLENS_DEMO_ELF=kernel.elf python3 tests/run_all.py      # also the parts that check the demo export
+    MEMLENS_TESTHOOK_ELF=<testhook kernel.elf> ...           # also the second sample (memlens-demo-testhook.zip)
     python3 tests/run_all.py --ida-stubs <folder with ida_*.pyi>   # also tests/check_ida_names.py (IDA's stubs)
     python3 tests/run_all.py --ida-sdk <SDK src/plugins/idapython>  # also tests/check_ida_api.py (api_contents.brief)
 
@@ -23,6 +24,8 @@ USAGE = ("usage: python3 tests/run_all.py [--ida-stubs <folder with ida_*.pyi>] 
 # tests that take the demo kernel.elf as their first argument (without it they skip the demo part)
 KERNEL_TESTS = {"test_demo_injection.py", "test_demo_percpu_index.py", "test_hookchain.py", "test_hookchain_stub.py",
                 "test_owner.py"}
+# tests that also check the second sample's kernel.elf (a hook set by a module), passed after the demo
+TESTHOOK_TESTS = {"test_hookchain.py", "test_owner.py"}
 
 
 def status(rc, out):
@@ -46,9 +49,16 @@ def main(argv):
     if demo and not os.path.isfile(demo):
         print("MEMLENS_DEMO_ELF=%s: no such file" % demo, file=sys.stderr)
         return 2
+    testhook = os.environ.get("MEMLENS_TESTHOOK_ELF", "")
+    testhook = os.path.abspath(testhook) if testhook else ""
+    if testhook and not os.path.isfile(testhook):
+        print("MEMLENS_TESTHOOK_ELF=%s: no such file" % testhook, file=sys.stderr)
+        return 2
     runs = []
     for name in sorted(n for n in os.listdir(HERE) if n.startswith("test_") and n.endswith(".py")):
         extra = [demo] if demo and name in KERNEL_TESTS else []
+        if testhook and name in TESTHOOK_TESTS:
+            extra = extra + [testhook]
         if demo and name == "test_findpatches_stub.py":
             extra = ["/bin/ls", demo]  # a stripped program (the test SKIPs it when missing), then the demo export
         runs.append((name, [name] + extra))

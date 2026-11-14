@@ -84,6 +84,21 @@ FFFFFFFF8E64E370 | vfs_getattr       | call to memory with no symbol | ftrace_tr
 
 The rest of the demo output (the patch scan, the hook chain's cross-references, owners and renames, the type header and the typed globals): [docs/OUTPUT.md](docs/OUTPUT.md#what-you-get-real-output-from-the-demo-not-ida-screenshots).
 
+### A hook set by a module (second sample)
+
+The demo's hooks come from the kernel's own tracing (plus systemd's BPF LSM program on `bpf_lsm_file_open`, in both captures). For the rootkit-style case there is a second capture of the same kernel, with a small test module loaded, [tests/vm/testhook](tests/vm/testhook/README.md). It hooks `__x64_sys_kill` with an ftrace callback and `__x64_sys_getdents64` with a kprobe. These are the APIs that ftrace-based rootkits use; this module only counts calls. The Owner column names the module's callbacks: **memlens_testhook.th_kill_callback** (from the trampoline's `ftrace_ops`) and **memlens_testhook.th_getdents_pre** (the probe's `pre_handler`, from the kernel's kprobe list). The same list for its `kernel.elf`, built the same way (fake IDA modules, `tests/test_hookchain_stub.py`; only the Where, Owner and Handler columns):
+
+```
+Where                | Owner                                                                       | Handler
+__x64_sys_kill       | memlens_testhook.th_kill_callback (ftrace_ops memlens_testhook.th_kill_ops) | ftrace_ops_assist_func (ftrace)
+__x64_sys_getdents64 | memlens_testhook.th_getdents_pre (kprobe pre_handler)                       | kprobe_ftrace_handler (kprobe via ftrace)
+bpf_lsm_file_open    | bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems (BPF program)            | __bpf_tramp_enter (BPF trampoline)
+```
+
+**Jump to owner** should lead to the module's callback (not checked in IDA). Both owner addresses (`0xffffffffc0cc6010`, `0xffffffffc0cc6040`) match the guest's `/proc/kallsyms` at capture time ([hook-truth-guest.txt](tests/vm/testhook/hook-truth-guest.txt)), and the module's counters in the image, `memlens_testhook.th_kill_calls` = 2 and `th_getdents_calls` = 16, show both hooks ran. There is no `sys_call_table` row: since Linux 6.9, x86-64 dispatches syscalls through `x64_sys_call()`, so a table hook would be inert (`tests/test_demo_injection.py` plants table slots instead).
+
+To try it, download `memlens-demo-testhook.zip` (21 MB) from the same [demo-data release](https://github.com/nightshift-labs-ai/memlens/releases/tag/demo-data), follow steps 1-3 of Try it and compare with its `expected-hook-chain.txt`; it holds the `kernel.elf`, the same ISF and the module source. The memory image itself, `testhook.elf.xz` (91 MB), is in the [Volatility samples release](https://github.com/nightshift-labs-ai/volatility-2026-samples/releases/tag/samples), so you can also export it yourself. The hooked entry, the trampoline and the module's code at its live address, in `objdump`: [docs/OUTPUT.md](docs/OUTPUT.md#the-second-sample-in-full-a-hook-set-by-a-module).
+
 ## What it does
 
 ```mermaid

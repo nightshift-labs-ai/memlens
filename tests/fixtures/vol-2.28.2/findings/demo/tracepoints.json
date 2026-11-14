@@ -1,0 +1,33 @@
+
+[
+  {
+    "Module": "__kernel__",
+    "Module address": 281473066205184,
+    "Probe": "probe_sched_wakeup",
+    "Probe address": 281473068514560,
+    "Probe priority": 10,
+    "__children": [],
+    "tracepoint": "sched_wakeup",
+    "tracepoint address": 281473097855584
+  },
+  {
+    "Module": "__kernel__",
+    "Module address": 281473066205184,
+    "Probe": "probe_sched_wakeup",
+    "Probe address": 281473068514560,
+    "Probe priority": 10,
+    "__children": [],
+    "tracepoint": "sched_wakeup_new",
+    "tracepoint address": 281473097855488
+  },
+  {
+    "Module": "__kernel__",
+    "Module address": 281473066205184,
+    "Probe": "probe_sched_switch",
+    "Probe address": 281473068514480,
+    "Probe priority": 10,
+    "__children": [],
+    "tracepoint": "sched_switch",
+    "tracepoint address": 281473097855392
+  }
+]

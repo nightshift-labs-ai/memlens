@@ -1,0 +1,24 @@
+
+[
+  {
+    "Address": 281473075229344,
+    "Module": "__kernel__",
+    "Name": "ttyS0",
+    "Symbol": "n_tty_receive_buf",
+    "__children": []
+  },
+  {
+    "Address": 281473075229344,
+    "Module": "__kernel__",
+    "Name": "tty1",
+    "Symbol": "n_tty_receive_buf",
+    "__children": []
+  },
+  {
+    "Address": 281473075229344,
+    "Module": "__kernel__",
+    "Name": "tty6",
+    "Symbol": "n_tty_receive_buf",
+    "__children": []
+  }
+]

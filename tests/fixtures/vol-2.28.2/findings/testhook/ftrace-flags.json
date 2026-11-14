@@ -1,0 +1,33 @@
+
+[
+  {
+    "Callback": "kprobe_ftrace_handler",
+    "Callback address": 281473643531984,
+    "Flags": "FTRACE_OPS_FL_ENABLED,FTRACE_OPS_FL_SAVE_REGS,FTRACE_OPS_FL_INITIALIZED,FTRACE_OPS_FL_ALLOC_TRAMP",
+    "Hooked symbols": null,
+    "Module": "__kernel__",
+    "Module address": 281473642921984,
+    "__children": [],
+    "ftrace_ops address": 281473674801376
+  },
+  {
+    "Callback": null,
+    "Callback address": 281473916362768,
+    "Flags": "FTRACE_OPS_FL_ENABLED,FTRACE_OPS_FL_DYNAMIC,FTRACE_OPS_FL_SAVE_REGS,FTRACE_OPS_FL_RECURSION,FTRACE_OPS_FL_INITIALIZED,FTRACE_OPS_FL_ALLOC_TRAMP",
+    "Hooked symbols": null,
+    "Module": "memlens_testhook",
+    "Module address": 281473916362752,
+    "__children": [],
+    "ftrace_ops address": 281473916371104
+  },
+  {
+    "Callback": "call_direct_funcs",
+    "Callback address": 281473645068240,
+    "Flags": "FTRACE_OPS_FL_ENABLED,FTRACE_OPS_FL_DYNAMIC,FTRACE_OPS_FL_SAVE_REGS,FTRACE_OPS_FL_INITIALIZED,FTRACE_OPS_FL_DIRECT",
+    "Hooked symbols": null,
+    "Module": "__kernel__",
+    "Module address": 281473642921984,
+    "__children": [],
+    "ftrace_ops address": 156202862095616
+  }
+]

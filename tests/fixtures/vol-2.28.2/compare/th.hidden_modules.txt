@@ -1,0 +1,2 @@
+Volatility 3 Framework 2.28.2
+ | Offset | Module Name | Code Size | Taints | Load Arguments | File Output

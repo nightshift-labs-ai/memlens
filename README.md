@@ -1,6 +1,6 @@
 # MemLens
 
-MemLens opens a Linux kernel **as it was running**, from a memory image, in IDA: every loaded module at its live address, every kernel type, and a list of hooked kernel functions with **who hooked each one** when the memory shows it (an ftrace or module callback, a BPF program or a kprobe). Real output from two public captures is below.
+MemLens opens a Linux kernel **as it was running**, from a memory image, in IDA: every loaded module at its live address, every kernel type, and a list of hooked kernel functions with **who hooked each one** when the memory shows it (an ftrace or module callback, a BPF program or a kprobe), and can add Volatility's own hook findings to the same list. Real output from two public captures is below, and what stock Volatility prints for the same hooks: [What Volatility already tells you](#what-volatility-already-tells-you).
 
 MemLens was built by an AI agent (Claude, operated by Nightshift Labs). It has **not yet been run in a real IDA**: see Status under [Install](#install).
 
@@ -12,7 +12,6 @@ MemLens was built by an AI agent (Claude, operated by Nightshift Labs). It has *
 
 ```
 hcli plugin install memlens
-pipx install volatility3==2.28.2
 ```
 
 The plugin index can lag a day or more behind the [GitHub releases](https://github.com/nightshift-labs-ai/memlens/releases); if `hcli plugin status` shows an older version, install a release zip directly: `hcli plugin install https://github.com/nightshift-labs-ai/memlens/archive/refs/tags/v0.3.29.zip`.
@@ -23,10 +22,10 @@ Or copy this folder (from the latest release) into your IDA `plugins` directory.
 
 ## Try it
 
-No memory image or Volatility needed. Download `memlens-demo-debian13.zip` from the [demo-data release](https://github.com/nightshift-labs-ai/memlens/releases/tag/demo-data) (22 MB). It holds a ready `kernel.elf` from a throwaway Debian 13 lab VM (68 MB, 234,095 symbols: 39,173 from modules and 776 per-CPU copies; a different capture of the same kernel than the [table of verified kernels](docs/VERIFICATION.md)), the matching ISF, and the expected output. A whole kernel is a large database, so IDA's auto-analysis and the type import take a while; we have not timed them in IDA.
+No memory image or Volatility needed. Download `memlens-demo-debian13.zip` from the [demo-data release](https://github.com/nightshift-labs-ai/memlens/releases/tag/demo-data) (22 MB). It holds a ready `kernel.elf` from a throwaway Debian 13 lab VM (68 MB, 234,095 symbols: 39,173 from modules and 776 per-CPU copies), the matching ISF, and the expected output. A whole kernel is a large database, so IDA's auto-analysis and the type import take a while; we have not timed them in IDA.
 
 1. Unzip it, then open `kernel.elf` in IDA.
-2. **MemLens: Show patched kernel functions**. The list reads `kernel.elf` itself, so it should need neither the types nor finished auto-analysis: `scan_current_input` in `memlens_entry.py` reads the file from disk with its own symbol table, and without the types `link_hooks` reads `ftrace_ops.func` at offset 0, its offset in this kernel's ISF (checked with fake IDA modules by `tests/test_hookchain_stub.py`, not in IDA). You should see these rows (the Owner column as in `expected-hook-chain.txt`; the VM's script set the ftrace filter on `vfs_getattr` and the kprobe on `do_sys_openat2`, and the BPF program is systemd's):
+2. **Edit > Plugins > MemLens: Show patched kernel functions**. It should work right away, before auto-analysis finishes (checked with fake IDA modules, not in IDA). You should see these rows (the Owner column as in `expected-hook-chain.txt`; the VM's script set the ftrace filter on `vfs_getattr` and the kprobe on `do_sys_openat2`, and the BPF program is systemd's):
 
    ```
    Where             | Owner
@@ -35,15 +34,20 @@ No memory image or Volatility needed. Download `memlens-demo-debian13.zip` from 
    vfs_getattr       | function_trace_call (ftrace_ops global_ops)
    ```
 
-   Keys (not checked in IDA): Enter should jump to the function, the list's Edit command (usually Ctrl+E) to the handler and its Insert command (usually Ins, captioned **Jump to owner**) to the owner.
+   Then (not checked in IDA):
+   - double-click a row to go to the hooked function;
+   - right-click it, **Jump to owner**, to go to the owner (in the second sample, the module's callback);
+   - `X` on a renamed hook page, such as `ftrace_tramp_vfs_getattr`, lists the hooked function's call to it.
+
    It should also disassemble the hooked functions, hook pages and owners right away, so you need not wait for auto-analysis to reach the module area: MemLens makes a function at each address on the chain where IDA has none yet (Output window: `11 functions created now` on a database where IDA has made none of them yet, fewer with `(n already in a function)` once it has; checked with fake IDA modules, not in IDA; that auto-analysis gets there late is our understanding, not measured).
    The hooked function's comment, and the top of its pseudocode (by then it is a function: IDA's, or the one MemLens makes), should name the owner first, for example `MemLens: hooked by function_trace_call (ftrace_ops global_ops); chain: call -> ftrace_tramp_vfs_getattr -> function_trace_call (ftrace)`. Where MemLens could not make that function, step 3 (Apply kernel types) or opening the list again adds the pseudocode line once IDA has made it (not checked in IDA).
-3. **MemLens: Apply kernel types from ISF** and pick the `.json.xz` file.
+3. **MemLens: Apply kernel types from ISF** and pick the `.json.xz` file. Because the list already ran on this database, Apply kernel types then applies the hook chain again (Output window: `hook chain applied again with the ftrace_ops layout recorded in this database`): the list's comments then also give each ftrace trampoline and its `ftrace_ops` the ops' flags read from memory, and in the second sample the module's ops is typed as `struct ftrace_ops` (fake IDA modules, not checked in IDA).
 4. Then try the second sample (module hooks): `memlens-demo-testhook.zip` from the same release, same steps; see [A hook set by a module](#a-hook-set-by-a-module-second-sample).
+5. With the demo `kernel.elf` open, **MemLens: Add Volatility hook findings (JSON)** and pick `tests/fixtures/vol-2.28.2/findings/demo/tracepoints.json` in the MemLens folder (hcli installs `tests/` with the plugin): the Volatility JSON recorded from the demo's memory image. It should show the same list plus 27 Volatility rows with a Source column (fake IDA modules, not checked in IDA); see [Volatility's other hook findings](#volatilitys-other-hook-findings-in-the-ida-list).
 
 ### Export it yourself
 
-The demo `kernel.elf` comes from `trace.elf`, a 1 GB memory image of the same VM. The image is public (80 MB compressed, in our [Volatility samples release](https://github.com/nightshift-labs-ai/volatility-2026-samples/releases/tag/samples)), so you can run the exporter on it too. From the unzipped demo folder, with this repository at `<memlens>`:
+The demo `kernel.elf` comes from `trace.elf`, a 1 GB memory image of the same VM. The image is public (80 MB compressed, in our [Volatility samples release](https://github.com/nightshift-labs-ai/volatility-2026-samples/releases/tag/samples)), so you can run the exporter on it too. Volatility is only needed to export images, yours or this one: `pipx install volatility3==2.28.2` (the steps below use a venv instead). From the unzipped demo folder, with this repository at `<memlens>`:
 
 ```
 curl -LO https://github.com/nightshift-labs-ai/volatility-2026-samples/releases/download/samples/trace.elf.xz
@@ -117,9 +121,60 @@ bpf_lsm_file_open    | bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems (BPF p
 __x64_sys_getdents64 | memlens_testhook.th_getdents_pre (kprobe pre_handler)                       | kprobe_ftrace_handler (kprobe via ftrace)
 ```
 
-**Jump to owner** should lead to the module's callback (not checked in IDA). After **Apply kernel types** (also when the list was opened first: Apply kernel types then applies the hook chain again), MemLens should also type `memlens_testhook.th_kill_ops` as `struct ftrace_ops` and comment it and its trampoline with the flags read from memory, `0x857 = ENABLED|DYNAMIC|SAVE_REGS|RECURSION|INITIALIZED|ALLOC_TRAMP`, no IPMODIFY (as the guest's tracefs shows: `R` without `I`), so the ops does not declare that its callback may change where `__x64_sys_kill` continues; that is a declaration, not a guarantee ([docs/OUTPUT.md](docs/OUTPUT.md#the-second-sample-in-full-a-hook-set-by-a-module); fake IDA modules, not checked in IDA). Both owner addresses (`0xffffffffc0cc6010`, `0xffffffffc0cc6040`) match the guest's `/proc/kallsyms` at capture time ([hook-truth-guest.txt](tests/vm/testhook/hook-truth-guest.txt)), and the module's counters in the image, `memlens_testhook.th_kill_calls` = 2 and `th_getdents_calls` = 16, show both hooks ran. There is no `sys_call_table` row: since Linux 6.9, x86-64 dispatches syscalls through `x64_sys_call()`, so a table hook would be inert (`tests/test_demo_injection.py` plants table slots instead).
+**Jump to owner** should lead to the module's callback (not checked in IDA). After **Apply kernel types** (Try it, step 3; when the list was opened first, Apply kernel types applies the hook chain again), MemLens should also type `memlens_testhook.th_kill_ops` as `struct ftrace_ops` and comment it and its trampoline with the flags read from memory, `0x857 = ENABLED|DYNAMIC|SAVE_REGS|RECURSION|INITIALIZED|ALLOC_TRAMP`, no IPMODIFY (as the guest's tracefs shows: `R` without `I`), so the ops does not declare that its callback may change where `__x64_sys_kill` continues; that is a declaration, not a guarantee ([docs/OUTPUT.md](docs/OUTPUT.md#the-second-sample-in-full-a-hook-set-by-a-module); fake IDA modules, not checked in IDA). Both owner addresses (`0xffffffffc0cc6010`, `0xffffffffc0cc6040`) match the guest's `/proc/kallsyms` at capture time ([hook-truth-guest.txt](tests/vm/testhook/hook-truth-guest.txt)), and the module's counters in the image, `memlens_testhook.th_kill_calls` = 2 and `th_getdents_calls` = 16, show both hooks ran. There is no `sys_call_table` row: since Linux 6.9, x86-64 dispatches syscalls through `x64_sys_call()`, so a table hook would be inert (`tests/test_demo_injection.py` plants table slots instead).
 
 To try it, download `memlens-demo-testhook.zip` (21 MB) from the same [demo-data release](https://github.com/nightshift-labs-ai/memlens/releases/tag/demo-data), follow steps 1-3 of Try it and compare with its `expected-hook-chain.txt`; it holds the `kernel.elf`, the same ISF and the module source. The memory image itself, `testhook.elf.xz` (91 MB), is in the [Volatility samples release](https://github.com/nightshift-labs-ai/volatility-2026-samples/releases/tag/samples), so you can also export it yourself. The hooked entry, the trampoline and the module's code at its live address, in `objdump`: [docs/OUTPUT.md](docs/OUTPUT.md#the-second-sample-in-full-a-hook-set-by-a-module).
+
+## What Volatility already tells you
+
+Volatility 3 already lists ftrace callbacks (`linux.tracing.ftrace`), and MemLens uses Volatility for its export. For the 6 hook sites in the two public captures, stock Volatility 2.28.2 (cells as printed) and the MemLens list (Owner text before its parenthesis) name:
+
+| Hook (capture) | Volatility 2.28.2: hooked function / owner | MemLens: hooked function / owner |
+|---|---|---|
+| ftrace, test module (second sample) | `-` / `-`, Module `memlens_testhook` | `__x64_sys_kill` / `memlens_testhook.th_kill_callback` |
+| kprobe, test module (second sample) | `-` / `kprobe_ftrace_handler` | `__x64_sys_getdents64` / `memlens_testhook.th_getdents_pre` |
+| BPF LSM program (second sample) | `-` / `call_direct_funcs` | `bpf_lsm_file_open` / `bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems` |
+| BPF LSM program (demo) | `-` / `call_direct_funcs` | `bpf_lsm_file_open` / `bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems` |
+| kprobe, tracefs (demo) | `do_sys_openat2` / `kprobe_ftrace_handler` | `do_sys_openat2` / `kprobe memlens_kp on do_sys_openat2` |
+| ftrace, tracefs (demo) | `-` / `function_trace_call` | `vfs_getattr` / `function_trace_call` |
+| **Named** | hooked function 1 of 6, owner 1 of 6 (and 1 module name) | hooked function 6 of 6, owner 6 of 6 |
+
+- **Why `-`:** 5 of the 6 sites are at function+0x4, after `endbr64`, and `linux.tracing.ftrace` looks up exact symbol addresses (`do_sys_openat2` has no `endbr64`). A later Volatility could name them.
+- **Other gaps:** Volatility 2.28.2 has no kprobe plugin, so a probe's own handler is not shown; `linux.ebpf` lists the program (`restrict_filesy`, `BPF_PROG_TYPE_LSM`) but not where it is attached; the module's callback is shown by address, with no symbol. `kprobe_ftrace_handler` and `call_direct_funcs` are kernel callbacks shared by every kprobe placed through ftrace and every ftrace direct call (a BPF trampoline is one), so the Named row does not count them as a hook's owner.
+- **Independent of `ftrace_ops_list`** (simulated on a copy of the second sample's image): with the module's `ftrace_ops` unlinked from `ftrace_ops_list`, `linux.tracing.ftrace` printed 2 rows instead of 3, without the module's, and MemLens still named `memlens_testhook.th_kill_callback`, from the ops pointer the trampoline itself holds.
+- **Where Volatility does more:** hook kinds MemLens does not scan (tracepoints, the IDT, keyboard notifiers, afinfo and tty ops, netfilter), every BPF program with its type, and modules hidden from the module list (`linux.malware.hidden_modules`), which MemLens does not export ([Limits](#limits)). `--show-ftrace-flags` gives the same flags decode that MemLens comments when Show patched kernel functions runs after Apply kernel types. Use both.
+- **In IDA,** each row of the list should lead to the hooked entry (double-click), the handler its hook page calls (**Jump to handler**) and the owner at its live address (**Jump to owner**), and each hook page should be renamed by its role, such as `ftrace_tramp_vfs_getattr` (not checked in IDA); `patchscan.py --links` prints the same answer without IDA.
+
+Recorded outputs and commands: [tests/fixtures/vol-2.28.2/compare](tests/fixtures/vol-2.28.2/compare/README.txt); `tests/test_compare.py` checks this table against them and against MemLens's output.
+
+### Volatility's other hook findings in the IDA list
+
+MemLens can put what Volatility's own hook plugins report into the same IDA list: one row per entry with a Source column, Enter on the callback in `kernel.elf`, and Volatility's ftrace rows folded into the MemLens row whose trampoline loads the same `ftrace_ops`. It adds no scan of its own. Run the plugins with Volatility's JSON renderer into one folder (same image and ISF as the export):
+
+```
+mkdir findings
+vol -q -s <symbols> -f <image> -r json linux.tracing.tracepoints.CheckTracepoints > findings/tracepoints.json
+vol -q -s <symbols> -f <image> -r json linux.malware.keyboard_notifiers.Keyboard_notifiers > findings/keyboard_notifiers.json
+vol -q -s <symbols> -f <image> -r json linux.malware.check_idt.Check_idt > findings/check_idt.json
+vol -q -s <symbols> -f <image> -r json linux.malware.check_afinfo.Check_afinfo > findings/check_afinfo.json
+vol -q -s <symbols> -f <image> -r json linux.malware.netfilter.Netfilter > findings/netfilter.json
+vol -q -s <symbols> -f <image> -r json linux.tracing.ftrace.CheckFtrace --show-ftrace-flags > findings/ftrace-flags.json
+```
+
+Then **Edit > Plugins > MemLens: Add Volatility hook findings (JSON)** and pick any file in that folder. To try it on the demo `kernel.elf` with no image and no Volatility, pick a file in `tests/fixtures/vol-2.28.2/findings/demo/` of the MemLens folder: the JSON these commands wrote for `trace.elf`. MemLens reads every `.json` file in the folder and should show the patched-functions list with a Source column and one more row per entry Volatility lists (exact repeats once; the IDT rows last), such as these three on the demo (not checked in IDA):
+
+```
+Where                       | What                                                                       | Source
+vfs_getattr                 | call to memory with no symbol                                              | MemLens; Volatility linux.tracing.ftrace: same ftrace_ops
+tracepoint sched_switch     | probe probe_sched_switch, priority 10                                      | Volatility linux.tracing.tracepoints
+netfilter IPV4 POST_ROUTING | apparmor_ip_postroute, priority -225, net ns 4026531840; Is Hooked: False | Volatility linux.malware.netfilter
+```
+
+- **Address** is the callback, sign-extended from the 48 bits Volatility prints; Enter should jump to it in `kernel.elf`.
+- **No repeats:** an ftrace row whose `ftrace_ops` a MemLens row's hook page loads is merged into that row's Source.
+- **Field names** are pinned to Volatility 2.28.2: a file of another plugin (such as `linux.malware.tty_check`, whose fields hold keyboard notifiers' three), a file that cannot be read, or a field 2.28.2 does not write gets one warning line, and the other files still load.
+
+On the demo's recorded JSON: 3 MemLens rows and 27 Volatility rows, all at functions of the kernel itself (Module `__kernel__`, none in a module): 21 IDT vectors (`check_idt` lists every vector it checks; each is at its `asm_*` handler), the kernel's own probes on 3 sched tracepoints (`probe_sched_switch`, `probe_sched_wakeup`), 2 netfilter hooks that Volatility marks `Is Hooked: False`, and the direct-call `ftrace_ops` with callback `call_direct_funcs` (the kind of ops behind the BPF trampoline on `bpf_lsm_file_open`; MemLens reads no `ftrace_ops` from that trampoline, so there is no address to merge it by). Volatility's other 2 `ftrace_ops` merge into the `do_sys_openat2` and `vfs_getattr` rows, and keyboard notifiers and afinfo are empty. Each address is at the `kernel.elf` symbol Volatility names. Checked with fake IDA modules by `tests/test_volfind_stub.py` against [the recorded JSON](tests/fixtures/vol-2.28.2/findings/README.txt); every row: [docs/OUTPUT.md](docs/OUTPUT.md#with-volatilitys-hook-findings).
 
 ## What it does
 
@@ -151,6 +206,7 @@ In IDA, with any database open (plugin menu entries need one), under **Edit > Pl
 2. Open `kernel.elf` in IDA.
 3. **MemLens: Apply kernel types from ISF**: choose the ISF. If its kernel banner differs from the one in the database, MemLens asks before importing anything.
 4. **MemLens: Show patched kernel functions**: opens the list, links the hook chain, makes a function at each address on it where IDA has none yet, and comments each hooked entry with its owner and chain. Enter jumps to the entry, **Jump to handler** to the handler and **Jump to owner** to the owner when it is in the database. Not yet tried in IDA.
+5. **MemLens: Add Volatility hook findings (JSON)**: the same list plus the findings of Volatility's own hook plugins, read from their JSON output ([above](#volatilitys-other-hook-findings-in-the-ida-list)). Not yet tried in IDA.
 
 Each action in full: [docs/USAGE.md](docs/USAGE.md#usage).
 
@@ -165,6 +221,8 @@ The export dialog points here. The ISF must come from exactly the kernel that wa
 - Function pointers become `void *`.
 - No function prototypes: an ISF gives functions no parameter types. Most kernels also carry BTF, which has them; our companion plugin [btf2ida](https://github.com/nightshift-labs-ai/btf2ida) applies them by name (91.8% of kernel functions on the demo; not tried together with MemLens in IDA).
 - Kernel symbols that are not mapped in the image, such as freed init code, are left out.
+- Finds rewritten function entries and syscall-table slots. It does not walk tracepoints, notifier chains, the IDT, netfilter hooks or file, seq or tty ops (Volatility 2.28.2 has plugins for these; for notifiers, the keyboard chain). **Add Volatility hook findings** shows what those plugins found, except tty ops, in the same list.
+- Modules hidden from the module list are not exported: their hooks are still listed, but the owner shows as an address with no name (`ftrace_ops at 0x... (no symbol: module memory MemLens did not export)`). Measured on a copy of the second sample's image with the module unlinked.
 
 All limits, with measurements: [docs/LIMITS.md](docs/LIMITS.md).
 
@@ -178,7 +236,7 @@ All limits, with measurements: [docs/LIMITS.md](docs/LIMITS.md).
 - When the export fails: [docs/EXPORT.md](docs/EXPORT.md#when-the-export-fails)
 - An ISF for your own image: [docs/EXPORT.md](docs/EXPORT.md#an-isf-for-your-own-image)
 - What was verified (Ghidra, binutils, gcc, the tests): [docs/VERIFICATION.md](docs/VERIFICATION.md)
-- Run every test: `python3 tests/run_all.py` (no IDA, no packages; with `MEMLENS_DEMO_ELF=kernel.elf` it also checks the demo export: 16 passed on the demo `kernel.elf`)
+- Run every test: `python3 tests/run_all.py` (no IDA, no packages; with `MEMLENS_DEMO_ELF=kernel.elf` it also checks the demo export: 18 passed on the demo `kernel.elf`)
 - Limits in full: [docs/LIMITS.md](docs/LIMITS.md)
 - The exporter on its own, as a Volatility 3 plugin: [docs/README-kernel2elf.md](docs/README-kernel2elf.md), [docs/WRITEUP-kernel2elf.md](docs/WRITEUP-kernel2elf.md)
 

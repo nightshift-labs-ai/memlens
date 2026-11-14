@@ -226,7 +226,8 @@ with tempfile.TemporaryDirectory() as t:
             assert list(m.percpu_copies(var, cpus, index)) == list(m.percpu_copies(var, cpus)), (segs, table, var)
     idc.get_first_seg = lambda: idc.BADADDR
     set_names({"demo_var": 0x1000})
-    assert sum(c[0] == "reg" for c in calls) == 3 and sum(c[0] == "menu" for c in calls) == 3
+    assert [c[1] for c in calls if c[0] == "reg"] == ["memlens:export", "memlens:types", "memlens:patches", "memlens:volatility"]
+    assert [c[2] for c in calls if c[0] == "menu"] == ["memlens:export", "memlens:types", "memlens:patches", "memlens:volatility"]
     cmd = m.export_command("/bin/vol", "/x/m.lime", "/out", "/sym")
     assert cmd[-1] == "linux.kernel2elf.Kernel2Elf" and "/x/m.lime" in cmd and "/sym" in cmd
     decls = ["a;", "BADTOKEN;", "b;", "c;", "BADTOKEN2;"]
@@ -381,5 +382,5 @@ with tempfile.TemporaryDirectory() as t:
     odd_dir = tempfile.mkdtemp(); before_odd = m.elf_files(odd_dir); os.mkdir(os.path.join(odd_dir, "kernel.elf"))
     said = m.remove_unusable(odd_dir, "kernel.elf", before_odd)
     assert said.startswith("MemLens could not remove it (") and said.endswith("); do not open it.") and os.path.isdir(os.path.join(odd_dir, "kernel.elf")), said
-    plugin.term(); assert sum(c[0] == "unreg" for c in calls) == 3
+    plugin.term(); assert sum(c[0] == "unreg" for c in calls) == 4
 print("stub test OK (fake IDA modules)")

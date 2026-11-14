@@ -1,0 +1,15 @@
+Volatility 3 Framework 2.28.2
+  |        Address |            Name |              Tag |                        Type
+* | 0xd2614050e000 | restrict_filesy | e8932b6bae2b9745 |           BPF_PROG_TYPE_LSM
+* | 0xd261400cd000 |      sd_devices | a42d275341448247 | BPF_PROG_TYPE_CGROUP_DEVICE
+* | 0xd261400e5000 |    sd_fw_egress | 6deef7357e7b4530 |    BPF_PROG_TYPE_CGROUP_SKB
+* | 0xd26140102000 |   sd_fw_ingress | 6deef7357e7b4530 |    BPF_PROG_TYPE_CGROUP_SKB
+* | 0xd26140151000 |      sd_devices | 2705a24f44b96941 | BPF_PROG_TYPE_CGROUP_DEVICE
+* | 0xd26140169000 |      sd_devices | ee0e253c78993a24 | BPF_PROG_TYPE_CGROUP_DEVICE
+* | 0xd26140181000 |    sd_fw_egress | 6deef7357e7b4530 |    BPF_PROG_TYPE_CGROUP_SKB
+* | 0xd26140199000 |   sd_fw_ingress | 6deef7357e7b4530 |    BPF_PROG_TYPE_CGROUP_SKB
+* | 0xd261406a7000 |      sd_devices | a42d275341448247 | BPF_PROG_TYPE_CGROUP_DEVICE
+* | 0xd2614047b000 |  sysctl_monitor | 342fe7f347490662 | BPF_PROG_TYPE_CGROUP_SYSCTL
+* | 0xd26140159000 |      sd_devices | 6ceaf4d6095cca93 | BPF_PROG_TYPE_CGROUP_DEVICE
+* | 0xd26140191000 |    sd_fw_egress | 6deef7357e7b4530 |    BPF_PROG_TYPE_CGROUP_SKB
+* | 0xd2614044d000 |   sd_fw_ingress | 6deef7357e7b4530 |    BPF_PROG_TYPE_CGROUP_SKB

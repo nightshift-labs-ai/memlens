@@ -1,0 +1,5 @@
+Volatility 3 Framework 2.28.2
+  | ftrace_ops address |              Callback | Callback address | Hooked symbols |           Module | Module address |                                                                                                                                           Flags
+* |     0xffffb26670e0 | kprobe_ftrace_handler |   0xffffb0894ed0 |              - |       __kernel__ | 0xffffb0800000 |                                               FTRACE_OPS_FL_ENABLED,FTRACE_OPS_FL_SAVE_REGS,FTRACE_OPS_FL_INITIALIZED,FTRACE_OPS_FL_ALLOC_TRAMP
+* |     0xffffc0cc80a0 |                     - |   0xffffc0cc6010 |              - | memlens_testhook | 0xffffc0cc6000 | FTRACE_OPS_FL_ENABLED,FTRACE_OPS_FL_DYNAMIC,FTRACE_OPS_FL_SAVE_REGS,FTRACE_OPS_FL_RECURSION,FTRACE_OPS_FL_INITIALIZED,FTRACE_OPS_FL_ALLOC_TRAMP
+* |     0x8e10d01bad00 |     call_direct_funcs |   0xffffb0a0bfd0 |              - |       __kernel__ | 0xffffb0800000 |                              FTRACE_OPS_FL_ENABLED,FTRACE_OPS_FL_DYNAMIC,FTRACE_OPS_FL_SAVE_REGS,FTRACE_OPS_FL_INITIALIZED,FTRACE_OPS_FL_DIRECT

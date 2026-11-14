@@ -1,0 +1,25 @@
+
+[
+  {
+    "Handler": 281473649013696,
+    "Hook": "POST_ROUTING",
+    "Is Hooked": "False",
+    "Module": "__kernel__",
+    "Net NS": 4026531840,
+    "Priority": -225,
+    "Proto": "IPV4",
+    "Symbol": "apparmor_ip_postroute",
+    "__children": []
+  },
+  {
+    "Handler": 281473649013696,
+    "Hook": "POST_ROUTING",
+    "Is Hooked": "False",
+    "Module": "__kernel__",
+    "Net NS": 4026531840,
+    "Priority": -225,
+    "Proto": "IPV6",
+    "Symbol": "apparmor_ip_postroute",
+    "__children": []
+  }
+]

@@ -1,0 +1,33 @@
+
+[
+  {
+    "Callback": "kprobe_ftrace_handler",
+    "Callback address": 281473066815184,
+    "Flags": "FTRACE_OPS_FL_ENABLED,FTRACE_OPS_FL_SAVE_REGS,FTRACE_OPS_FL_INITIALIZED,FTRACE_OPS_FL_ALLOC_TRAMP",
+    "Hooked symbols": "do_sys_openat2",
+    "Module": "__kernel__",
+    "Module address": 281473066205184,
+    "__children": [],
+    "ftrace_ops address": 281473098084576
+  },
+  {
+    "Callback": "function_trace_call",
+    "Callback address": 281473068517952,
+    "Flags": "FTRACE_OPS_FL_ENABLED,FTRACE_OPS_FL_INITIALIZED,FTRACE_OPS_FL_ALLOC_TRAMP,FTRACE_OPS_FL_PID",
+    "Hooked symbols": null,
+    "Module": "__kernel__",
+    "Module address": 281473066205184,
+    "__children": [],
+    "ftrace_ops address": 281473096885856
+  },
+  {
+    "Callback": "call_direct_funcs",
+    "Callback address": 281473068351440,
+    "Flags": "FTRACE_OPS_FL_ENABLED,FTRACE_OPS_FL_DYNAMIC,FTRACE_OPS_FL_SAVE_REGS,FTRACE_OPS_FL_INITIALIZED,FTRACE_OPS_FL_DIRECT",
+    "Hooked symbols": null,
+    "Module": "__kernel__",
+    "Module address": 281473066205184,
+    "__children": [],
+    "ftrace_ops address": 150621439118080
+  }
+]

@@ -19,11 +19,21 @@ Or copy this folder (from the latest release) into your IDA `plugins` directory.
 
 ## Try it
 
-No memory image or Volatility needed for steps 1-3. Download `memlens-demo-debian13.zip` from the [demo-data release](https://github.com/nightshift-labs-ai/memlens/releases/tag/demo-data) (22 MB). It holds a ready `kernel.elf` from a throwaway Debian 13 lab VM (68 MB, 234,095 symbols: 39,173 from modules and 776 per-CPU copies; a different capture of the same kernel than the [table of verified kernels](docs/VERIFICATION.md)), the matching ISF, and the expected output. A whole kernel is a large database, so IDA's auto-analysis and the type import take a while; we have not timed them in IDA.
+No memory image or Volatility needed. Download `memlens-demo-debian13.zip` from the [demo-data release](https://github.com/nightshift-labs-ai/memlens/releases/tag/demo-data) (22 MB). It holds a ready `kernel.elf` from a throwaway Debian 13 lab VM (68 MB, 234,095 symbols: 39,173 from modules and 776 per-CPU copies; a different capture of the same kernel than the [table of verified kernels](docs/VERIFICATION.md)), the matching ISF, and the expected output. A whole kernel is a large database, so IDA's auto-analysis and the type import take a while; we have not timed them in IDA.
 
 1. Unzip it, then open `kernel.elf` in IDA.
-2. **MemLens: Apply kernel types from ISF** and pick the `.json.xz` file.
-3. **MemLens: Show patched kernel functions**. The lab VM's script set an ftrace filter on `vfs_getattr` and a kprobe on `do_sys_openat2`; a third patched entry, `bpf_lsm_file_open`, was not set by the script: its hook page is a BPF trampoline that runs the BPF program `bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems` (systemd's BPF LSM program). All three should be listed as `call to memory with no symbol` (each entry calls a trampoline page that no module owns, copied in as `memlens_target_<address>`), and each label names the handler that page calls: `function_trace_call` (ftrace), `kprobe_ftrace_handler` (kprobe via ftrace) and `__bpf_tramp_enter` (a BPF trampoline), as in `expected-patched-functions.txt`. In the list, the Target column should show each hook page under its new name (`ftrace_tramp_vfs_getattr`, `kprobe_ftrace_tramp_do_sys_openat2`, `bpf_tramp_bpf_lsm_file_open`), the Handler column the function it calls, and the Owner column who put the hook there: `function_trace_call (ftrace_ops global_ops)`, `kprobe memlens_kp on do_sys_openat2 (tracefs kprobe event; pre_handler kprobe_dispatcher)` and `bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems (BPF program)`, as in `expected-hook-chain.txt`. Enter should jump to the function, the list's Edit command (usually Ctrl+E) to the handler and its Insert command (usually Ins, captioned **Jump to owner**) to the owner; the keys are not checked in IDA.
+2. **MemLens: Show patched kernel functions**. The list reads `kernel.elf` itself, so it should need neither the types nor finished auto-analysis: `scan_current_input` in `memlens_entry.py` reads the file from disk with its own symbol table, and without the types `link_hooks` reads `ftrace_ops.func` at offset 0, its offset in this kernel's ISF (checked with fake IDA modules by `tests/test_hookchain_stub.py`, not in IDA). You should see these rows (the Owner column as in `expected-hook-chain.txt`; the VM's script set the ftrace filter on `vfs_getattr` and the kprobe on `do_sys_openat2`, and the BPF program is systemd's):
+
+   ```
+   Where             | Owner
+   bpf_lsm_file_open | bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems (BPF program)
+   do_sys_openat2    | kprobe memlens_kp on do_sys_openat2 (tracefs kprobe event; pre_handler kprobe_dispatcher)
+   vfs_getattr       | function_trace_call (ftrace_ops global_ops)
+   ```
+
+   Keys (not checked in IDA): Enter should jump to the function, the list's Edit command (usually Ctrl+E) to the handler and its Insert command (usually Ins, captioned **Jump to owner**) to the owner.
+3. **MemLens: Apply kernel types from ISF** and pick the `.json.xz` file.
+4. Then try the second sample (module hooks): `memlens-demo-testhook.zip` from the same release, same steps; see [A hook set by a module](#a-hook-set-by-a-module-second-sample).
 
 ### Export it yourself
 

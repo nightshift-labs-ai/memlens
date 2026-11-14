@@ -44,7 +44,8 @@ idapro.close_database = lambda save: calls.append(("close", save))
 xref = types.ModuleType("ida_xref"); xref.fl_CN, xref.fl_JN, xref.XREF_USER = 17, 19, 32
 iname = types.ModuleType("ida_name"); iname.SN_NOWARN = 256
 nnode = types.ModuleType("ida_netnode")
-funcs = types.ModuleType("ida_funcs")
+funcs = types.ModuleType("ida_funcs"); funcs.get_func = lambda ea: None  # IDA has made no function yet
+iname.get_name = lambda ea: {0xffffffffc0b2b000: "ftrace_tramp_vfs_getattr"}.get(ea, "")  # the page as link_hooks renamed it
 sys.modules.update(ida_kernwin=kw, ida_idaapi=api, ida_typeinf=ti, ida_nalt=nalt, idc=idc, ida_bytes=dbytes, idapro=idapro, idautils=autils,
                    ida_xref=xref, ida_name=iname, ida_netnode=nnode, ida_funcs=funcs)
 import memlens_headless as h
@@ -54,14 +55,18 @@ isf = {"base_types": {"unsigned int": {"size": 4, "signed": False, "kind": "int"
                    "pcpu_var": {"address": 0x2000, "type": {"kind": "struct", "name": "demo"}},
                    "linux_banner": {"address": 5, "constant_data": "TGludXggdmVyc2lvbiAxLjA="}},
        "user_types": {"demo": {"kind": "struct", "size": 8, "fields": {"a": {"offset": 0, "type": {"kind": "base", "name": "unsigned int"}}}}}}
-findings = [(0x1000, "vfs_getattr", "call to memory with no symbol", "memlens_target_ffffffffc0b2b000 (calls function_trace_call, ftrace)", None)]
+findings = [(0x1000, "vfs_getattr", "call to memory with no symbol", "memlens_target_ffffffffc0b2b000 (calls function_trace_call, ftrace)", 0xffffffffc0b2b000)]
 m.patchscan.on_disk_kernel = lambda blob: False
 m.patchscan.Image = lambda blob: ("image", blob)
 not_kernel = [None]
 m.patchscan.nothing_to_check = lambda image: not_kernel[0]
 m.patchscan.scan = lambda blob, image=None: findings
-# The hook chain itself is tested in test_hookchain_stub.py; here only that the runner applies it to the scanned image.
-m.link_hooks = lambda image, found: calls.append(("link", image, found)) or ([], dict.fromkeys(
+m.patchscan.copied_page = lambda image, address: address == 0xffffffffc0b2b000  # the hook page MemLens copied into the ELF
+# The hook chain itself is tested in test_hookchain_stub.py; here only that the runner applies it to the scanned image and
+# comments the entry from the link it returns (review s196).
+link = m.patchscan.Link(0x1000, "vfs_getattr", 0x1004, "call", 0xffffffffc0b2b000, True, None, None, "function_trace_call", "ftrace",
+                        m.patchscan.Owner("function_trace_call (ftrace_ops global_ops)", None, "ftrace_ops", []))
+m.link_hooks = lambda image, found: calls.append(("link", image, found)) or ([link], dict.fromkeys(
     ("xrefs", "xrefs_before", "xrefs_failed", "renamed", "named_before", "kept", "rename_failed"), 0))
 with tempfile.TemporaryDirectory() as t:
     elf, p = os.path.join(t, "kernel.elf"), os.path.join(t, "x.json")
@@ -69,7 +74,8 @@ with tempfile.TemporaryDirectory() as t:
     assert h.main([elf, p, "--no-analysis"]) == 0
     assert calls[0] == ("open", "kernel.elf", False) and calls[-1] == ("close", True), calls
     assert ("settype", 0x1000, "struct demo demo_var;") in calls and ("settype", 0x2100, "struct demo pcpu_var;") in calls, calls
-    assert comments[0x1000].startswith("MemLens: call to memory with no symbol memlens_target_ffffffffc0b2b000"), comments
+    assert comments[0x1000] == ("MemLens: hooked by function_trace_call (ftrace_ops global_ops); chain: call -> ftrace_tramp_vfs_getattr "
+                                "-> function_trace_call (ftrace)"), comments
     assert ("link", ("image", b"\x7fELF"), findings) in calls and calls.index(("link", ("image", b"\x7fELF"), findings)) < len(calls) - 1, calls
     # The entry comments are written after the hook chain is linked, from its names, as the menu action does (judge s194 F2).
     assert calls.index(("link", ("image", b"\x7fELF"), findings)) < calls.index(("cmt", 0x1000)), calls

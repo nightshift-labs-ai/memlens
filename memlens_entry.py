@@ -6,7 +6,7 @@ Three actions under Edit > Plugins:
   * Show patched kernel functions: lists hooked entries and odd syscall slots, Enter jumps there; links each hooked
     entry to its hook page and the page to its handler (code xrefs) and to its owner (the BPF program, or the
     ftrace_ops and its callback), names the hook pages by role, and comments each hooked entry (and the function that
-    starts there) with that chain and its owner.
+    starts there) with its owner and that chain.
 """
 import base64
 import hashlib
@@ -1022,14 +1022,19 @@ def set_entry_comment(address, text, page):
 
 
 def set_function_comment(address, text):
-    """text also as the comment of the function that starts at address, which Hex-Rays prints at the top of its
-    pseudocode. Only when IDA has a function starting there, and its comment is empty or holds only lines an earlier
-    run wrote (patchscan.ENTRY_PREFIX): never over the analyst's. Returns True when it was set."""
+    """text also as the (regular) comment of the function that starts at address, which Hex-Rays should print at the
+    top of its pseudocode. Only when IDA has a function starting there, and both its comments, regular and repeatable,
+    are empty or hold only lines an earlier run wrote (patchscan.ENTRY_PREFIX): never over or next to the analyst's
+    (review s196). Returns True when it was set."""
+    # get_func, get_func_cmt and set_func_cmt are deprecated in the IDA 9.5 SDK (for get_func_start, get_func_cmt_ea,
+    # set_func_cmt_ea), but the idapro 0.0.5 to 0.0.9 stubs (older IDA) lack those: the old names are kept on purpose.
     pfn = ida_funcs.get_func(address)
     if pfn is None or pfn.start_ea != address:
         return False  # no function there yet, or address is inside another function
     old = ida_funcs.get_func_cmt(pfn, False) or ""
-    if text in old or any(not line.startswith(patchscan.ENTRY_PREFIX) for line in (old.split("\n") if old else [])):
+    repeatable = ida_funcs.get_func_cmt(pfn, True) or ""
+    lines = (old.split("\n") if old else []) + (repeatable.split("\n") if repeatable else [])
+    if text in old or any(not line.startswith(patchscan.ENTRY_PREFIX) for line in lines):
         return False
     return bool(ida_funcs.set_func_cmt(pfn, text, False))
 
@@ -1041,13 +1046,16 @@ def database_names(image, findings):
 
 def comment_entries(image, findings, links, names):
     """Each finding's comment (patchscan.entry_comments, with names: the database's names after link_hooks). An entry
-    linked to a copied hook page gets the chain and its owner (set_entry_comment), and the function that starts there
-    the same text (set_function_comment); any other row gets the scan's line, as before. Returns the number of function
-    comments set."""
+    linked to a copied hook page gets its owner and the chain (set_entry_comment), and the function that starts there
+    the same text (set_function_comment); any other row gets the scan's line, as before, unless an earlier run wrote
+    the chain there (linking failed this time: that line stays, review s196). Returns the number of function comments
+    set."""
     set_functions = 0
     for address, text, page in patchscan.entry_comments(image, findings, links, names):
         if page is None:
-            add_comment(address, text)
+            old = idc.get_cmt(address, False) or ""
+            if not any(line.startswith(patchscan.ENTRY_PREFIX) for line in old.split("\n")):
+                add_comment(address, text)
         else:
             set_entry_comment(address, text, page)
             set_functions += set_function_comment(address, text)
@@ -1234,8 +1242,11 @@ def refresh_hook_chain():
             return False
         image, findings = scanned
         links, counts = link_hooks(image, findings)
-        comment_entries(image, findings, links, database_names(image, findings))  # as Show patched kernel functions does
         ida_kernwin.msg(link_report(links, counts))
+        try:  # as Show patched kernel functions does; an error here leaves the chain applied and its report shown
+            comment_entries(image, findings, links, database_names(image, findings))
+        except Exception:
+            ida_kernwin.msg("[MemLens] comments at the hooked entries stopped by this error:\n%s\n" % traceback.format_exc())
         ida_kernwin.msg("[MemLens] hook chain applied again with the ftrace_ops layout recorded in this database (Show "
                         "patched kernel functions ran before Apply kernel types)\n")
         return True

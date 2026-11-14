@@ -176,8 +176,13 @@ def handler_kind(handler):
     function (module.symbol, into_module), or None: a core-kernel function that is not ftrace, kprobe or BPF plumbing
     (_printk, kfree, a retpoline thunk) is a helper the hook code uses, not a handler (judge s160 finding 5)."""
     kind = next((kind for prefix, kind in HANDLER_KINDS if handler.startswith(prefix)), None)
-    # bpf.* (the exporter's BPF names) and dot-prefixed core labels (.E_copy, .slowpath) are not module functions (code review s170 n-1)
-    return kind or (MODULE_CALLBACK if into_module("", handler) and not handler.startswith(("bpf.", ".")) else None)
+    return kind or (MODULE_CALLBACK if module_symbol(handler) else None)
+
+
+def module_symbol(name):
+    """True for a module's symbol (module.symbol). bpf.* (the exporter's BPF names) and dot-prefixed core labels
+    (.E_copy, .slowpath) are not module symbols (code review s170 n-1), nor are compiler clones (foo.isra.0)."""
+    return bool(name) and into_module("", name) and not name.startswith(("bpf.", "."))
 
 
 def page_kind(image, page, handler):
@@ -479,12 +484,100 @@ OPS_LOAD = b"\x48\x8b\x15"
 KERNEL_MAP = 0xffffffff80000000  # x86-64: the kernel image and module space (modules, trampolines, BPF) are above this
 
 
-def ftrace_ops_func_offset(isf):
-    """The offset of func in struct ftrace_ops from a loaded ISF (a dict), or None when the ISF does not have it."""
+def ftrace_ops_field_offset(isf, field):
+    """The offset of a field of struct ftrace_ops from a loaded ISF (a dict), or None when the ISF does not have it."""
     try:
-        return int(isf["user_types"]["ftrace_ops"]["fields"]["func"]["offset"])
+        return int(isf["user_types"]["ftrace_ops"]["fields"][field]["offset"])
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def ftrace_ops_func_offset(isf):
+    """The offset of func in struct ftrace_ops from a loaded ISF (a dict), or None when the ISF does not have it."""
+    return ftrace_ops_field_offset(isf, "func")
+
+
+# ftrace_ops.flags (include/linux/ftrace.h). The FTRACE_OPS_FL_* values are an anonymous enum whose numbering changed
+# across kernel versions, so they are only ever read by name from that kernel's ISF, never assumed. IPMODIFY is the flag
+# a callback sets when it may change where the hooked function continues (livepatch, ftrace hooks that replace a
+# function). It is a declaration: the x86 trampolines of both samples copy regs->ip back after every callback.
+FTRACE_OPS_FL = "FTRACE_OPS_FL_"
+IPMODIFY = FTRACE_OPS_FL + "IPMODIFY"
+
+
+def ftrace_ops_flag_values(isf):
+    """{FTRACE_OPS_FL_<name>: value} from the enums of a loaded ISF (in Linux an anonymous one), {} when it has none."""
+    values = {}
+    enums = isf.get("enums") if isinstance(isf, dict) else None
+    for enum in (enums.values() if isinstance(enums, dict) else ()):
+        constants = enum.get("constants") if isinstance(enum, dict) else None
+        for name, value in (constants.items() if isinstance(constants, dict) else ()):
+            if name.startswith(FTRACE_OPS_FL) and isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                values.setdefault(name, value)
+    return values
+
+
+def ops_flags_text(flags, values):
+    """The comment for an ftrace_ops whose flags field holds flags, decoded with values ({FTRACE_OPS_FL_<name>: value}),
+    or None when values has no FTRACE_OPS_FL_IPMODIFY (nothing is said without it). Bits no name covers are shown as a
+    number."""
+    if not isinstance(values, dict):
+        return None
+    values = {name: value for name, value in values.items() if isinstance(name, str) and name.startswith(FTRACE_OPS_FL)
+              and isinstance(value, int) and not isinstance(value, bool) and value > 0}
+    ipmodify = values.get(IPMODIFY)
+    if not ipmodify:
+        return None
+    names, rest = [], flags
+    for name, value in sorted(values.items(), key=lambda item: (item[1], item[0])):
+        if flags & value == value:
+            names.append(name[len(FTRACE_OPS_FL):])
+            rest &= ~value
+    if rest:
+        names.append("%#x" % rest)
+    if flags & ipmodify == ipmodify:
+        meaning = ("IPMODIFY: the callback declared that it may change where the hooked function continues (as livepatch "
+                   "and ftrace hooks that replace a function do)")
+    else:
+        meaning = ("no IPMODIFY: the callback did not declare that it may change where the hooked function continues (a "
+                   "declaration, not a guarantee: read the callback to be sure)")
+    return "MemLens: ftrace_ops flags %#x = %s; %s" % (flags, "|".join(names) or "none", meaning)
+
+
+def ftrace_ops_pages(image, links):
+    """{page: ftrace_ops address} for the copied ftrace trampolines among the links whose Owner comes from the ops they
+    load (Owner.how 'ftrace_ops') and whose ops is in the ELF. kprobe pages are left out, also when their Owner is the
+    kprobe layer's ops (exports without the kprobe list): a kprobe's pre_handler can change regs->ip, and no flag says so."""
+    kprobe_pages = {link.target for link in links if link.page and link.kind == KPROBE_KIND}
+    pages = {}
+    for page, owner in sorted(page_owners(links).items()):
+        if owner.how != "ftrace_ops" or page in kprobe_pages:
+            continue
+        found = ftrace_ops_slot(image, page)
+        if found is not None and image.segment(found[1]) is not None:
+            pages[page] = found[1]
+    return pages
+
+
+def ops_flags_comments(image, links, offset, values):
+    """{address: comment} with ops_flags_text for each ftrace_ops_pages page and its ops, the flags read at offset in the
+    ops (unsigned long); {} when values has no IPMODIFY, and nothing for an ops whose flags are not in the ELF."""
+    comments = {}
+    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+        return comments
+    for page, ops in sorted(ftrace_ops_pages(image, links).items()):
+        raw = image.read(ops + offset, 8)
+        text = ops_flags_text(struct.unpack("<Q", raw)[0], values) if raw else None
+        if text:
+            comments[page] = comments[ops] = text
+    return comments
+
+
+def module_ops(image, links):
+    """The ftrace_ops addresses of ftrace_ops_pages at which a module's symbol starts (memlens_testhook.th_kill_ops):
+    Apply kernel types types the kernel's globals by their ISF names, and a module's are not in the ISF. An ops inside a
+    bigger object (evilmod.hooks+0x20, an array of hook records) is left alone."""
+    return sorted({ops for ops in ftrace_ops_pages(image, links).values() if module_symbol(symbol_start(image, ops))})
 
 
 def ftrace_ops_slot(image, page, span=0x200):

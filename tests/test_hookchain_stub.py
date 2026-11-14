@@ -298,7 +298,7 @@ with tempfile.TemporaryDirectory() as work:
     m.save_layout(m.isf_layout(FLAGS_ISF))
     run()
     assert not [c for c in calls if c[0] == "settype"], calls
-    assert comments[OPS] == "MemLens: ftrace_ops flags 0 = none; " + NO_IPMODIFY, comments
+    assert comments[OPS] == "MemLens: ftrace_ops flags 0x0 = none; " + NO_IPMODIFY, comments
     known_types.clear()
     nalt.get_input_file_path = lambda: ""
 
@@ -349,9 +349,10 @@ with tempfile.TemporaryDirectory() as work:
     assert layout == {"ftrace_ops.func": 0, "ftrace_ops.flags": 16,
                       "FTRACE_OPS_FL": {"FTRACE_OPS_FL_" + name: 1 << bit for bit, name in enumerate(FL_6_12)}}, layout
     assert layout["FTRACE_OPS_FL"]["FTRACE_OPS_FL_IPMODIFY"] == 0x1000, layout
-    # IPMODIFY set, plus a bit the enum does not name (shown as a number, not dropped).
-    settype, out = flags_run(0x101007, layout)
-    text = "MemLens: ftrace_ops flags 0x101007 = ENABLED|DYNAMIC|SAVE_REGS|IPMODIFY|0x100000; " + IPMODIFY_TEXT
+    # IPMODIFY set, plus a bit the enum does not name (shown as a number, not dropped; above bit 31: flags is an
+    # unsigned long, read as 8 bytes).
+    settype, out = flags_run(0x10000001007, layout)
+    text = "MemLens: ftrace_ops flags 0x10000001007 = ENABLED|DYNAMIC|SAVE_REGS|IPMODIFY|0x10000000000; " + IPMODIFY_TEXT
     assert flag_lines() == {PAGE: [text], OPS: [text]}, flag_lines()
     assert comments[OPS] == text and comments[PAGE].split("\n")[0].startswith("MemLens: hook page no module owns"), comments
     assert settype == [(OPS, "struct ftrace_ops;")], settype
@@ -374,8 +375,8 @@ with tempfile.TemporaryDirectory() as work:
     old = m.isf_layout(flags_isf(["ENABLED", "DYNAMIC", "CONTROL", "SAVE_REGS", "SAVE_REGS_IF_SUPPORTED", "RECURSION_SAFE", "STUB",
                                   "INITIALIZED", "DELETED", "ADDING", "REMOVING", "MODIFYING", "ALLOC_TRAMP", "IPMODIFY", "PID"]))
     assert old["FTRACE_OPS_FL"]["FTRACE_OPS_FL_IPMODIFY"] == 0x2000, old
-    flags_run(0x101007, old)
-    text = "MemLens: ftrace_ops flags 0x101007 = ENABLED|DYNAMIC|CONTROL|ALLOC_TRAMP|0x100000; " + NO_IPMODIFY
+    flags_run(0x10000001007, old)
+    text = "MemLens: ftrace_ops flags 0x10000001007 = ENABLED|DYNAMIC|CONTROL|ALLOC_TRAMP|0x10000000000; " + NO_IPMODIFY
     assert flag_lines() == {PAGE: [text], OPS: [text]}, flag_lines()
     # struct ftrace_ops not in the database (types not imported): the flags are decoded, nothing is typed.
     settype, out = flags_run(0x101007, layout, types=())
@@ -395,13 +396,15 @@ with tempfile.TemporaryDirectory() as work:
     nalt.get_input_file_path = lambda: ""
 known_types.clear()
 
-# Apply kernel types records that layout in the database: a second ISF without the enum drops the old values (they
-# would be another kernel's), and keys it does not set stay.
+# Apply kernel types records that layout in the database: a second ISF without the enum (or without struct ftrace_ops)
+# drops the old values (they would be another kernel's), and keys it does not set stay.
 with tempfile.TemporaryDirectory() as work:
     blobs.clear()
     m.save_layout({"other.key": 1})
     for isf, expected in ((FLAGS_ISF, dict(m.isf_layout(FLAGS_ISF), **{"other.key": 1})),
-                          (dict(FLAGS_ISF, enums={}), {"ftrace_ops.func": 0, "ftrace_ops.flags": 16, "other.key": 1})):
+                          (dict(FLAGS_ISF, enums={}), {"ftrace_ops.func": 0, "ftrace_ops.flags": 16, "other.key": 1}),
+                          (FLAGS_ISF, dict(m.isf_layout(FLAGS_ISF), **{"other.key": 1})),
+                          (dict(FLAGS_ISF, user_types={}, enums={}), {"other.key": 1})):
         isf_path = os.path.join(work, "isf.json")
         with open(isf_path, "w") as handle:
             json.dump(isf, handle)
@@ -552,7 +555,7 @@ for path in sys.argv[1:]:
     database(blob)
     known_types.add("ftrace_ops")
     m.save_layout(layout)
-    run()
+    _, _, flags_out = run()
     settype = [c[1:] for c in calls if c[0] == "settype"]
     assert [m._open_list.OnGetLine(n) for n in range(m._open_list.OnGetSize())] == rows
     flagged = flag_comments()
@@ -567,10 +570,11 @@ for path in sys.argv[1:]:
     print("  after Apply kernel types with %s (ftrace_ops.flags = %d, %d FTRACE_OPS_FL_* values by name, IPMODIFY = %#x): the same %d rows"
           % (os.path.basename(isf_path), layout["ftrace_ops.flags"], len(layout["FTRACE_OPS_FL"]),
              layout["FTRACE_OPS_FL"]["FTRACE_OPS_FL_IPMODIFY"], len(rows)))
+    print("    " + next(line for line in flags_out.splitlines() if "hook chain:" in line))
     for ea, lines in sorted(flagged.items()):
-        print("    comment at %#x (%s): %s" % (ea, ps.at(image, ea), lines[0]))
+        print("    comment at %#x (%s): %s" % (ea, iname.get_name(ea) or ps.at(image, ea), lines[0]))
     for ea, declaration in settype:
-        print("    SetType(%#x (%s), %r)" % (ea, ps.at(image, ea), declaration))
+        print("    SetType(%#x (%s), %r)" % (ea, iname.get_name(ea) or ps.at(image, ea), declaration))
     print("    %d SetType; second run: 0 SetType, 0 comments changed%s" % (
         len(settype), "; as expected for this public sample" if sha in REAL_FLAGS else ""))
     # The same ISF without its FTRACE_OPS_FL_ enum: no flags comment (no guessed values); the struct is still there.

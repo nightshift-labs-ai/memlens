@@ -486,11 +486,18 @@ print("kprobe owner tests OK (hand-made ELF: %d probes in .memlens.kprobes, %d k
 EXPECTED = {
     "vfs_getattr": ("function_trace_call (ftrace_ops global_ops)", "function_trace_call", 0xdd, "global_ops"),
     "do_sys_openat2": ("kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)", "kprobe_ftrace_handler", 0x162, "kprobe_ftrace_ops"),
+    # The test-module sample (tests/vm/testhook): the module's own ftrace_ops, called through ftrace_ops_assist_func
+    # (flags SAVE_REGS | RECURSION); the callback address matches the guest's /proc/kallsyms (hook-truth-guest.txt).
+    "__x64_sys_kill": ("memlens_testhook.th_kill_callback (ftrace_ops memlens_testhook.th_kill_ops)",
+                       "memlens_testhook.th_kill_callback", 0x162, "memlens_testhook.th_kill_ops"),
+    "__x64_sys_getdents64": ("kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)", "kprobe_ftrace_handler", 0x162, "kprobe_ftrace_ops"),
 }
 # An export with the kernel's kprobe list (.memlens.kprobes, in exports newer than v0.3.28) names the probe instead:
 # tests/vm/scenario_ftrace_d13.sh made it with 'p:memlens_kp do_sys_openat2'. The ftrace_ops references stay.
 EXPECTED_KPROBE = {"do_sys_openat2": ("kprobe memlens_kp on do_sys_openat2 (tracefs kprobe event; pre_handler kprobe_dispatcher)",
-                                      "kprobe_dispatcher")}
+                                      "kprobe_dispatcher"),
+                  # the test module's register_kprobe() with a pre_handler (tests/vm/testhook/memlens_testhook.c)
+                  "__x64_sys_getdents64": ("memlens_testhook.th_getdents_pre (kprobe pre_handler)", "memlens_testhook.th_getdents_pre")}
 # BPF trampolines: the program call's offset in the page, the kernel's name for the program (an export with BPF names
 # has it as bpf.<name>), and the program's address in the exports without BPF names that we know (page -> program):
 # the demo kernel.elf and the Ubuntu 24.04 export.
@@ -517,7 +524,7 @@ for path in sys.argv[1:]:
             assert link.owner == ps.Owner(text, program, "BPF program", [(link.target + site, program, "call")]), link
             print("%s: %s -> %s" % (path, link.function, link.owner.text))
     if not known and not any(link.function in EXPECTED_BPF for link in links):
-        print("%s: SKIPPED, no hook with expected values (EXPECTED knows the demo's and Ubuntu 24.04's)" % path)
+        print("%s: SKIPPED, no hook with expected values (EXPECTED knows the demo's, Ubuntu 24.04's and the test module's)" % path)
         continue
     lines, _ = owner_lines(path)
     assert lines == [["%#x" % link.target, "%#x" % link.owner.address if link.owner.address is not None else "-", link.owner.text]

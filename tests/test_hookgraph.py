@@ -64,8 +64,8 @@ SAMPLES = [("testhook", os.path.join(IMG, "expected-hook-chain.testhook.txt"), T
            ("demo", os.path.join(IMG, "expected-hook-chain.demo.txt"), DEMO_SHA)]  # bottom panel
 SCALE = 1.5  # the PNG's device scale (docs/img/README.md step 2)
 # (hookchain.svg, hookchain.png) sha256: the PNG rendered from that SVG (docs/img/README.md step 2 records the same pair)
-RENDERED = ("b58e2860ee7b20dbf1305c6302ae97798a02050e091ad5b677d459122c34205c",
-            "ec821f8f7bbb8d7415a194d6f795e28d1f70092fb70a6a91ca006ef5514b00a8")
+RENDERED = ("3b3a5a02dc16ae297da23d75761e6c9fc00c276be14c276db02834c68cdd3f57",
+            "45020c145f049b97c8d57ea473d661d25b8672125e27dc8fdcc16666ac125d98")
 NS = "{http://www.w3.org/2000/svg}"
 TOOL = [sys.executable, "-I", os.path.join(ROOT, "tools", "hookgraph.py")]
 PATCHSCAN = [sys.executable, "-I", os.path.join(ROOT, "patchscan.py")]
@@ -79,7 +79,7 @@ TOUCH, NEAR = 2, 12  # px: an arrow starts and ends this close to its boxes; its
 # The tool's own words, the only texts in the picture that are not pieces of the --links output, typed here again so that
 # a word changed in tools/hookgraph.py fails: the heading of each demo sample's panel (no other kernel.elf gets one) and
 # the colour legend, whose colour words name the colours the boxes of each role are drawn in.
-HEADING = {"testhook": "Second sample: test module hooks", "demo": "Demo: Debian 13 6.12 memory image"}
+HEADING = {"testhook": "Hooks set by a test module (second sample)", "demo": "Hooks set through tracefs (demo)"}
 LEGEND = (("site", "white = hooked function"), ("page", "orange = hook page MemLens named"),
           ("handler", "blue = handler"), ("owner", "purple = owner"))
 COLOURS = {"site": ("#ffffff", "#8c959f"),  # (fill, stroke): white, grey border
@@ -503,14 +503,14 @@ mutants = {
     "owner arrow label swapped": in_panel(svg_text, 2, ">kprobe<", ">ftrace_ops<"),
     "owner box removed": in_panel(svg_text, 1, r'<rect [^>]*fill="%s"[^>]*/>\n' % hookgraph.STYLE["owner"][0], ""),
     "arrowhead reversed": re.sub(r'<polygon points="(\d+),(\d+) (\d+),(\d+) (\d+),(\d+)"', head_reversed, svg_text, count=1),
-    "heading reworded": in_panel(svg_text, 1, ">Second sample: test module hooks<", ">Second sample: rootkit hooks<"),
+    "heading reworded": in_panel(svg_text, 1, r">Hooks set by a test module \(second sample\)<", ">Hooks set by a rootkit (second sample)<"),
     "headings swapped": svg_text.replace(HEADING["testhook"], "@").replace(HEADING["demo"], HEADING["testhook"]).replace(
         "@", HEADING["demo"]),
     "heading dropped": in_panel(svg_text, 2, r'<text class="heading"[^>]*>[^<]*</text>\n', ""),
     "heading doubled into a lane": in_panel(svg_text, 1, r'(<g class="lane">\n)',
                                             r'\1<text class="heading" x="22" y="90" font-size="15" fill="#1f2328">%s</text>\n'
                                             % HEADING["testhook"]),
-    "a --links word as the heading": in_panel(svg_text, 2, ">%s<" % HEADING["demo"], ">kprobe<"),
+    "a --links word as the heading": in_panel(svg_text, 2, ">%s<" % re.escape(HEADING["demo"]), ">kprobe<"),
     "legend reworded": in_legend(svg_text, ">purple = owner<", ">red = owner<"),
     "legend reordered": in_legend(in_legend(svg_text, ">blue = handler<", ">@<"), ">purple = owner<", ">blue = handler<").replace(
         ">@<", ">purple = owner<", 1),

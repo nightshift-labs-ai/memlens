@@ -60,8 +60,8 @@ Lane = collections.namedtuple("Lane", "site flow page handler hflow kind owner h
 # The tool's own words, the only text that is not a piece of the --links output (tests/test_hookgraph.py exempts exactly
 # these strings). The panel heading of each public demo kernel.elf (demo-data release), by its sha256:
 HEADINGS = {
-    "1481bdbfd0d12b907e208b873d5810c6d1e2adacdf8dbc9cebfb0ae8ad80efa5": "Demo: Debian 13 6.12 memory image",  # memlens-demo-debian13.zip
-    "8d95998eacc39055c81417983f3dcdf7bea1d1c811272b13725035971dd149f9": "Second sample: test module hooks",  # memlens-demo-testhook.zip
+    "1481bdbfd0d12b907e208b873d5810c6d1e2adacdf8dbc9cebfb0ae8ad80efa5": "Hooks set through tracefs (demo)",  # memlens-demo-debian13.zip
+    "8d95998eacc39055c81417983f3dcdf7bea1d1c811272b13725035971dd149f9": "Hooks set by a test module (second sample)",  # memlens-demo-testhook.zip
 }
 # The colour legend, one line above the panels: each box role, with its colour as STYLE draws it.
 LEGEND = (("site", "white = hooked function"), ("page", "orange = hook page MemLens named"),

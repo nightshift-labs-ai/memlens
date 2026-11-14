@@ -12,7 +12,7 @@
 </g>
 <g class="panel">
 <rect x="10" y="34" width="880" height="420" rx="10" fill="#f6f8fa" stroke="#d1d9e0"/>
-<text class="heading" x="22" y="59" font-size="15" fill="#1f2328">Second sample: test module hooks</text>
+<text class="heading" x="22" y="59" font-size="15" fill="#1f2328">Hooks set by a test module (second sample)</text>
 <g class="lane">
 <rect x="22" y="72" width="211" height="44" rx="6" fill="#ffffff" stroke="#8c959f"/>
 <text class="site" x="32" y="98" font-size="13" fill="#1f2328">__x64_sys_kill+0x4</text>
@@ -84,7 +84,7 @@
 </g>
 <g class="panel">
 <rect x="10" y="466" width="880" height="420" rx="10" fill="#f6f8fa" stroke="#d1d9e0"/>
-<text class="heading" x="22" y="491" font-size="15" fill="#1f2328">Demo: Debian 13 6.12 memory image</text>
+<text class="heading" x="22" y="491" font-size="15" fill="#1f2328">Hooks set through tracefs (demo)</text>
 <g class="lane">
 <rect x="22" y="504" width="211" height="44" rx="6" fill="#ffffff" stroke="#8c959f"/>
 <text class="site" x="32" y="530" font-size="13" fill="#1f2328">bpf_lsm_file_open+0x4</text>

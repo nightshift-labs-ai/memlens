@@ -7,8 +7,8 @@ They are drawn from `patchscan.py --links` output. They are not IDA screenshots:
 ## What the picture shows
 
 - **Legend line, at the top:** white = hooked function, orange = hook page MemLens named, blue = handler, purple = owner, each with a square in that box's colours.
-- **Top panel, "Second sample: test module hooks":** `memlens-demo-testhook.zip`. The test module `memlens_testhook` ([tests/vm/testhook](../../tests/vm/testhook/README.md)) hooks `__x64_sys_kill` with an ftrace callback and `__x64_sys_getdents64` with a kprobe. The `bpf_lsm_file_open` lane is systemd's BPF LSM program.
-- **Bottom panel, "Demo: Debian 13 6.12 memory image":** `memlens-demo-debian13.zip`. The lab VM's script set, through the kernel's tracing (tracefs), an ftrace filter on `vfs_getattr` and a kprobe event (`memlens_kp`) on `do_sys_openat2`. The `bpf_lsm_file_open` lane is the same systemd program again.
+- **Top panel, "Hooks set by a test module (second sample)":** `memlens-demo-testhook.zip`. The test module `memlens_testhook` ([tests/vm/testhook](../../tests/vm/testhook/README.md)) hooks `__x64_sys_kill` with an ftrace callback and `__x64_sys_getdents64` with a kprobe. The `bpf_lsm_file_open` lane is systemd's BPF LSM program.
+- **Bottom panel, "Hooks set through tracefs (demo)":** `memlens-demo-debian13.zip`. The lab VM's script set, through the kernel's tracing (tracefs), an ftrace filter on `vfs_getattr` and a kprobe event (`memlens_kp`) on `do_sys_openat2`. The `bpf_lsm_file_open` lane is the same systemd program again.
 - **One lane per patched function entry**, in the order patchscan lists them (by address):
   - **White box:** the hooking instruction (function+offset).
   - **Orange box:** the hook page it calls, copied from memory. The top line is the name MemLens gives the page in IDA, and the line under it is the exporter's `memlens_target_` label.
@@ -33,7 +33,7 @@ They are drawn from `patchscan.py --links` output. They are not IDA screenshots:
 2. **PNG:** rasterised offline from the SVG with Playwright's Chromium headless shell (`chromium_headless_shell-1155`).
    - **Settings:** viewport set to the SVG's size (900 x 896), device scale 1.5, so it stays sharp on HiDPI screens. The system's monospace font is DejaVu Sans Mono here.
    - **Result:** 1350 x 1344 px, 248 KB, embedded at width 900.
-   - **Hashes:** rendered from hookchain.svg sha256 b58e2860ee7b20dbf1305c6302ae97798a02050e091ad5b677d459122c34205c; hookchain.png sha256 ec821f8f7bbb8d7415a194d6f795e28d1f70092fb70a6a91ca006ef5514b00a8. `tests/test_hookgraph.py` checks this pair (its `RENDERED`), because README.md shows the PNG: a redrawn SVG needs a new PNG, and both hashes change here and in the test. The script below gives these PNG bytes again from this SVG here; another machine's fonts may give other bytes.
+   - **Hashes:** rendered from hookchain.svg sha256 3b3a5a02dc16ae297da23d75761e6c9fc00c276be14c276db02834c68cdd3f57; hookchain.png sha256 45020c145f049b97c8d57ea473d661d25b8672125e27dc8fdcc16666ac125d98. `tests/test_hookgraph.py` checks this pair (its `RENDERED`), because README.md shows the PNG: a redrawn SVG needs a new PNG, and both hashes change here and in the test. The script below gives these PNG bytes again from this SVG here; another machine's fonts may give other bytes.
    - **Script** (Node, with the `playwright` package):
 
      ```js
@@ -57,7 +57,7 @@ To redraw after a change to patchscan, run step 1, then step 2 (device scale 1.5
   - The SVG parses with `xml.etree` and has no script, style, image, link or event attribute.
   - Every text node in panel *i* is a piece of one field of sample *i*'s expected text, and each bold text is a piece of an `owner` line.
   - **The only exceptions are the tool's own words**, typed again in the test so that a changed word fails:
-    - Panel *i*'s heading, exactly `Second sample: test module hooks` (top) or `Demo: Debian 13 6.12 memory image` (bottom), at the top of its panel, outside the lanes. A panel drawn from any other `kernel.elf` has no heading.
+    - Panel *i*'s heading, exactly `Hooks set by a test module (second sample)` (top) or `Hooks set through tracefs (demo)` (bottom), at the top of its panel, outside the lanes. A panel drawn from any other `kernel.elf` has no heading.
     - The legend line above the panels, exactly `white = hooked function`, `orange = hook page MemLens named`, `blue = handler`, `purple = owner`, in that order. Each square is in the fill and border colours of its role's boxes, and every box of that role has those colours.
   - **Lane by lane:**
     - The site, the first arrow's label and the page label are one `xref` line, with that type.
@@ -86,7 +86,7 @@ To redraw after a change to patchscan, run step 1, then step 2 (device scale 1.5
 README.md has this right under its pitch (the test checks that README.md holds these lines as they are):
 
 ```markdown
-<a href="docs/img/hookchain.svg"><img src="docs/img/hookchain.png" width="900" alt="Hook chain diagram drawn from patchscan.py --links output on the two demo kernel.elf files, not an IDA screenshot. Legend: white = hooked function, orange = hook page MemLens named, blue = handler, purple = owner. Top panel, second sample (test module hooks): __x64_sys_kill hooked through ftrace, owner memlens_testhook.th_kill_callback; bpf_lsm_file_open, owner systemd's BPF program; __x64_sys_getdents64 hooked by a kprobe, owner memlens_testhook.th_getdents_pre. Bottom panel, demo (Debian 13 6.12 memory image): bpf_lsm_file_open, the same BPF program; do_sys_openat2, owner the tracefs kprobe memlens_kp; vfs_getattr, owner function_trace_call (ftrace_ops global_ops)."></a>
+<a href="docs/img/hookchain.svg"><img src="docs/img/hookchain.png" width="900" alt="Hook chain diagram drawn from patchscan.py --links output on the two demo kernel.elf files, not an IDA screenshot. Legend: white = hooked function, orange = hook page MemLens named, blue = handler, purple = owner. Top panel, hooks set by a test module (second sample): __x64_sys_kill hooked through ftrace, owner memlens_testhook.th_kill_callback; bpf_lsm_file_open, owner systemd's BPF program; __x64_sys_getdents64 hooked by a kprobe, owner memlens_testhook.th_getdents_pre. Bottom panel, hooks set through tracefs (demo, Debian 13 6.12 memory image): bpf_lsm_file_open, the same BPF program; do_sys_openat2, owner the tracefs kprobe memlens_kp; vfs_getattr, owner function_trace_call (ftrace_ops global_ops)."></a>
 
 <sub>Drawn by tools/hookgraph.py from `patchscan.py --links` on the two demo kernel.elf files; not an IDA screenshot. One lane per hooked function: the hooking call, the hook page copied from memory under the name MemLens's code gives it in IDA (the exporter's label under it), the page's first named call, and the owner in bold. The hook on `bpf_lsm_file_open` is systemd's BPF LSM program in both captures. How it is made and checked: [docs/img](docs/img/README.md).</sub>
 ```

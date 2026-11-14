@@ -1,7 +1,8 @@
 #!/bin/sh
 # Re-record the Volatility 3 (2.28.2) JSON outputs in this folder from the two public memory images.
 # usage: record.sh <trace.elf> <testhook.elf> <symbols folder with linux/debian-6.12.115+deb13.1-amd64.json.xz> [vol]
-# Writes demo/*.json and testhook/*.json under the current folder; tests/test_volfind_stub.py reads them.
+# Writes demo/*.json, testhook/*.json and not-read/tty_check.json under the current folder; tests/test_volfind_stub.py
+# reads them.
 set -e
 trace=$1; testhook=$2; symbols=$3; vol=${4:-vol}
 run() {  # run <sample folder> <image> <output name> <plugin> [options]
@@ -18,3 +19,5 @@ for sample in demo testhook; do
     run $sample "$img" netfilter          linux.malware.netfilter.Netfilter
     run $sample "$img" ftrace-flags       linux.tracing.ftrace.CheckFtrace --show-ftrace-flags
 done
+# A plugin MemLens does not read whose fields hold keyboard notifiers' three (and Name): it must be skipped.
+run not-read "$trace" tty_check linux.malware.tty_check.Tty_Check

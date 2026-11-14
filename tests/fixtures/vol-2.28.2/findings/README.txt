@@ -28,5 +28,11 @@ Rows per file (demo / testhook):
   ftrace-flags.json        3 / 3
 testhook/ftrace-flags.json is byte for byte the th.ftrace.json the s194 review recorded with the same command.
 
+not-read/tty_check.json: a plugin MemLens does not read, recorded the same way on trace.elf (2026-11-14, exit 0, 17.7 s):
+  vol -q -s <symbols> -f trace.elf -r json linux.malware.tty_check.Tty_Check                    > tty_check.json
+Its fields (Name, Address, Module, Symbol) hold all three of keyboard notifiers' (Address, Module, Symbol), so the test
+checks that MemLens skips it with one warning line instead of reading its 3 rows (ttyS0, tty1, tty6 at
+n_tty_receive_buf) as keyboard notifiers.
+
 Volatility prints kernel addresses cut to 48 bits: JSON 281473643531984 is 0xffffb0894ed0, for 0xffffffffb0894ed0.
 The field names are the plugins' TreeGrid column names in 2.28.2 (an empty file, "[]", has none).

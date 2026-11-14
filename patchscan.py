@@ -936,19 +936,17 @@ ENTRY_PREFIX = "MemLens: hooked"  # how every entry_text line starts
 
 
 def entry_text(link, page_name):
-    """The comment at an entry linked to a copied hook page, read along the chain: the page's kind, the hooking
-    instruction, the page under page_name (its name in the database now), the handler, and the owner when one is known:
-    'MemLens: hooked (ftrace): call -> ftrace_tramp___x64_sys_kill -> ftrace_ops_assist_func; owner:
-    memlens_testhook.th_kill_callback (ftrace_ops memlens_testhook.th_kill_ops)'. A page with no known role names its
-    first call as handler_text does: 'MemLens: hooked: jmp -> memlens_target_... (hook code; first call: _printk)'."""
-    text = ENTRY_PREFIX + (" (%s)" % link.kind if link.kind else "") + ": %s -> %s" % (link.flow, page_name)
-    if link.handler_name and link.kind:
-        text += " -> %s" % link.handler_name
-    elif link.handler_name:
-        text += " (hook code; first call: %s)" % link.handler_name
-    if link.owner is not None:
-        text += "; owner: %s" % link.owner.text
-    return text
+    """The comment at an entry linked to a copied hook page: the owner first, when one is known, so that it shows near
+    the left of the line in IDA (review s196: a long line runs past the right edge), then the chain: the hooking
+    instruction, the page under page_name (its name in the database now) and the handler as handler_text gives it:
+    'MemLens: hooked by memlens_testhook.th_kill_callback (ftrace_ops memlens_testhook.th_kill_ops); chain: call ->
+    ftrace_tramp___x64_sys_kill -> ftrace_ops_assist_func (ftrace)'. With no owner known, and on a page with no known
+    role: 'MemLens: hooked; chain: jmp -> memlens_target_... (hook code; first call: _printk)'."""
+    chain = "%s -> %s" % (link.flow, page_name)
+    handler = handler_text(link)
+    if handler:
+        chain += (" -> " if link.kind else " ") + handler
+    return ENTRY_PREFIX + (" by %s" % link.owner.text if link.owner is not None else "") + "; chain: " + chain
 
 
 def entry_comments(image, findings, links, names):

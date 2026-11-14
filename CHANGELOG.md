@@ -2,7 +2,7 @@
 
 Taken from the GitHub release notes. Newest first.
 
-## Unreleased
+## v0.3.31 (2026-11-19)
 
 - README hook chain picture (judge s192 item 3): `docs/img/hookchain.png` (a link to `.svg`) under the pitch, the hook chain of both demo `kernel.elf` files drawn by the new `tools/hookgraph.py` with the code of `patchscan.py --links` (one panel per sample, "Hooks set by a test module (second sample)" above "Hooks set through tracefs (demo)"; one lane per patched entry: hooking instruction, hook page under the name MemLens gives it, handler, owner in bold; the two panel headings and the colour legend are the tool's only own words). Not an IDA screenshot. `tests/test_hookgraph.py` checks every label against both zips' `expected-hook-chain.txt`, lane by lane (30 mutants fail), that the PNG is the one rendered from the SVG (their sha256 pair, recorded in docs/img/README.md) and that the alt text names the hooked functions in the picture's order; with both `kernel.elf` files it checks that the tool redraws the SVG byte for byte. `tests/run_all.py` now runs it too (16 passed with the demo `kernel.elf`). How the picture is made and checked, and a README link check: docs/img/README.md.
 

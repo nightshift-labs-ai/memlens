@@ -5,16 +5,19 @@ test in real IDA.
 
 usage: python3 tests/test_volfind_stub.py [demo kernel.elf] [second sample's kernel.elf]
 Always: volfind.py on hand-made JSON (Volatility's 48-bit addresses sign-extended, the plugin a file comes from told by
-its 2.28.2 field names, unknown fields, unknown plugins, files that are not JSON, a plugin read twice, nested rows) and
-the action on a hand-made kernel ELF whose ftrace trampoline loads an ftrace_ops: an ftrace row with that ops is merged
-into the MemLens row (no row repeats it), the other findings become rows with a Source column, Enter and Jump to owner
-go to the sign-extended callback, a file of an unknown plugin gives one warning line and the rest still load.
+its 2.28.2 field names, unknown fields, unknown plugins, files that are not JSON or cannot be opened, a plugin read
+twice, nested rows, and the recorded linux.malware.tty_check file, whose fields hold keyboard notifiers' three: skipped)
+and the action on a hand-made kernel ELF whose ftrace trampoline loads an ftrace_ops: an ftrace row with that ops is
+merged into the MemLens row (no row repeats it), the other findings become rows with a Source column, Enter and Jump to
+owner go to the sign-extended callback (for a callback outside kernel.elf, Target says so and Jump to owner names the
+owner instead), a file of an unknown plugin (and tty_check's) gives one warning line and the rest still load.
 With the two public samples' kernel.elf files (told apart by SHA-256; any other kernel.elf is skipped), also the action
 on the JSON recorded from their memory images (tests/fixtures/vol-2.28.2/findings/<sample>, see its README.txt): the
 tracepoint, IDT and netfilter rows at the sign-extended addresses, each address at the kernel.elf symbol Volatility
 names, netfilter's "Is Hooked" verbatim, the MemLens rows unchanged, and no Volatility row that repeats a MemLens row
-(an ftrace row whose ftrace_ops a MemLens row's hook page loads is merged into that row).
-Then two mutants, no sign extension and no merge of ftrace rows by ops address, must fail the same checks.
+(an ftrace row whose ftrace_ops a MemLens row's hook page loads is merged into that row), and the IDT rows after the
+other Volatility rows. Then mutants must fail the same checks: no sign extension and no merge of ftrace rows by ops
+address (both cases), keyboard notifiers read from a file with more fields (hand-made), IDT rows not last (samples).
 """
 import contextlib, hashlib, io, json, os, runpy, shutil, struct, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -29,6 +32,8 @@ elf, call, BASE, TEXT = builder["elf"], builder["call"], builder["BASE"], builde
 import volfind  # noqa: E402  (memlens_entry put the repository folder on sys.path)
 
 FIXTURES = os.path.join(HERE, "fixtures", "vol-2.28.2", "findings")
+TTY = os.path.join(FIXTURES, "not-read", "tty_check.json")  # linux.malware.tty_check on trace.elf, see its README.txt
+NOT_READ = ": not read, its fields are not those of a plugin MemLens reads"
 FILES = ("tracepoints", "keyboard_notifiers", "check_idt", "check_afinfo", "netfilter", "ftrace-flags")
 COLUMNS = ["Address", "Where", "What", "Target", "Handler", "Owner"]
 TITLE = "MemLens: patched kernel functions and Volatility findings"
@@ -102,6 +107,8 @@ def mutant(name, replacement):
 
 MUTANTS = (("no sign extension", "sign_extend", lambda value: value if isinstance(value, int) and not isinstance(value, bool) else None),
            ("no merge of ftrace rows by ops address", "repeats", lambda finding, by_ops: []))
+HANDMADE_MUTANTS = MUTANTS + (("keyboard notifiers read from a file with more fields (tty_check's)", "EXACT", ()),)
+SAMPLE_MUTANTS = MUTANTS + (("IDT rows not after the other Volatility rows", "LAST", ()),)
 
 # --- volfind.py alone -------------------------------------------------------------------------------------------------
 assert volfind.VOLATILITY == "2.28.2"
@@ -146,8 +153,20 @@ with tempfile.TemporaryDirectory() as work:
     loaded = volfind.load([os.path.join(work, "newer.json")])  # a field 2.28.2 does not write: ignored, the row is read
     assert len(loaded.warnings) == 1 and "Gate" in loaded.warnings[0], loaded.warnings
     assert [(f.plugin, f.where) for f in loaded.findings] == [("linux.malware.check_idt", "IDT 0x3")], loaded.findings
+    # linux.malware.tty_check writes Name, Address, Module and Symbol: keyboard notifiers' three fields and one more. Its
+    # file (recorded, 3 rows) is skipped with one warning line, not read as keyboard notifiers.
+    loaded = volfind.load([TTY])
+    assert loaded.findings == [] and loaded.read == [] and len(loaded.warnings) == 1, loaded
+    assert loaded.warnings[0] == "tty_check.json%s (as Volatility 2.28.2 names them): Address, Module, Name, Symbol" % NOT_READ, loaded.warnings
+    # A file that cannot be opened: one warning line, and the files after it still load.
+    loaded = volfind.load([os.path.join(work, name) for name in ("kb.json", "gone.json", "idt.json")])
+    assert [w.split(":")[0] for w in loaded.warnings] == ["gone.json"] and "gone.json: not read (" in loaded.warnings[0], loaded.warnings
+    assert [name for name, _, _ in loaded.read] == ["kb.json", "idt.json"], loaded.read
     # A folder: every .json file in it, in name order, whatever file was picked; a file too big for findings is skipped.
     write(work, "notes.txt", "not read")
+    write(work, "locked.json", "[]")
+    os.chmod(os.path.join(work, "locked.json"), 0)  # cannot be opened (unless we run as root, who can read it anyway)
+    locked = not os.access(os.path.join(work, "locked.json"), os.R_OK)
     good_size = volfind.MAX_SIZE
     volfind.MAX_SIZE = 1000
     try:
@@ -155,9 +174,13 @@ with tempfile.TemporaryDirectory() as work:
         loaded = volfind.load_folder(os.path.join(work, "notes.txt"))
     finally:
         volfind.MAX_SIZE = good_size
-    assert [name for name, _, _ in loaded.read] == ["afinfo.json", "empty.json", "idt.json", "kb-again.json"], loaded.read
-    assert [w.split(":")[0] for w in loaded.warnings] == ["big.json", "broken.json", "ebpf.json", "kb.json", "newer.json", "object.json"], loaded.warnings
-    assert "kb-again.json" in loaded.warnings[3] and "idt.json" in loaded.warnings[4], loaded.warnings  # read twice: the first one counts
+        os.chmod(os.path.join(work, "locked.json"), 0o600)
+    assert [name for name, _, _ in loaded.read] == ["afinfo.json", "empty.json", "idt.json", "kb-again.json"] + ([] if locked else ["locked.json"]), loaded.read
+    assert [w.split(":")[0] for w in loaded.warnings] == ["big.json", "broken.json", "ebpf.json", "kb.json"] + (["locked.json"] if locked else []) + \
+        ["newer.json", "object.json"], loaded.warnings
+    assert "kb-again.json" in loaded.warnings[3] and "idt.json" in loaded.warnings[-2], loaded.warnings  # read twice: the first one counts
+    if locked:
+        assert loaded.warnings[4].startswith("locked.json: not read ("), loaded.warnings
     assert "notes.txt" not in str(loaded), loaded
 
 # --- the action on a hand-made kernel ELF ----------------------------------------------------------------------------
@@ -183,7 +206,9 @@ FTRACE = [{"ftrace_ops address": OPS & MASK48, "Callback": None, "Callback addre
 TRACEPOINTS = [{"tracepoint": "sched_switch", "tracepoint address": (BASE + TEXT) & MASK48, "Probe": "probe_sched_switch",
                 "Probe address": PROBE & MASK48, "Probe priority": 10, "Module": "evilmod", "Module address": BASE & MASK48,
                 "__children": []}]
-KEYBOARD = [{"Address": NOTIFIER & MASK48, "Module": "evilmod", "Symbol": None, "__children": []}]
+HIDDEN = 0xffffffffc0009000  # in no segment of the hand-made kernel.elf (a module MemLens did not export, say)
+KEYBOARD = [{"Address": NOTIFIER & MASK48, "Module": "evilmod", "Symbol": None, "__children": []},
+            {"Address": HIDDEN & MASK48, "Module": "hiddenmod", "Symbol": None, "__children": []}]
 
 
 def check_handmade(work):
@@ -202,19 +227,26 @@ def check_handmade(work):
              "", "__kernel__", "Volatility linux.tracing.ftrace"],
             ["%X" % NOTIFIER, "keyboard notifier", "notifier_call -", "evilmod.kb_notify", "", "evilmod",
              "Volatility linux.malware.keyboard_notifiers"],
+            ["%X" % HIDDEN, "keyboard notifier", "notifier_call -", "%#x (not in this kernel.elf)" % HIDDEN, "", "hiddenmod",
+             "Volatility linux.malware.keyboard_notifiers"],
             ["%X" % PROBE, "tracepoint sched_switch", "probe probe_sched_switch, priority 10", "evilmod.probe_sched_switch", "",
              "evilmod", "Volatility linux.tracing.tracepoints"]]
     if sorted(rows) != sorted(want):
         errors.append("rows:\n  %s\nwant:\n  %s" % ("\n  ".join(map(str, rows)), "\n  ".join(map(str, want))))
-    if len(warnings(out)) != 1 or "ebpf.json" not in warnings(out)[0]:
-        errors.append("want one warning line, for ebpf.json: %s" % warnings(out))
+    if [line.split(":")[0] for line in warnings(out)] != ["[MemLens] warning"] * 2 or \
+            not all(NOT_READ in line for line in warnings(out)) or \
+            ["ebpf.json", "tty_check.json"] != [line.split(": ")[1].split(":")[0] for line in warnings(out)]:
+        errors.append("want one warning line each for ebpf.json and tty_check.json (not read): %s" % warnings(out))
     for n, row in enumerate(rows):
         if row[6].startswith("Volatility"):
             del calls[:]
             table.OnSelectLine(n)
-            table.OnInsertLine(n)  # Jump to owner: the callback, which is the module's (Owner column)
-            if calls != [("jump", int(row[0], 16))] * 2:
-                errors.append("Enter / Jump to owner on %s: %s" % (row[1], calls))
+            table.OnInsertLine(n)  # Jump to owner: the callback, which is the module's (Owner column), when in kernel.elf
+            address = int(row[0], 16)
+            want_calls = [("jump", address)] * 2 if address != HIDDEN else \
+                [("jump", address), ("msg", "[MemLens] the owner of keyboard notifier is not in this database: hiddenmod\n")]
+            if calls != want_calls:
+                errors.append("Enter / Jump to owner on %s at %#x: %s" % (row[1], address, calls))
     return errors
 
 
@@ -229,12 +261,13 @@ with tempfile.TemporaryDirectory() as work:
     write(findings, "keyboard_notifiers.json", KEYBOARD)
     write(findings, "check_afinfo.json", "[]")
     write(findings, "ebpf.json", [{"Address": 1, "Name": "x", "Tag": "t", "Type": "BPF_PROG_TYPE_LSM", "__children": []}])
+    shutil.copy(TTY, os.path.join(findings, "tty_check.json"))
     database(blob, path)
     plain = show_plain()
     errors = check_handmade(findings)
     assert not errors, "\n".join(errors)
     assert show_plain() == plain  # the plain list is unchanged afterwards (6 columns, no Volatility row)
-    for name, attribute, replacement in MUTANTS:
+    for name, attribute, replacement in HANDMADE_MUTANTS:
         with mutant(attribute, replacement):
             database(blob, path)
             assert check_handmade(findings), "mutant %r passed the hand-made checks" % name
@@ -247,8 +280,9 @@ with tempfile.TemporaryDirectory() as work:
     # Cancel in the file dialog: nothing happens.
     result, table, out = add_findings("")
     assert result == 0 and table is None and calls == [], calls
-    print("hand-made: 4 rows with a Source column (1 MemLens row with Volatility's ftrace_ops merged into it, 3 Volatility "
-          "rows), one warning line for the unknown file; %d mutants fail" % len(MUTANTS))
+    print("hand-made: 5 rows with a Source column (1 MemLens row with Volatility's ftrace_ops merged into it, 4 Volatility "
+          "rows, one outside kernel.elf), one warning line each for the unknown file and tty_check's; %d mutants fail"
+          % len(HANDMADE_MUTANTS))
 
 
 # --- the two public samples ------------------------------------------------------------------------------------------
@@ -322,6 +356,9 @@ def check_sample(sample, image, plain):
         errors.append("an ftrace row's callback is not at the kernel.elf symbol Volatility names")
     if {(row[0], row[1]) for row in theirs} & {(row[0], row[1]) for row in mine}:
         errors.append("a Volatility row has the Address and Where of a MemLens row")
+    idt = [row[6] == "Volatility linux.malware.check_idt" for row in rows]
+    if idt != sorted(idt) or rows[:len(mine)] != mine:
+        errors.append("want the MemLens rows first and the IDT rows last: %s" % [row[6] for row in rows])
     for n, row in enumerate(rows):
         if row[6].startswith("Volatility linux.tracing.tracepoints"):
             del calls[:]
@@ -356,9 +393,9 @@ for path in sys.argv[1:]:
         if not row[1].startswith("IDT "):
             print("  row: " + " | ".join(row))
     print("  (and %d IDT rows)" % sum(row[1].startswith("IDT ") for row in lines_of(table)))
-    for name, attribute, replacement in MUTANTS:
+    for name, attribute, replacement in SAMPLE_MUTANTS:
         with mutant(attribute, replacement):
             database(blob, path)
             assert check_sample(sample, image, plain), "mutant %r passed the %s checks" % (name, sample)
-    print("  %d mutants fail the %s checks" % (len(MUTANTS), sample))
+    print("  %d mutants fail the %s checks" % (len(SAMPLE_MUTANTS), sample))
 print("volfind stub tests OK")

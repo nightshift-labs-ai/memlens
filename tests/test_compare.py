@@ -7,7 +7,7 @@
 
 Every Volatility cell must be what the recorded plugin printed for that hook, every Volatility row must be used once, the
 "Named" row must be the count of the cells above it, and the section's other numbers and plugin names must match the
-recordings, and each row's hook kind must fit Volatility's callback (kprobe: kprobe_ftrace_handler, BPF: call_direct_funcs,
+recordings (plugins by their linux.malware.* name where 2.28.2 has one; the old names are aliases it will remove), and each row's hook kind must fit Volatility's callback (kprobe: kprobe_ftrace_handler, BPF: call_direct_funcs,
 both ways). With a sample's kernel.elf, every MemLens cell must be what `patchscan.py --links` prints for it, a `-` in
 Volatility's hooked-function column must be exactly a hook site after the function's start, and the ftrace_ops address
 Volatility prints must be the ops MemLens reads from that hook's trampoline. The hidden-module rows of docs/LIMITS.md are
@@ -121,6 +121,9 @@ def check(readme, limits, output_md, links):
                         [(n, "docs/LIMITS.md") for n in re.findall(r"`(linux\.[A-Za-z_.]+)`", limits)]:
         if not any(p == name or p.startswith(name + ".") for p in plugins[1:]):
             errors.append("%s names %s, which Volatility 2.28.2 does not have" % (source, name))
+        elif not name.startswith("linux.malware.") and any(p.startswith("linux.malware." + name[6:] + ".") for p in plugins[1:]):
+            # 2.28.2 keeps the old name as an alias that "will be removed in the first release after 2026-06-07"
+            errors.append("%s names %s, an old name: use linux.malware.%s" % (source, name, name[6:]))
     if "no kprobe plugin" in text and any("kprobe" in p.lower() for p in plugins[1:]):
         errors.append("the section says there is no kprobe plugin, but plugins.txt has one")
 
@@ -225,7 +228,7 @@ def check(readme, limits, output_md, links):
     before, after = vol_table("th.hidden_modules.txt")[1], vol_table("th-module-unlinked.hidden_modules.txt")[1]
     cell = "`memlens_testhook` (Offset `%s`, as printed)" % (after[0]["Offset"] if after else "?")
     if before or [r["Module Name"] for r in after] != ["memlens_testhook"] or cell not in limits:
-        errors.append("docs/LIMITS.md's linux.hidden_modules row does not match the recordings")
+        errors.append("docs/LIMITS.md's linux.malware.hidden_modules row does not match the recordings")
     if vol_table("th-module-unlinked.ftrace.txt")[1] != original:
         errors.append("docs/LIMITS.md says linux.tracing.ftrace shows the same row; the recordings differ")
 

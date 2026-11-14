@@ -12,10 +12,13 @@ Files made by record.sh (vol -q -s <symbols> -f <image> -r pretty <plugin>; stdo
   demo.ftrace.txt / th.ftrace.txt               linux.tracing.ftrace.CheckFtrace
   demo.ftrace-flags.txt / th.ftrace-flags.txt   linux.tracing.ftrace.CheckFtrace --show-ftrace-flags
   demo.ebpf.txt / th.ebpf.txt                   linux.ebpf.EBPF
-  th.hidden_modules.txt                         linux.hidden_modules.Hidden_modules
+  th.hidden_modules.txt                         linux.malware.hidden_modules.Hidden_modules
   plugins.txt                                   the first line of vol -h and its linux.* plugin names (59)
 All runs exited 0. Every file here but plugins.txt (the edited copies' files too) is byte for byte what the s194 review
-recorded on 2026-11-14 with the same commands.
+recorded on 2026-11-14 with the same commands, except that the s194 review and the edited copy used the old name
+linux.hidden_modules.Hidden_modules. Volatility 2.28.2 says that name has been renamed and will be removed in the first
+release after 2026-06-07; th.hidden_modules.txt re-recorded with linux.malware.hidden_modules.Hidden_modules (2026-11-14)
+is byte for byte the same.
 Volatility prints kernel addresses cut to 48 bits (0xffffc0cc80a0 is 0xffffffffc0cc80a0).
 
 Files from edited copies of testhook.elf (offline edits of the image file, made to see what each tool shows when a
@@ -23,7 +26,7 @@ kernel list is edited; how such an edit behaves on a live system was not tested)
   module unlinked: memlens_testhook removed from the `modules` list, four list pointers rewritten as list_del does
     (modules.next, the next module's list.prev, the module's own list.next/prev set to LIST_POISON)
       th-module-unlinked.ftrace.txt          linux.tracing.ftrace.CheckFtrace
-      th-module-unlinked.hidden_modules.txt  linux.hidden_modules.Hidden_modules
+      th-module-unlinked.hidden_modules.txt  linux.hidden_modules.Hidden_modules (the old name of the same plugin)
       th-module-unlinked.owners.txt          the owner lines of patchscan.py --links on that copy's MemLens export
                                              (69 modules, 234,095 symbols; the original image's export: 70, 234,115)
   ops unlinked: kprobe_ftrace_ops.next rewritten to skip memlens_testhook's th_kill_ops on ftrace_ops_list (one pointer)

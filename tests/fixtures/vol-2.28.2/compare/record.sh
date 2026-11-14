@@ -14,5 +14,5 @@ run demo.ebpf.txt         "$trace"    linux.ebpf.EBPF
 run th.ftrace.txt         "$testhook" linux.tracing.ftrace.CheckFtrace
 run th.ftrace-flags.txt   "$testhook" linux.tracing.ftrace.CheckFtrace --show-ftrace-flags
 run th.ebpf.txt           "$testhook" linux.ebpf.EBPF
-run th.hidden_modules.txt "$testhook" linux.hidden_modules.Hidden_modules
+run th.hidden_modules.txt "$testhook" linux.malware.hidden_modules.Hidden_modules
 { "$vol" -h | head -1; "$vol" -h | grep -o '^ *linux\.[A-Za-z_.]*' | tr -d ' '; } > plugins.txt

@@ -85,6 +85,15 @@ class func_t:
 funcs.get_func = lambda ea: next((func_t(s, e) for s, e in functions.items() if s <= ea < e), None)
 funcs.get_func_cmt = lambda pfn, repeatable: func_comments.get(pfn.start_ea)
 funcs.set_func_cmt = lambda pfn, cmt, repeatable: calls.append(("funccmt", pfn.start_ea, cmt, repeatable)) or func_comments.__setitem__(pfn.start_ea, cmt) or True
+refused_funcs = set()  # addresses where the fake add_func fails, as IDA's does where it cannot make a function
+def add_func(ea1, ea2=idc.BADADDR):
+    """Recorded; makes a 1-byte function at ea1, except inside an existing function or at a refused address (False)."""
+    calls.append(("addfunc", ea1))
+    if ea1 in refused_funcs or any(s <= ea1 < e for s, e in functions.items()):
+        return False
+    functions[ea1] = ea1 + 1
+    return True
+funcs.add_func = add_func
 sys.modules.update(ida_kernwin=kw, ida_idaapi=api, ida_typeinf=ti, ida_nalt=nalt, idc=idc, ida_bytes=dbytes, idautils=autils,
                    ida_xref=xref, ida_name=iname, ida_netnode=nnode, ida_funcs=funcs)
 import memlens_entry as m

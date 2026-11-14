@@ -23,7 +23,7 @@ Rows per file (demo / testhook):
   tracepoints.json         3 / 0   (demo: sched_wakeup, sched_wakeup_new, sched_switch; the tracer's own probes)
   keyboard_notifiers.json  0 / 0
   check_idt.json          21 / 21  (vectors 0x0-0x13 and 0x80, as the plugin checks them)
-  check_afinfo.json        0 / 0   (the plugin lists only seq_ops members that point outside the kernel)
+  check_afinfo.json        0 / 0   (the plugin lists a member only when no kernel symbol starts at its handler)
   netfilter.json           2 / 2   ("Is Hooked": "False", a string, as printed)
   ftrace-flags.json        3 / 3
 testhook/ftrace-flags.json is byte for byte the th.ftrace.json the s194 review recorded with the same command.

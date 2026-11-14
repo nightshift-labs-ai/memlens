@@ -36,6 +36,7 @@ No memory image or Volatility needed. Download `memlens-demo-debian13.zip` from 
    ```
 
    Keys (not checked in IDA): Enter should jump to the function, the list's Edit command (usually Ctrl+E) to the handler and its Insert command (usually Ins, captioned **Jump to owner**) to the owner.
+   The hooked function's comment, and the top of its pseudocode once IDA has made it a function, should name the owner, for example `MemLens: hooked (ftrace): call -> ftrace_tramp_vfs_getattr -> function_trace_call; owner: function_trace_call (ftrace_ops global_ops)` (not checked in IDA).
 3. **MemLens: Apply kernel types from ISF** and pick the `.json.xz` file.
 4. Then try the second sample (module hooks): `memlens-demo-testhook.zip` from the same release, same steps; see [A hook set by a module](#a-hook-set-by-a-module-second-sample).
 

@@ -1,0 +1,21 @@
+125682 function symbols scanned
+0xffffffffb08dcac0	__x64_sys_kill	call to memory with no symbol	memlens_target_ffffffffc0cd0000 (calls ftrace_ops_assist_func, ftrace)
+0xffffffffb0af9250	bpf_lsm_file_open	call to memory with no symbol	memlens_target_ffffffffc01a0940 (calls __bpf_tramp_enter, BPF trampoline)
+0xffffffffb0c65950	__x64_sys_getdents64	call to memory with no symbol	memlens_target_ffffffffc0cd2000 (calls kprobe_ftrace_handler, kprobe via ftrace)
+xref	0xffffffffb08dcac4	0xffffffffc0cd0000	call	__x64_sys_kill+0x4 -> memlens_target_ffffffffc0cd0000
+xref	0xffffffffb0af9254	0xffffffffc01a0940	call	bpf_lsm_file_open+0x4 -> memlens_target_ffffffffc01a0940
+xref	0xffffffffb0c65954	0xffffffffc0cd2000	call	__x64_sys_getdents64+0x4 -> memlens_target_ffffffffc0cd2000
+xref	0xffffffffb26670e0	0xffffffffb0894ed0	data	kprobe_ftrace_ops -> kprobe_ftrace_handler
+xref	0xffffffffc01a0963	0xffffffffb0acea70	call	memlens_target_ffffffffc01a0940+0x23 -> __bpf_tramp_enter
+xref	0xffffffffc01a0993	0xffffffffc01a0668	call	memlens_target_ffffffffc01a0940+0x53 -> bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems
+xref	0xffffffffc0cc80a0	0xffffffffc0cc6010	data	memlens_testhook.th_kill_ops -> memlens_testhook.th_kill_callback
+xref	0xffffffffc0cd00d9	0xffffffffb0a0c740	call	memlens_target_ffffffffc0cd0000+0xd9 -> ftrace_ops_assist_func
+xref	0xffffffffc0cd0162	0xffffffffc0cc80a0	data	memlens_target_ffffffffc0cd0000+0x162 -> memlens_testhook.th_kill_ops
+xref	0xffffffffc0cd20d9	0xffffffffb0894ed0	call	memlens_target_ffffffffc0cd2000+0xd9 -> kprobe_ftrace_handler
+xref	0xffffffffc0cd2162	0xffffffffb26670e0	data	memlens_target_ffffffffc0cd2000+0x162 -> kprobe_ftrace_ops
+rename	0xffffffffc01a0940	memlens_target_ffffffffc01a0940	bpf_tramp_bpf_lsm_file_open
+rename	0xffffffffc0cd0000	memlens_target_ffffffffc0cd0000	ftrace_tramp___x64_sys_kill
+rename	0xffffffffc0cd2000	memlens_target_ffffffffc0cd2000	kprobe_ftrace_tramp___x64_sys_getdents64
+owner	0xffffffffc01a0940	0xffffffffc01a0668	bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems (BPF program)
+owner	0xffffffffc0cd0000	0xffffffffc0cc6010	memlens_testhook.th_kill_callback (ftrace_ops memlens_testhook.th_kill_ops)
+owner	0xffffffffc0cd2000	0xffffffffc0cc6040	memlens_testhook.th_getdents_pre (kprobe pre_handler)

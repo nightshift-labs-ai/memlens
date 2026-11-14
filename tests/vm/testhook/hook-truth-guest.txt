@@ -1,0 +1,9 @@
+echo HOOK_TRUTH_BEGIN; cat /sys/kernel/tracing/enabled_functions; cat /sys/kernel/debug/kprobes/list; echo HOOK_TRUTH_END </dev/null; echo __DO""NE629810000__
+[?2004hVMOK# echo HOOK_TRUTH_BEGIN; cat /sys/kernel/tracing/enabled_functions; cat /sys/kernel/debug/kprobes/list; echo HOOK_TRUTH_END </dev/null; echo __DO""NE629810000__
+[?2004lHOOK_TRUTH_BEGIN
+__x64_sys_kill (1) R         	tramp: 0xffffffffc0cd0000 (th_kill_callback+0x0/0x20 [memlens_testhook]) ->ftrace_ops_assist_func+0x0/0xf0
+bpf_lsm_file_open (1) R   D   M 	tramp: ftrace_regs_caller+0x0/0x65 (call_direct_funcs+0x0/0x20)
+	direct-->bpf_trampoline_6442509381+0x0/0xee
+__x64_sys_getdents64 (1) R         	tramp: 0xffffffffc0cd2000 (kprobe_ftrace_handler+0x0/0x1d0) ->kprobe_ftrace_handler+0x0/0x1d0
+ffffffffb0c65954  k  __x64_sys_getdents64+0x4    [FTRACE]
+HOOK_TRUTH_END

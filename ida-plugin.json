@@ -4,7 +4,7 @@
     "name": "memlens",
     "entryPoint": "memlens_entry.py",
     "version": "0.3.29",
-    "idaVersions": ">=9.0",
+    "idaVersions": ">=9.1",
     "description": "Reverse engineer a Linux kernel from a memory image: exports kernel and modules as a symbolled ELF at their live addresses, imports every kernel type from a Volatility ISF, and lists patched kernel functions with their hook code. Not yet run in real IDA.",
     "license": "MIT",
     "categories": [

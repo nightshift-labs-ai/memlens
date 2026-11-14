@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MemLens without the IDA window, through idalib (IDA 9.0 or newer).
+"""MemLens without the IDA window, through idalib (IDA 9.1 or newer).
 
     python3 tools/memlens_headless.py kernel.elf <isf.json.xz> [--no-analysis] [--any-kernel]
 
@@ -37,7 +37,7 @@ def main(argv=None):
     try:
         import idapro  # must be imported before any ida_* module
     except ImportError as error:
-        print("memlens_headless: idalib is not available (%s). It needs IDA 9.0 or newer; see the top of this file." % error, file=sys.stderr)
+        print("memlens_headless: idalib is not available (%s). It needs IDA 9.1 or newer; see the top of this file." % error, file=sys.stderr)
         return 2
     if idapro.open_database(args.elf, not args.no_analysis) != 0:
         print("memlens_headless: IDA could not open %s" % args.elf, file=sys.stderr)

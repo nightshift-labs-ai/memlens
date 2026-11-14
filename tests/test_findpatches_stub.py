@@ -2,15 +2,27 @@
 """Show patched kernel functions on a database whose input file is not a kernel: one warning and no list, instead of an
 empty list that looks clean. Two inputs: a file without function symbols (/bin/ls, or argv[1]) and, when a C compiler
 is installed, a small unstripped program (function symbols but no linux_banner). Also the same warning from
-patchscan.py on the command line. argv: [stripped ELF (default /bin/ls)] [the demo kernel.elf, still scanned]. Fake IDA
+patchscan.py on the command line. Then the first try on your own file (judge s194 item 5): a memory image (a hand-made
+ELF core and a LiME header), a kernel file from disk (a hand-made ELF with .altinstructions, and argv[3] when given,
+for example a stripped vmlinux) and anything else (a hand-made PE, an ARM64 ELF) each get one line that names the next
+step. argv: [stripped ELF (default /bin/ls)] [the demo kernel.elf, still scanned] [a kernel file from disk]. Fake IDA
 modules."""
-import os, runpy, shutil, subprocess, sys, tempfile
+import os, runpy, shutil, struct, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
 import patchscan
 
 g = runpy.run_path(os.path.join(HERE, "test_plugin_stub.py"))
 m, calls, nalt = g["m"], g["calls"], g["nalt"]
+DEMO_URL = "https://github.com/nightshift-labs-ai/memlens/releases/tag/demo-data"  # the README's demo-data link
+assert DEMO_URL in open(os.path.join(HERE, "..", "README.md")).read()
+# One phrase per kind of file; each warning has its own kind's phrase and no other.
+KEYS = {"memory image": "looks like a memory image",
+        "from disk": "shows the kernel as built, not as it ran",
+        "other": "MemLens works on a Linux kernel exported from a memory image"}
+NEXT = {"memory image": ["Edit > Plugins > MemLens: Export kernel from memory image", "tools/find_isf.py"],
+        "from disk": ["export a kernel.elf from a memory image of that system", DEMO_URL],
+        "other": [DEMO_URL]}
 
 
 def check(target, reason):
@@ -22,6 +34,7 @@ def check(target, reason):
     assert m.FindPatches().activate(None) == 0
     ui = [c[1] for c in calls if c[0] == "ui"]
     assert len(ui) == 1 and "checked nothing" in ui[0] and reason in ui[0], ui
+    assert KEYS["other"] in ui[0] and DEMO_URL in ui[0], ui  # the next step: the demo kernel.elf
     assert m._open_list is None, "a patch list was opened"
     assert not any(c[0] == "msg" and "patched entries" in c[1] for c in calls), calls
     cli = subprocess.run([sys.executable, "-I", os.path.join(HERE, "..", "patchscan.py"), target],
@@ -75,3 +88,75 @@ if os.path.isfile(demo):
 else:
     print("SKIP: no %s to check that a real export is still scanned (pass the demo kernel.elf as argv[2])" % demo)
 print("ran %d of 2 non-kernel cases" % ran)
+
+
+# The first try on your own file (judge s194 item 5): one line with the next step, and no list.
+def landing(path, kind, what):
+    nalt.get_input_file_path = lambda: path
+    m._open_list = None
+    del calls[:]
+    assert m.FindPatches().activate(None) == 0, what
+    ui = [c[1] for c in calls if c[0] == "ui"]
+    assert len(ui) == 1, (what, ui)
+    text = ui[0]
+    for other, phrase in KEYS.items():
+        assert (phrase in text) == (other == kind), (what, kind, phrase, text)
+    for step in NEXT[kind]:
+        assert step in text, (what, step, text)
+    assert "\n" not in text and len(text) <= 330, (what, len(text), text)  # one short line
+    assert os.path.basename(path) in text, (what, text)
+    assert m._open_list is None, "a patch list was opened for %s" % what
+    print("landing OK (%s -> %s: %s)" % (what, kind, text))
+
+
+def elf(e_type, machine, sections=None, loads=()):
+    """A 64-bit little-endian ELF: a header, one program header per (p_type, data) in loads, then each section's data
+    and a section table with a .shstrtab (sections: (name, data)); no section table when sections is None."""
+    offset = 64 + 56 * len(loads)
+    phdrs, body = b"", b""
+    for index, (p_type, data) in enumerate(loads):
+        phdrs += struct.pack("<IIQQQQQQ", p_type, 4, offset + len(body), 0, 0x1000 * index, len(data), len(data), 0)
+        body += data
+    shoff = shnum = shstrndx = 0
+    table = b""
+    if sections is not None:
+        names, table = b"\0", bytes(64)
+        for name, data in list(sections) + [(".shstrtab", None)]:
+            if data is None:  # the section names come last
+                data = names + name.encode() + b"\0"
+            table += struct.pack("<IIQQQQIIQQ", len(names), 3 if name == ".shstrtab" else 1, 0, 0, offset + len(body),
+                                 len(data), 0, 0, 1, 0)
+            names += name.encode() + b"\0"
+            body += data
+        shoff, shnum, shstrndx = offset + len(body), len(sections) + 2, len(sections) + 1
+    head = b"\x7fELF" + bytes([2, 1, 1]) + bytes(9) + struct.pack(
+        "<HHIQQQIHHHHHH", e_type, machine, 1, 0, 64 if loads else 0, shoff, 0, 64, 56, len(loads), 64, shnum, shstrndx)
+    return head + phdrs + body + table
+
+
+with tempfile.TemporaryDirectory() as work:
+    def write(name, data):
+        path = os.path.join(work, name)
+        with open(path, "wb") as handle:
+            handle.write(data)
+        return path
+
+    # A memory image: an ELF core dump (QEMU's dump-guest-memory writes one) and a LiME file (one 4 KiB range).
+    landing(write("guest.elf", elf(4, 62, loads=[(4, bytes(32)), (1, bytes(4096))])), "memory image", "ELF core (ET_CORE)")
+    landing(write("guest.lime", struct.pack("<IIQQ8x", 0x4C694D45, 1, 0, 0xFFF) + bytes(4096)), "memory image", "LiME")
+    # A kernel file from disk: its alternatives are unapplied (.altinstructions), so its entries are not what ran.
+    landing(write("vmlinux", elf(2, 62, sections=[(".text", b"\x90" * 16), (".altinstructions", bytes(12))])),
+            "from disk", "hand-made ELF with .altinstructions")
+    vmlinux = sys.argv[3] if len(sys.argv) > 3 else ""
+    if vmlinux and os.path.isfile(vmlinux):
+        landing(vmlinux, "from disk", "kernel file from disk %s" % vmlinux)
+    else:
+        print("(no kernel file from disk given as argv[3]: only the hand-made one was checked)")
+    # Anything else: a Windows PE and an ELF for another machine.
+    pe = bytearray(0x200)
+    pe[:2] = b"MZ"
+    struct.pack_into("<I", pe, 0x3C, 0x80)
+    pe[0x80:0x84] = b"PE\0\0"
+    struct.pack_into("<H", pe, 0x84, 0x8664)
+    landing(write("program.exe", bytes(pe)), "other", "PE (MZ...PE)")
+    landing(write("arm64.elf", elf(2, 183, sections=[(".text", bytes(16))])), "other", "ARM64 ELF")

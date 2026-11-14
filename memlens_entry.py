@@ -6,7 +6,7 @@ Three actions under Edit > Plugins:
   * Show patched kernel functions: lists hooked entries and odd syscall slots, Enter jumps there; links each hooked
     entry to its hook page and the page to its handler (code xrefs) and to its owner (the BPF program, or the
     ftrace_ops and its callback), names the hook pages by role, and comments each hooked entry (and the function that
-    starts there) with that chain and its owner.
+    starts there) with its owner and that chain.
 """
 import base64
 import hashlib

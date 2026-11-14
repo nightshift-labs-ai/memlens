@@ -36,7 +36,7 @@ No memory image or Volatility needed. Download `memlens-demo-debian13.zip` from 
    ```
 
    Keys (not checked in IDA): Enter should jump to the function, the list's Edit command (usually Ctrl+E) to the handler and its Insert command (usually Ins, captioned **Jump to owner**) to the owner.
-   The hooked function's comment, and the top of its pseudocode once IDA has made it a function, should name the owner, for example `MemLens: hooked (ftrace): call -> ftrace_tramp_vfs_getattr -> function_trace_call; owner: function_trace_call (ftrace_ops global_ops)` (not checked in IDA).
+   The hooked function's comment should name the owner first, for example `MemLens: hooked by function_trace_call (ftrace_ops global_ops); chain: call -> ftrace_tramp_vfs_getattr -> function_trace_call (ftrace)`. If IDA had already made it a function when the list ran, the same text should also head its pseudocode; if not, step 3 (Apply kernel types) or opening the list again adds it once IDA has made the function (not checked in IDA).
 3. **MemLens: Apply kernel types from ISF** and pick the `.json.xz` file.
 4. Then try the second sample (module hooks): `memlens-demo-testhook.zip` from the same release, same steps; see [A hook set by a module](#a-hook-set-by-a-module-second-sample).
 
@@ -141,7 +141,7 @@ In IDA, with any database open (plugin menu entries need one), under **Edit > Pl
 1. **MemLens: Export kernel from memory image**: choose the image. `kernel.elf` is written next to it (`kernel-1.elf` if one is already there; the message names the file). MemLens asks for the ISF and hands it to Volatility.
 2. Open `kernel.elf` in IDA.
 3. **MemLens: Apply kernel types from ISF**: choose the ISF. If its kernel banner differs from the one in the database, MemLens asks before importing anything.
-4. **MemLens: Show patched kernel functions**: opens the list, adds a comment at each entry and links the hook chain. Enter jumps to the entry, **Jump to handler** to the handler and **Jump to owner** to the owner when it is in the database. Not yet tried in IDA.
+4. **MemLens: Show patched kernel functions**: opens the list, links the hook chain, and comments each hooked entry with its owner and chain. Enter jumps to the entry, **Jump to handler** to the handler and **Jump to owner** to the owner when it is in the database. Not yet tried in IDA.
 
 Each action in full: [docs/USAGE.md](docs/USAGE.md#usage).
 

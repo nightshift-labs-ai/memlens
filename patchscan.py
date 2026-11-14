@@ -503,6 +503,7 @@ def ftrace_ops_func_offset(isf):
 # function). It is a declaration: the x86 trampolines of both samples copy regs->ip back after every callback.
 FTRACE_OPS_FL = "FTRACE_OPS_FL_"
 IPMODIFY = FTRACE_OPS_FL + "IPMODIFY"
+ENABLED = FTRACE_OPS_FL + "ENABLED"  # set while the ops is registered
 OPS_FLAGS_PREFIX = "MemLens: ftrace_ops flags "  # how every ops_flags_text line starts
 
 
@@ -520,14 +521,15 @@ def ftrace_ops_flag_values(isf):
 
 def ops_flags_text(flags, values):
     """The comment for an ftrace_ops whose flags field holds flags, decoded with values ({FTRACE_OPS_FL_<name>: value}),
-    or None when values has no FTRACE_OPS_FL_IPMODIFY (nothing is said without it). Bits no name covers are shown as a
-    number."""
+    or None when values has no FTRACE_OPS_FL_IPMODIFY (nothing is said without it) or when values names
+    FTRACE_OPS_FL_ENABLED and flags lack it: an ops behind a live trampoline is enabled, so the read is stale or the ISF
+    is another kernel's (review s193). Bits no name covers are shown as a number."""
     if not isinstance(values, dict):
         return None
     values = {name: value for name, value in values.items() if isinstance(name, str) and name.startswith(FTRACE_OPS_FL)
               and isinstance(value, int) and not isinstance(value, bool) and value > 0}
-    ipmodify = values.get(IPMODIFY)
-    if not ipmodify:
+    ipmodify, enabled = values.get(IPMODIFY), values.get(ENABLED)
+    if not ipmodify or (enabled and flags & enabled != enabled):
         return None
     names, rest = [], flags
     for name, value in sorted(values.items(), key=lambda item: (item[1], item[0])):

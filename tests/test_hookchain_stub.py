@@ -259,7 +259,7 @@ put(PAGE - BASE + 0x74, b"\x48\x8b\x15" + struct.pack("<i", (PAGE + 0xdd) - (PAG
 put(PAGE - BASE + 0x94, call(PAGE + 0x94, ASSIST))
 put(PAGE - BASE + 0xd8, b"\xc3\xcc\x00\x00\x00" + struct.pack("<Q", OPS))
 put(0x000, b"\xf3\x0f\x1e\xfa" + call(BASE + 4, PAGE))
-rodata = b"Linux version 6.12\0".ljust(0x40, b"\0") + struct.pack("<QQQ", THUNK, ASSIST, 0)  # ops: func, a decoy at +8, flags 0
+rodata = b"Linux version 6.12\0".ljust(0x40, b"\0") + struct.pack("<QQQ", THUNK, ASSIST, 1)  # ops: func, a decoy at +8, flags ENABLED
 symbols = [("__x64_sys_getdents64", BASE, 0x100), ("ftrace_ops_assist_func", ASSIST, 0x100), ("evilmod.fh_ftrace_thunk", THUNK, 0x100),
            ("linux_banner", BASE + TEXT, 0x20), ("evilmod.hooks", OPS - 0x20, 0x80), ("%s%x" % (ps.TARGET_PREFIX, PAGE), PAGE, 0)]
 blob = elf(code, symbols, rodata)
@@ -291,14 +291,14 @@ with tempfile.TemporaryDirectory() as work:
     crefs, renames, out = run()
     assert m._open_list.OnGetLine(0)[5] == "ftrace_ops_assist_func (ftrace_ops evilmod.hooks+0x20)", m._open_list.OnGetLine(0)
     assert sorted(c[1:] for c in calls if c[0] == "dref") == [(PAGE + 0xdd, OPS, DATA), (OPS + 8, ASSIST, DATA)], calls
-    # With the flags layout and struct ftrace_ops in the database: the flags (0 here) are decoded at the page and the
-    # ops, but an ops inside a bigger module object (evilmod.hooks+0x20, the ftrace_hook array) is not retyped.
+    # With the flags layout and struct ftrace_ops in the database: the flags (ENABLED only here) are decoded at the page
+    # and the ops, but an ops inside a bigger module object (evilmod.hooks+0x20, the ftrace_hook array) is not retyped.
     database(blob)
     known_types.add("ftrace_ops")
     m.save_layout(m.isf_layout(FLAGS_ISF))
     run()
     assert not [c for c in calls if c[0] == "settype"], calls
-    assert comments[OPS] == "MemLens: ftrace_ops flags 0x0 = none; " + NO_IPMODIFY, comments
+    assert comments[OPS] == comments[PAGE].split("\n")[1] == "MemLens: ftrace_ops flags 0x1 = ENABLED; " + NO_IPMODIFY, comments
     known_types.clear()
     nalt.get_input_file_path = lambda: ""
 
@@ -306,7 +306,7 @@ with tempfile.TemporaryDirectory() as work:
 # values, read by name from the ISF's (anonymous) enum. For each ftrace trampoline whose Owner comes from its ftrace_ops,
 # the page and the ops get a comment that decodes the ops' flags, and an ops a module symbol starts at is typed as
 # struct ftrace_ops once (when the database has that struct). kprobe pages get nothing: a pre_handler can change
-# regs->ip and no flag says so. Without the layout, or without the enum's IPMODIFY, nothing is said.
+# regs->ip and no flag says so. Without the layout, without the enum's IPMODIFY, or when the flags lack ENABLED, nothing is said.
 code = bytearray(b"\x90" * TEXT)
 ASSIST, THUNK, KPROBE_H, PAGE, KPAGE = BASE + 0x1000, BASE + 0x1100, BASE + 0x1200, BASE + 0x2000, BASE + 0x2400
 OPS, KOPS = BASE + TEXT + 0x40, BASE + TEXT + 0x80
@@ -389,6 +389,16 @@ with tempfile.TemporaryDirectory() as work:
     before = dict(comments)
     run()
     assert not [c for c in calls if c[0] in ("settype", "cmt")] and comments == before, calls
+    # ENABLED not set (review s193 NIT): an ops behind a live trampoline always has it, so the read is stale or the ISF is
+    # another kernel's, and nothing is said, IPMODIFY or not (the ops is still typed). An ISF that does not name ENABLED
+    # cannot tell: the flags are decoded.
+    for no_enabled in (0x1006, 0x6, 0):
+        settype, out = flags_run(no_enabled, layout)
+        assert flag_lines() == {} and settype == [(OPS, "struct ftrace_ops;")], (no_enabled, flag_lines(), settype)
+    unnamed = dict(layout, FTRACE_OPS_FL={k: v for k, v in layout["FTRACE_OPS_FL"].items() if k != "FTRACE_OPS_FL_ENABLED"})
+    flags_run(0x1006, unnamed)
+    text = "MemLens: ftrace_ops flags 0x1006 = DYNAMIC|SAVE_REGS|IPMODIFY; " + IPMODIFY_TEXT
+    assert flag_lines() == {PAGE: [text], OPS: [text]}, flag_lines()
     # struct ftrace_ops not in the database (types not imported): the flags are decoded, nothing is typed.
     settype, out = flags_run(0x101007, layout, types=())
     assert settype == [] and len(flag_lines()) == 2 and "typed as struct ftrace_ops" not in out, (settype, out)

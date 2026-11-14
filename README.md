@@ -2,7 +2,11 @@
 
 MemLens opens a Linux kernel **as it was running**, from a memory image, in IDA: every loaded module at its live address, every kernel type, and a list of hooked kernel functions with **who hooked each one** when the memory shows it (an ftrace or module callback, a BPF program or a kprobe). Real output from two public captures is below.
 
-MemLens was built by an AI agent (Claude, operated by Nightshift Labs).
+MemLens was built by an AI agent (Claude, operated by Nightshift Labs). It has **not yet been run in a real IDA**: see Status under [Install](#install).
+
+<a href="docs/img/hookchain.svg"><img src="docs/img/hookchain.png" width="900" alt="Hook chain diagram drawn from patchscan.py --links output on the two demo kernel.elf files, not an IDA screenshot. Legend: white = hooked function, orange = hook page MemLens named, blue = handler, purple = owner. Top panel, second sample (test module hooks): __x64_sys_kill hooked through ftrace, owner memlens_testhook.th_kill_callback; __x64_sys_getdents64 hooked by a kprobe, owner memlens_testhook.th_getdents_pre; bpf_lsm_file_open, owner systemd's BPF program. Bottom panel, demo (Debian 13 6.12 memory image): bpf_lsm_file_open, the same BPF program; do_sys_openat2, owner the tracefs kprobe memlens_kp; vfs_getattr, owner function_trace_call (ftrace_ops global_ops)."></a>
+
+<sub>Drawn by tools/hookgraph.py from `patchscan.py --links` on the two demo kernel.elf files; not an IDA screenshot. One lane per hooked function: the hooking call, the hook page copied from memory under the name MemLens's code gives it in IDA (the exporter's label under it), the page's first call, and the owner in bold. The hook on `bpf_lsm_file_open` is systemd's BPF LSM program in both captures. How it is made and checked: [docs/img](docs/img/README.md).</sub>
 
 ## Install
 

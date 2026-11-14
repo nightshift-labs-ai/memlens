@@ -23,8 +23,9 @@ Always:
   too many, a heading reworded, swapped, dropped, doubled or replaced by a --links word, the legend reworded,
   reordered, recoloured, extended or dropped, a box recoloured.
 - docs/img/hookchain.png is the SVG rasterised at device scale SCALE (its size the SVG's times SCALE) and under 300 KB.
-- docs/img/README.md has the README snippet with the caption, the image paths (which exist), and a Where | Handler |
-  Owner table that is the top panel's lanes, row by row, from the testhook --links text.
+- docs/img/README.md has the README snippet with the caption and the image paths (which exist), README.md holds the
+  snippet's lines as they are, and the Where | Handler | Owner table under the snippet is the top panel's lanes, row by
+  row, from the testhook --links text.
 - A hand-made kernel.elf (ftrace, module callback and unknown-role pages): the tool's SVG for it passes the same check
   against a fresh `patchscan.py --links` of it, the CLI and the function give the same bytes, and the exit codes.
 With a demo kernel.elf (its sha256 is DEMO_SHA or TESTHOOK_SHA): `patchscan.py --links` on it must print its sample's
@@ -531,17 +532,22 @@ assert len(png) < 300 * 1024, len(png)
 notes = read(os.path.join(IMG, "README.md"))
 assert CAPTION in notes and "docs/img/hookchain.png" in notes and "tools/hookgraph.py" in notes, notes[:300]
 snippet = notes[notes.index("```markdown\n") + len("```markdown\n"):]
+table = snippet[snippet.index("\n```") + 4:]
+table = table[:table.index("\n#")]  # the table under the snippet, before the next heading
 snippet = snippet[:snippet.index("\n```")]
+front = read(os.path.join(ROOT, "README.md")).splitlines()
+missing = [line for line in snippet.splitlines() if line.strip() and line not in front]
+assert not missing, "README.md does not hold these lines of the docs/img/README.md snippet: %r" % missing
 for link in re.findall(r'(?:src|href)="([^"#]+)"|\]\(([^)#]+)\)', snippet):
     target = link[0] or link[1]
     assert "://" in target or os.path.exists(os.path.join(ROOT, target)), target  # what the README link check will ask
 assert 'width="%d"' % width in snippet, "embed the %gx PNG at the SVG's width" % SCALE
 rows = [[re.sub(r"[`*]", "", cell).strip() for cell in line.strip().strip("|").split("|")]
-        for line in snippet.splitlines() if line.startswith("|") and not re.match(r"^\|[-| :]+\|$", line)]
+        for line in table.splitlines() if line.startswith("|") and not re.match(r"^\|[-| :]+\|$", line)]
 assert rows[0] == ["Where", "Handler", "Owner"], rows[:1]
 assert rows[1:] == table_rows(texts[0]), (rows[1:], table_rows(texts[0]))  # the top panel's lanes, from --links
 assert [row[0] for row in rows[1:]] == [lane.find(NS + "text").text.split("+")[0] for lane in panels[0]], rows
-print("committed picture OK (%dx%d px; %s lanes; %d mutants fail; PNG %dx%d, %d bytes; README table = top panel)" % (
+print("committed picture OK (%dx%d px; %s lanes; %d mutants fail; PNG %dx%d, %d bytes; README.md holds the snippet; table = top panel)" % (
     width, height, "+".join(str(len(panel)) for panel in panels), len(mutants) + 2, size[0], size[1], len(png)))
 
 # 3. A hand-made kernel.elf: an ftrace page with no owner, a module callback (owner), a page whose role is unknown.

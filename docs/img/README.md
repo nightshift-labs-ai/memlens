@@ -74,35 +74,35 @@ To redraw after a change to patchscan, run step 1, then step 2 (device scale 1.5
     - A heading reworded, swapped between the panels, dropped, doubled into a lane or replaced by a `--links` word.
     - The legend reworded, reordered, recoloured, extended or dropped, and a box recoloured.
   - The PNG is the SVG's size times 1.5 and under 300 KB.
-  - The snippet below has the caption and image paths that exist, and its table is the top panel's lanes, row by row, from the testhook `--links` text.
+  - The snippet below has the caption and image paths that exist, README.md holds its lines as they are, and the table under it is the top panel's lanes, row by row, from the testhook `--links` text.
 - **With `MEMLENS_DEMO_ELF` and `MEMLENS_TESTHOOK_ELF`** (or both files as arguments, in any order; each is told apart by its sha256):
   - `patchscan.py --links` on each must print its sample's expected text. If it does not, the test fails and says to redraw.
   - Two runs of the tool give this SVG byte for byte.
   - A `kernel.elf` with another sha256 (your own export) is only checked against its own `--links` output.
 
-## Proposed README snippet
+## README snippet
 
-Put this right under the pitch. It is added at merge time.
+README.md has this right under its pitch (the test checks that README.md holds these lines as they are):
 
 ```markdown
-<a href="docs/img/hookchain.svg"><img src="docs/img/hookchain.png" width="900" alt="The hook chain MemLens's code links in IDA, as patchscan.py --links computes it: one lane per patched function, with the hooking call, the hook page copied from memory under its new name, the page's first call, and the owner in bold. Top: the test-module sample; bottom: the demo kernel.elf."></a>
+<a href="docs/img/hookchain.svg"><img src="docs/img/hookchain.png" width="900" alt="Hook chain diagram drawn from patchscan.py --links output on the two demo kernel.elf files, not an IDA screenshot. Legend: white = hooked function, orange = hook page MemLens named, blue = handler, purple = owner. Top panel, second sample (test module hooks): __x64_sys_kill hooked through ftrace, owner memlens_testhook.th_kill_callback; __x64_sys_getdents64 hooked by a kprobe, owner memlens_testhook.th_getdents_pre; bpf_lsm_file_open, owner systemd's BPF program. Bottom panel, demo (Debian 13 6.12 memory image): bpf_lsm_file_open, the same BPF program; do_sys_openat2, owner the tracefs kprobe memlens_kp; vfs_getattr, owner function_trace_call (ftrace_ops global_ops)."></a>
 
-<sub>Drawn by tools/hookgraph.py from `patchscan.py --links` on the two demo kernel.elf files; not an IDA screenshot. Top: `memlens-demo-testhook.zip` (the test module `memlens_testhook` hooks `__x64_sys_kill` and `__x64_sys_getdents64`; systemd's BPF program on `bpf_lsm_file_open`). Bottom: `memlens-demo-debian13.zip` (the lab VM's script set an ftrace filter on `vfs_getattr` and a kprobe event on `do_sys_openat2` through tracefs; the same BPF program). Each lane: the hooking instruction, the hook page copied from memory (orange: the name MemLens gives it over the exporter's label), its first call (blue) and the owner (purple, bold). How it is made: [docs/img](docs/img/README.md).</sub>
+<sub>Drawn by tools/hookgraph.py from `patchscan.py --links` on the two demo kernel.elf files; not an IDA screenshot. One lane per hooked function: the hooking call, the hook page copied from memory under the name MemLens's code gives it in IDA (the exporter's label under it), the page's first call, and the owner in bold. The hook on `bpf_lsm_file_open` is systemd's BPF LSM program in both captures. How it is made and checked: [docs/img](docs/img/README.md).</sub>
+```
 
-The top panel as a table, from the same `--links` text, in the list's order (by address):
+The top panel as a table, from the same `--links` text, in the list's order (by address). README.md does not repeat it: its section "A hook set by a module" already has these three rows, as Where | Owner | Handler.
 
 | Where | Handler | Owner |
 |---|---|---|
 | `__x64_sys_kill` | `ftrace_ops_assist_func` (ftrace) | **memlens_testhook.th_kill_callback** (ftrace_ops memlens_testhook.th_kill_ops) |
 | `bpf_lsm_file_open` | `__bpf_tramp_enter` (BPF trampoline) | **bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems** (BPF program) |
 | `__x64_sys_getdents64` | `kprobe_ftrace_handler` (kprobe via ftrace) | **memlens_testhook.th_getdents_pre** (kprobe pre_handler) |
-```
 
-### Merge notes (for the README front-page branch)
+### How README.md uses it
 
-- **Placement:** the snippet goes right under the pitch, with the table directly under the image (field item 9: the picture plus a 3-row table).
-- **The existing table:** README's "A hook set by a module" section already has a Where | Owner | Handler table of the same three rows. Keep only one, or turn that one into a pointer up to the hero. Its rows are reordered compared with the list (judge release-day item 5); this table uses the list's order.
-- **Link check after inserting:** every relative link and image path in README.md must resolve. `tests/test_hookgraph.py` checks that the snippet's three paths exist, but only the merged README can be checked as a whole:
+- **Placement:** in README.md the snippet sits right under the pitch and the line on who built MemLens. That line also says, before the picture, that MemLens has not yet been run in a real IDA, because the picture pushes the Status line under Install below the first screen.
+- **The table:** README.md keeps its narrow Where | Owner | Handler tables (the demo's under Before and after, the second sample's under "A hook set by a module", in the list's order) and adds no third one.
+- **Link check:** every relative link and image path in README.md must resolve. `tests/test_hookgraph.py` checks that the snippet's three paths exist and that README.md holds the snippet; this one-liner checks the whole README:
 
   ```
   python3 -I -c "import os,re,sys; t=open('README.md').read(); bad=[p for a,b in re.findall(r'(?:src|href)=\"([^\"#]+)\"|\]\(([^)#]+)\)',t) for p in [a or b] if '://' not in p and not p.startswith('mailto:') and not os.path.exists(p)]; print(bad or 'all links resolve'); sys.exit(1 if bad else 0)"

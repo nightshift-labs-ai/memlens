@@ -933,15 +933,17 @@ def scan_current_input():
         if not path:
             return None
     with open(path, "rb") as handle:
-        blob = handle.read()
-    if picked and not same_as_database(path, blob):
-        return None
+        blob = handle.read(64)
+        kind = memory_image(blob)
+        if not kind:  # a memory image is not read further: it can be gigabytes
+            blob += handle.read()
     name = os.path.basename(path)
-    kind = memory_image(blob)
     if kind:  # a judge's own sample: one line with the next step (judge s194 item 5)
         ida_kernwin.warning("MemLens: %s looks like a memory image (%s): use Edit > Plugins > MemLens: Export kernel from "
                             "memory image on it first (Volatility 3 and that kernel's ISF; tools/find_isf.py finds one), "
                             "then open the kernel.elf it writes." % (name, kind))
+        return None
+    if picked and not same_as_database(path, blob):
         return None
     try:
         if patchscan.on_disk_kernel(blob):  # its entry bytes are not what ran (unapplied alternatives)

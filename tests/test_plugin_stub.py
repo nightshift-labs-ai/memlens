@@ -76,8 +76,17 @@ dummy_names = set()  # addresses whose name IDA made up (sub_..., loc_...): not 
 dbytes.get_flags = lambda ea: ea  # the fake flags are the address, for has_user_name below
 dbytes.has_user_name = lambda flags: bool(iname.get_name(flags)) and flags not in dummy_names
 kw.ASKBTN_NO, kw.ASKBTN_YES = 0, 1
+# Functions and function comments (names as in the IDA 9.1-9.4 stubs, ida_funcs.pyi): none unless a case adds one to
+# functions (start -> end); get_func gives the function an address is in, which may start before it.
+funcs = types.ModuleType("ida_funcs")
+functions, func_comments = {}, {}
+class func_t:
+    def __init__(self, start, end): self.start_ea, self.end_ea = start, end
+funcs.get_func = lambda ea: next((func_t(s, e) for s, e in functions.items() if s <= ea < e), None)
+funcs.get_func_cmt = lambda pfn, repeatable: func_comments.get(pfn.start_ea)
+funcs.set_func_cmt = lambda pfn, cmt, repeatable: calls.append(("funccmt", pfn.start_ea, cmt, repeatable)) or func_comments.__setitem__(pfn.start_ea, cmt) or True
 sys.modules.update(ida_kernwin=kw, ida_idaapi=api, ida_typeinf=ti, ida_nalt=nalt, idc=idc, ida_bytes=dbytes, idautils=autils,
-                   ida_xref=xref, ida_name=iname, ida_netnode=nnode)
+                   ida_xref=xref, ida_name=iname, ida_netnode=nnode, ida_funcs=funcs)
 import memlens_entry as m
 isf = {"base_types": {"unsigned int": {"size": 4, "signed": False, "kind": "int"}},
        "enums": {}, "symbols": {"demo_var": {"address": 1, "type": {"kind": "struct", "name": "demo"}}, "absent": {"address": 2, "type": {"kind": "struct", "name": "demo"}}, "fn": {"address": 3, "type": {"kind": "base", "name": "void"}}}, "user_types": {"demo": {"kind": "struct", "size": 8, "fields": {"a": {"offset": 4, "type": {"kind": "base", "name": "unsigned int"}}, "private": {"offset": 0, "type": {"kind": "base", "name": "unsigned int"}}}}, "shrunk": {"kind": "struct", "size": 4, "fields": {"a": {"offset": 0, "type": {"kind": "base", "name": "unsigned int"}}}}, "gone": {"kind": "struct", "size": 4, "fields": {"a": {"offset": 0, "type": {"kind": "base", "name": "unsigned int"}}}}}}

@@ -44,8 +44,9 @@ idapro.close_database = lambda save: calls.append(("close", save))
 xref = types.ModuleType("ida_xref"); xref.fl_CN, xref.fl_JN, xref.XREF_USER = 17, 19, 32
 iname = types.ModuleType("ida_name"); iname.SN_NOWARN = 256
 nnode = types.ModuleType("ida_netnode")
+funcs = types.ModuleType("ida_funcs")
 sys.modules.update(ida_kernwin=kw, ida_idaapi=api, ida_typeinf=ti, ida_nalt=nalt, idc=idc, ida_bytes=dbytes, idapro=idapro, idautils=autils,
-                   ida_xref=xref, ida_name=iname, ida_netnode=nnode)
+                   ida_xref=xref, ida_name=iname, ida_netnode=nnode, ida_funcs=funcs)
 import memlens_headless as h
 import memlens_entry as m
 isf = {"base_types": {"unsigned int": {"size": 4, "signed": False, "kind": "int"}}, "enums": {},

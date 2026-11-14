@@ -23,6 +23,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     builder = runpy.run_path(os.path.join(HERE, "test_patchscan.py"))
 m, calls, nalt, names, blobs, comments = g["m"], g["calls"], g["nalt"], g["names"], g["blobs"], g["comments"]
 dummy_names, netnode, xref, iname = g["dummy_names"], g["netnode"], g["xref"], g["iname"]
+functions, func_comments = g["functions"], g["func_comments"]  # the fake database's functions (start -> end) and their comments
 elf, call, BASE, TEXT = builder["elf"], builder["call"], builder["BASE"], builder["TEXT"]
 CALL, JUMP = 17 | 32, 19 | 32  # fl_CN | XREF_USER, fl_JN | XREF_USER
 RENAME = 256 | 64  # SN_NOWARN | SN_NON_AUTO: a user name, so IDA does not replace it as it may an auto name
@@ -73,6 +74,18 @@ def database(blob):
     names.update({s[2]: s[0] for s in ps.Image(blob).symbols if s[2].startswith(ps.TARGET_PREFIX)})
     blobs.clear()
     comments.clear()
+    functions.clear()
+    func_comments.clear()
+
+
+def memlens_lines(ea):
+    """The MemLens lines of the comment at ea."""
+    return [line for line in (comments.get(ea) or "").split("\n") if line.startswith("MemLens:")]
+
+
+def func_cmts():
+    """The set_func_cmt calls of the last run, as (function start, comment, repeatable)."""
+    return [c[1:] for c in calls if c[0] == "funccmt"]
 
 
 code = bytearray(b"\x90" * TEXT)
@@ -97,6 +110,10 @@ with tempfile.TemporaryDirectory() as work:
         handle.write(blob)
     nalt.get_input_file_path = lambda: path
     database(blob)
+    # Functions IDA found: traced_a and kprobe_me start at their entry, probed too but with an analyst's function comment,
+    # traced_b's entry lies inside a function that starts before it, movjmp is in no function.
+    functions.update({BASE: BASE + 0x80, BASE + 0x200: BASE + 0x280, BASE + 0x400: BASE + 0x480, BASE + 0xc0: BASE + 0x180})
+    func_comments[BASE + 0x200] = "analyst: probe seen in the wild"
     crefs, renames, out = run()
     # Each hooking instruction to its page (call -> fl_CN, jmp -> fl_JN), each page's handler call to the handler, all XREF_USER.
     assert crefs == sorted([(BASE + 4, F, CALL), (BASE + 0x100, F, CALL), (BASE + 0x200, K, CALL), (BASE + 0x30a, B, JUMP),
@@ -104,10 +121,23 @@ with tempfile.TemporaryDirectory() as work:
     assert renames == sorted([(F, "ftrace_tramp_%x" % F, RENAME), (K, "kprobe_ftrace_tramp_probed", RENAME), (B, "bpf_tramp_movjmp", RENAME)]), renames
     assert "7 code xrefs added; 3 hook pages renamed by role\n" in out, out
     assert "4 patched entries lead into this database, 4 to a hook page MemLens copied" in out, out
-    # The exporter's label stays findable in a comment at the page; the entries keep their own comment.
-    assert comments[F].startswith("MemLens: hook page no module owns, copied from memory (exporter label memlens_target_%x); "
-                                  "reached from traced_a, traced_b" % F), comments
-    assert comments[BASE + 4 - 4].startswith("MemLens: call to memory with no symbol memlens_target_%x" % F), comments
+    # The exporter's label stays findable in a comment at the page (outside any module's memory: judge s194 F3).
+    assert comments[F].startswith("MemLens: hook page outside any module's memory, copied from memory (exporter label "
+                                  "memlens_target_%x); reached from traced_a, traced_b" % F), comments
+    # Each hooked entry linked to a copied hook page: how it is hooked and the chain, with the page's name after the
+    # rename (judge s194 item 3 / F2); rows with no link (int3, the syscall slot) keep the scan's line.
+    entry_text = {BASE: "MemLens: hooked (ftrace): call -> ftrace_tramp_%x -> function_trace_call" % F,
+                  BASE + 0x100: "MemLens: hooked (ftrace): call -> ftrace_tramp_%x -> function_trace_call" % F,
+                  BASE + 0x200: "MemLens: hooked (kprobe via ftrace): call -> kprobe_ftrace_tramp_probed -> kprobe_ftrace_handler",
+                  BASE + 0x300: "MemLens: hooked (BPF trampoline): jmp -> bpf_tramp_movjmp -> __bpf_tramp_enter",
+                  BASE + 0x400: "MemLens: int3 at entry (kprobe or breakpoint) ",
+                  BASE + TEXT + 0x20: "MemLens: syscall entry outside the handlers memlens_target_%x" % K}
+    assert {ea: comments.get(ea) for ea in entry_text} == entry_text, {ea: comments.get(ea) for ea in entry_text}
+    # The function comment (Hex-Rays prints it at the top of the pseudocode): only for a function that starts at a linked
+    # entry, and never over the analyst's (probed); not for traced_b (its function starts before it), movjmp (no
+    # function) or the int3 row (no link).
+    assert func_cmts() == [(BASE, entry_text[BASE], False)], func_cmts()
+    assert func_comments == {BASE: entry_text[BASE], BASE + 0x200: "analyst: probe seen in the wild"}, func_comments
     # The list: Handler and Owner columns; Enter goes to the entry, Ctrl+E ("Jump to handler") to the handler.
     table = m._open_list
     assert [c[0] for c in table.cols] == ["Address", "Where", "What", "Target", "Handler", "Owner"], table.cols
@@ -127,12 +157,12 @@ with tempfile.TemporaryDirectory() as work:
     table.OnInsertLine(index.index("traced_a")); assert calls[-1][0] == "msg" and "no owner" in calls[-1][1], calls[-1]
     table.OnInsertLine(-1); assert calls[-1][0] == "msg", calls[-1]  # nothing selected
 
-    # Second run: nothing added or renamed twice; comments unchanged.
-    before = dict(comments)
+    # Second run: nothing added or renamed twice; comments unchanged, no comment or function comment written.
+    before, before_func = dict(comments), dict(func_comments)
     crefs, renames, out = run()
     assert crefs == [] and renames == [], (crefs, renames)
     assert "0 code xrefs added (7 already added by an earlier run); 0 hook pages renamed by role, 3 already named by an earlier run" in out, out
-    assert comments == before, comments
+    assert comments == before and func_comments == before_func and not [c for c in calls if c[0] in ("cmt", "funccmt")], calls
     assert m._open_list.OnGetLine(0)[3:] == table.OnGetLine(0)[3:]
 
     # The user renamed a page since: it is left alone.
@@ -140,11 +170,44 @@ with tempfile.TemporaryDirectory() as work:
     crefs, renames, out = run()
     assert crefs == [] and renames == [] and "2 already named by an earlier run, 1 left alone, they have another name now" in out, out
     assert {line[1]: line[3] for line in (m._open_list.OnGetLine(n) for n in range(3))}["probed"] == "my_kprobe"
+    # ... and the entry's comment names the page as the database does now: its line is replaced, not kept twice.
+    assert comments[BASE + 0x200] == "MemLens: hooked (kprobe via ftrace): call -> my_kprobe -> kprobe_ftrace_handler", comments
+    assert func_comments[BASE + 0x200] == "analyst: probe seen in the wild" and not func_cmts(), (func_comments, calls)
+    # The function comment MemLens wrote (only MemLens lines in it) follows the name too.
+    del names["ftrace_tramp_%x" % F]; names["my_ftrace"] = F
+    run()
+    assert func_cmts() == [(BASE, "MemLens: hooked (ftrace): call -> my_ftrace -> function_trace_call", False)], func_cmts()
+    assert comments[BASE] == comments[BASE + 0x100] == func_comments[BASE], (comments, func_comments)
+    del names["my_ftrace"]; names["ftrace_tramp_%x" % F] = F
     # ... or removed the name MemLens gave (IDA shows a dummy name): not named again either.
     del names["my_kprobe"]; names["sub_%X" % K] = K; dummy_names.add(K)
     crefs, renames, out = run()
     assert crefs == [] and renames == [] and "1 left alone" in out, out
     dummy_names.clear(); del names["sub_%X" % K]
+
+    # A database an older MemLens annotated: its entry line named the exporter's label (memlens_target_..., renamed since)
+    # and no owner, and its page line said "no module owns". The new lines replace them: one MemLens line each, the
+    # analyst's lines stay; a second run changes nothing.
+    database(blob)
+    functions[BASE] = BASE + 0x80
+    old_entry = "MemLens: call to memory with no symbol memlens_target_%x (calls function_trace_call, ftrace)" % F
+    old_page = ("MemLens: hook page no module owns, copied from memory (exporter label memlens_target_%x); reached from "
+                "traced_a, traced_b; first named call: function_trace_call (ftrace)" % F)
+    comments.update({BASE: "analyst note\n" + old_entry, BASE + 0x100: old_entry, F: old_page + "\nanalyst: seen in the wild"})
+    run()
+    assert comments[BASE] == "analyst note\n" + entry_text[BASE] and comments[BASE + 0x100] == entry_text[BASE + 0x100], comments
+    assert comments[F] == "analyst: seen in the wild\n" + old_page.replace("no module owns", "outside any module's memory"), comments[F]
+    assert all(len(memlens_lines(ea)) == 1 for ea in (BASE, BASE + 0x100, BASE + 0x200, BASE + 0x300, F)), comments
+    assert func_cmts() == [(BASE, entry_text[BASE], False)], func_cmts()
+    before = dict(comments)
+    run()
+    assert comments == before and not [c for c in calls if c[0] in ("cmt", "funccmt")], calls
+    # An analyst's note after our entry line stays on a rerun (the line still holds our text).
+    comments[BASE] = "analyst note\n" + entry_text[BASE] + "  (analyst: checked)"
+    func_comments[BASE] = entry_text[BASE] + "  (analyst: checked)"
+    before, before_func = dict(comments), dict(func_comments)
+    run()
+    assert comments == before and func_comments == before_func and not [c for c in calls if c[0] in ("cmt", "funccmt")], calls
 
     # A fresh database where the planned name is already used elsewhere (IDA refuses it), a page that has no name and
     # one with only a name IDA made up: those two are renamed.
@@ -201,6 +264,20 @@ with tempfile.TemporaryDirectory() as work:
     assert crefs == [] and renames == [] and "getblob broke" in out and "hook chain stopped by this error" in out, out
     lines = {line[1]: line for line in (m._open_list.OnGetLine(n) for n in range(m._open_list.OnGetSize()))}
     assert lines["traced_a"][3:5] == ["memlens_target_%x" % F, "function_trace_call (ftrace)"] and len(lines) == 6, lines
+    # ... and with no link the entries get the scan's line, as before.
+    assert comments[BASE] == "MemLens: call to memory with no symbol memlens_target_%x (calls function_trace_call, ftrace)" % F, comments
+    # If writing the entry comments fails (here the function lookup raises), the list is still shown and the traceback
+    # goes to the Output window.
+    database(blob)
+    good_get_func = g["funcs"].get_func
+    def broken_get_func(ea): raise TypeError("get_func broke")
+    g["funcs"].get_func = broken_get_func
+    try:
+        crefs, renames, out = run()
+    finally:
+        g["funcs"].get_func = good_get_func
+    assert len(crefs) == 7 and "get_func broke" in out and "comments at the hooked entries stopped by this error" in out, out
+    assert m._open_list.OnGetSize() == 6, m._open_list.OnGetSize()
     # A late failure (the record cannot be saved) after xrefs and names were added: the Output window must not claim
     # that nothing was added.
     database(blob)
@@ -282,6 +359,8 @@ with tempfile.TemporaryDirectory() as work:
     table.OnInsertLine(0); assert calls[-1] == ("jump", THUNK), calls[-1]
     table.OnEditLine(0); assert calls[-1] == ("jump", ASSIST), calls[-1]
     assert comments[PAGE].endswith("; owner: evilmod.fh_ftrace_thunk (ftrace_ops evilmod.hooks+0x20)"), comments[PAGE]
+    assert comments[BASE] == ("MemLens: hooked (ftrace): call -> ftrace_tramp___x64_sys_getdents64 -> ftrace_ops_assist_func; "
+                              "owner: evilmod.fh_ftrace_thunk (ftrace_ops evilmod.hooks+0x20)"), comments[BASE]
     crefs, renames, out = run()
     assert crefs == [] and not [c for c in calls if c[0] == "dref"], calls
     assert "0 code xrefs added (2 already added by an earlier run); 0 data xrefs added (2 already added by an earlier run)" in out, out
@@ -290,6 +369,12 @@ with tempfile.TemporaryDirectory() as work:
     m.save_layout({"ftrace_ops.func": 8})
     crefs, renames, out = run()
     assert m._open_list.OnGetLine(0)[5] == "ftrace_ops_assist_func (ftrace_ops evilmod.hooks+0x20)", m._open_list.OnGetLine(0)
+    assert comments[BASE].endswith("; owner: ftrace_ops_assist_func (ftrace_ops evilmod.hooks+0x20)"), comments[BASE]
+    # The same database with the layout read at offset 0 again: the owner changes, so the entry's line is replaced.
+    m.save_layout({"ftrace_ops.func": 0})
+    run()
+    assert memlens_lines(BASE) == [comments[BASE]] and comments[BASE].endswith(
+        "; owner: evilmod.fh_ftrace_thunk (ftrace_ops evilmod.hooks+0x20)"), comments[BASE]
     assert sorted(c[1:] for c in calls if c[0] == "dref") == [(PAGE + 0xdd, OPS, DATA), (OPS + 8, ASSIST, DATA)], calls
     # With the flags layout and struct ftrace_ops in the database: the flags (ENABLED only here) are decoded at the page
     # and the ops, but an ops inside a bigger module object (evilmod.hooks+0x20, the ftrace_hook array) is not retyped.
@@ -356,7 +441,7 @@ with tempfile.TemporaryDirectory() as work:
     settype, out = flags_run(0x10000001007, layout)
     text = "MemLens: ftrace_ops flags 0x10000001007 = ENABLED|DYNAMIC|SAVE_REGS|IPMODIFY|0x10000000000; " + IPMODIFY_TEXT
     assert flag_lines() == {PAGE: [text], OPS: [text]}, flag_lines()
-    assert comments[OPS] == text and comments[PAGE].split("\n")[0].startswith("MemLens: hook page no module owns"), comments
+    assert comments[OPS] == text and comments[PAGE].split("\n")[0].startswith("MemLens: hook page outside any module's memory"), comments
     assert settype == [(OPS, "struct ftrace_ops;")], settype
     assert out.endswith("; 1 module ftrace_ops typed as struct ftrace_ops\n"), out
     table = m._open_list
@@ -385,7 +470,7 @@ with tempfile.TemporaryDirectory() as work:
     settype, out = flags_run(0x10000001007, layout, fresh=False)
     text = "MemLens: ftrace_ops flags 0x10000001007 = ENABLED|DYNAMIC|SAVE_REGS|IPMODIFY|0x10000000000; " + IPMODIFY_TEXT
     assert flag_lines() == {PAGE: [text], OPS: [text]} and settype == [], (flag_lines(), settype)
-    assert comments[OPS] == text and comments[PAGE].split("\n")[0].startswith("MemLens: hook page no module owns"), comments
+    assert comments[OPS] == text and comments[PAGE].split("\n")[0].startswith("MemLens: hook page outside any module's memory"), comments
     before = dict(comments)
     run()
     assert not [c for c in calls if c[0] in ("settype", "cmt")] and comments == before, calls
@@ -447,13 +532,27 @@ with tempfile.TemporaryDirectory() as work:
     text = "MemLens: ftrace_ops flags 0x857 = ENABLED|DYNAMIC|SAVE_REGS|RECURSION|INITIALIZED|ALLOC_TRAMP; " + NO_IPMODIFY
     settype, out = flags_run(0x857, None, types=())  # the list first: no layout recorded, no struct in the database
     assert flag_lines() == {} and settype == [] and m.load_layout() == {}, (flag_lines(), settype, m.load_layout())
+    kill_text = ("MemLens: hooked (ftrace): call -> ftrace_tramp___x64_sys_kill -> ftrace_ops_assist_func; owner: evilmod.fh_kill "
+                 "(ftrace_ops evilmod.fh_ops)")
+    assert comments[BASE] == kill_text, comments[BASE]
+    # The refresh writes the entries' comments as Show patched kernel functions does (the same code): here on a database an
+    # older MemLens annotated (its entry line names the exporter's label) whose trampoline the user renamed since, and
+    # where IDA has made __x64_sys_kill a function: one MemLens line naming the page as the database does now, and the
+    # function comment.
+    comments[BASE] = "MemLens: call to memory with no symbol memlens_target_%x (calls ftrace_ops_assist_func, ftrace)" % PAGE
+    del names["ftrace_tramp___x64_sys_kill"]; names["my_kill_tramp"] = PAGE
+    functions[BASE] = BASE + 0x80
     settype, out = apply_kernel_types()
     assert flag_lines() == {PAGE: [text], OPS: [text]} and settype == [(OPS, "struct ftrace_ops;")], (flag_lines(), settype, out)
     assert "0 structs" not in out and " structs" in out and out.index(" structs") < out.index("hook chain applied again with"), out
     assert "1 module ftrace_ops typed as struct ftrace_ops" in out, out
+    kill_text = kill_text.replace("ftrace_tramp___x64_sys_kill", "my_kill_tramp")
+    assert comments[BASE] == kill_text and func_cmts() == [(BASE, kill_text, False)], (comments[BASE], func_cmts())
+    assert comments[BASE + 0x100] == ("MemLens: hooked (kprobe via ftrace): call -> kprobe_ftrace_tramp_do_sys_openat2 -> "
+                                      "kprobe_ftrace_handler; owner: kprobe_ftrace_handler (ftrace_ops kprobe_ipmodify_ops)"), comments
     before = dict(comments)
     settype, out = apply_kernel_types()  # again: the same types, nothing added to the hook chain
-    assert settype == [] and comments == before and not [c for c in calls if c[0] in ("cref", "setname", "cmt", "dref")], calls
+    assert settype == [] and comments == before and not [c for c in calls if c[0] in ("cref", "setname", "cmt", "dref", "funccmt")], calls
     read = []
     database(flags_blob(0x857)); known_types.clear()
     nalt.get_input_file_path = lambda: read.append(1) or path
@@ -592,6 +691,11 @@ with tempfile.TemporaryDirectory() as work:
     table.OnInsertLine(index.index("vfs_read")); assert calls[-1][0] == "msg" and "module callback" in calls[-1][1], calls[-1]
     assert comments[MP].endswith("reached from __x64_sys_kill; first named call: evilmod.fh_sys_kill (module callback)"), comments[MP]
     assert comments[HP].endswith("reached from vfs_read; first named call: _printk"), comments[HP]
+    # The entries: a module callback is the handler and the owner; a page with no known role says what it calls first,
+    # names no handler and no owner, and keeps its label.
+    assert comments[BASE] == ("MemLens: hooked (module callback): call -> module_hook___x64_sys_kill -> evilmod.fh_sys_kill; "
+                              "owner: evilmod.fh_sys_kill (module callback)"), comments[BASE]
+    assert comments[BASE + 0x100] == "MemLens: hooked: jmp -> memlens_target_%x (hook code; first call: _printk)" % HP, comments[BASE + 0x100]
     nalt.get_input_file_path = lambda: ""
 print("hook chain stub test OK (hand-made ELFs; fake IDA modules)")
 
@@ -630,22 +734,91 @@ def flag_comments():
     return {ea: [line for line in text.split("\n") if "ftrace_ops flags" in line] for ea, text in comments.items()
             if "ftrace_ops flags" in text}
 
+
+import re, subprocess
+def links_entry_comments(path):
+    """{entry address: comment} for each row of `patchscan.py --links <path>`, filled from its lines alone (judge s194
+    item 3): for a row whose target is a copied hook page (memlens_target_<page> (calls <handler>, <kind>)), 'MemLens:
+    hooked (<kind>): <flow> -> <new name> -> <handler>; owner: <owner>', with the flow of the xref line from that entry to
+    the page, the page's rename line, the page's xref line to the handler and its owner line; any other row 'MemLens:
+    <what> <target>' (the scan's line)."""
+    cli = subprocess.run([sys.executable, "-I", os.path.join(HERE, "..", "patchscan.py"), "--links", path], capture_output=True, text=True)
+    assert cli.returncode == 0, cli.stderr
+    rows, xrefs, renames, owners = [], [], {}, {}
+    for line in cli.stdout.splitlines():
+        fields = line.split("\t")
+        if fields[0] == "xref":
+            xrefs.append((int(fields[1], 16), int(fields[2], 16), fields[3], fields[4]))
+        elif fields[0] == "rename":
+            renames[int(fields[1], 16)] = fields[3]
+        elif fields[0] == "owner":
+            owners[int(fields[1], 16)] = fields[3]
+        else:
+            rows.append(fields)
+    expected = {}
+    for address, function, what, target in rows:
+        entry, page = int(address, 16), re.match(r"%s([0-9a-f]+) \(calls (\S+), (.+)\)$" % ps.TARGET_PREFIX, target)
+        if page is None:
+            expected[entry] = "MemLens: %s %s" % (what, target)
+            continue
+        page, handler, kind = int(page.group(1), 16), page.group(2), page.group(3)
+        flows = [flow for source, to, flow, _ in xrefs if to == page and entry <= source < entry + 16]
+        assert len(flows) == 1 and flows[0] in ("call", "jmp"), (function, flows)
+        assert [x for x in xrefs if x[3].startswith("%s%x+" % (ps.TARGET_PREFIX, page)) and x[3].endswith(" -> " + handler)], (function, handler)
+        expected[entry] = "MemLens: hooked (%s): %s -> %s -> %s; owner: %s" % (kind, flows[0], renames[page], handler, owners[page])
+    return expected
+
+
 for path in sys.argv[1:]:
     blob = open(path, "rb").read()
     nalt.get_input_file_path = lambda: path
     database(blob)
     assert m.load_layout() == {}, m.load_layout()  # as before Apply kernel types: no layout recorded
+    # Each entry's comment (judge s194 item 3): the template filled from this file's --links lines. Function comments: of
+    # the entries in address order, IDA has made the first a function, the second too but with the analyst's function
+    # comment, and the third lies inside a function that starts before it (the rest are in no function).
+    expected_entries = links_entry_comments(path)
+    entries = sorted(expected_entries)
+    linked = [ea for ea in entries if expected_entries[ea].startswith("MemLens: hooked")]
+    assert len(linked) >= 3, expected_entries
+    functions.update({linked[0]: linked[0] + 0x40, linked[1]: linked[1] + 0x40, linked[2] - 0x10: linked[2] + 0x40})
+    func_comments[linked[1]] = "analyst: my notes on this function"
     crefs, renames, out = run()
+    assert {ea: comments.get(ea) for ea in entries} == expected_entries, ({ea: comments.get(ea) for ea in entries}, expected_entries)
+    assert func_cmts() == [(linked[0], expected_entries[linked[0]], False)], func_cmts()
+    assert func_comments == {linked[0]: expected_entries[linked[0]], linked[1]: "analyst: my notes on this function"}, func_comments
+    entry_lines = ["  entry %#x: %s" % (ea, expected_entries[ea]) for ea in entries]
     assert not [c for c in calls if c[0] in ("parse", "settype")], calls  # no type imported or applied
     assert flag_comments() == {}, flag_comments()  # no layout: nothing said about ftrace_ops flags
     drefs = [c for c in calls if c[0] == "dref"]
     assert crefs and all(kind == CALL for _, _, kind in crefs) and all(c[3] == DATA for c in drefs), (crefs, drefs)
+    before, before_func = dict(comments), dict(func_comments)
     second = run()
     assert second[:2] == ([], []) and not [c for c in calls if c[0] == "dref"], second
+    assert comments == before and func_comments == before_func and not [c for c in calls if c[0] in ("cmt", "funccmt")], calls
     print("%s: first run %d add_cref, %d add_dref, %d set_name (%s); second run %d add_cref, %d set_name" % (
         path, len(crefs), len(drefs), len(renames), ", ".join(r[1] for r in renames), len(second[0]), len(second[1])))
     for line in out.splitlines():
         print("  " + line)
+    print("  entry comments: %d of %d equal the template filled from the --links lines; 1 set_func_cmt (the function that "
+          "starts at its entry; not over the analyst's, not inside another function); second run: 0 comments, 0 function "
+          "comments written" % (len(entries), len(entries)))
+    for line in entry_lines:
+        print(line)
+    # A database an older MemLens annotated (each entry's line was the scan's 'MemLens: <what> <memlens_target_...>'; one
+    # entry also has an analyst's line): each entry ends with exactly one MemLens line, the new one; the analyst's line stays.
+    old_lines = {int(line.split("\t")[0], 16): "MemLens: %s %s" % tuple(line.split("\t")[2:4])
+                 for line in subprocess.run([sys.executable, "-I", os.path.join(HERE, "..", "patchscan.py"), path],
+                                            capture_output=True, text=True).stdout.splitlines()}
+    assert sorted(old_lines) == entries and any(old_lines[ea] != expected_entries[ea] for ea in entries), old_lines
+    database(blob)
+    comments.update(old_lines)
+    comments[entries[0]] = "analyst: look here\n" + old_lines[entries[0]]
+    run()
+    assert all(memlens_lines(ea) == [expected_entries[ea]] for ea in entries), {ea: comments[ea] for ea in entries}
+    assert comments[entries[0]] == "analyst: look here\n" + expected_entries[entries[0]], comments[entries[0]]
+    print("  on a database with the older entry lines: each of the %d entries ends with exactly one MemLens line, the new one"
+          % len(entries))
     table = m._open_list
     for n in range(table.OnGetSize()):
         print("  row: " + " | ".join(table.OnGetLine(n)))
@@ -698,6 +871,7 @@ for path in sys.argv[1:]:
     _, _, flags_out = run()
     settype = [c[1:] for c in calls if c[0] == "settype"]
     assert [m._open_list.OnGetLine(n) for n in range(m._open_list.OnGetSize())] == rows
+    assert {ea: comments.get(ea) for ea in entries} == expected_entries, {ea: comments.get(ea) for ea in entries}
     flagged = flag_comments()
     if sha in REAL_FLAGS:
         assert (flagged, settype) == REAL_FLAGS[sha], (flagged, settype)
@@ -748,6 +922,8 @@ for path in sys.argv[1:]:
     refreshed = [c[1:] for c in calls if c[0] == "settype"]
     apply_out = "".join(c[1] for c in calls if c[0] == "msg")
     assert (flag_comments(), refreshed) == (flagged, settype) and "hook chain applied again with" in apply_out, (flag_comments(), refreshed, apply_out)
-    print("    list first, then Apply kernel types (no second list): the same %d flags comments and %d SetType" % (
-        len(flagged), len(refreshed)))
+    # The refresh writes the entries' comments too (the same code as the list): unchanged here, so nothing is rewritten.
+    assert {ea: comments.get(ea) for ea in entries} == expected_entries and not [c for c in calls if c[0] in ("cmt", "funccmt") and c[1] in entries], calls
+    print("    list first, then Apply kernel types (no second list): the same %d flags comments and %d SetType; the %d entry "
+          "comments unchanged" % (len(flagged), len(refreshed), len(entries)))
     known_types.clear()

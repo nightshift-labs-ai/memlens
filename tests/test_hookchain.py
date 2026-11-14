@@ -117,12 +117,36 @@ assert not ps.copied_page(image, P["F"] + 1)  # no symbol at that address at all
 
 comments = ps.page_comments(list(links.values()))
 assert set(comments) == set(P.values()) - {P["X"]}, comments
-assert comments[P["F"]] == ("MemLens: hook page no module owns, copied from memory (exporter label memlens_target_%x); reached from "
-                            "traced_a, traced_b; first named call: function_trace_call (ftrace)" % P["F"]), comments[P["F"]]
+assert comments[P["F"]] == ("MemLens: hook page outside any module's memory, copied from memory (exporter label memlens_target_%x); "
+                            "reached from traced_a, traced_b; first named call: function_trace_call (ftrace)" % P["F"]), comments[P["F"]]
 assert comments[P["U"]].endswith("reached from pushret; first named call: some_helper"), comments[P["U"]]
 assert comments[P["M"]].endswith("reached from modhook; first named call: evilmod.fh_cb (module callback)"), comments[P["M"]]
 many = [ps.Link(BASE + 0x10 * i, "fn%d" % i, BASE + 0x10 * i, "call", P["F"], True, None, None, None, None) for i in range(7)]
 assert ps.page_comments(many)[P["F"]].endswith("reached from fn0, fn1, fn2, fn3, fn4 and 2 more"), ps.page_comments(many)
+
+# The comment at each row's address (judge s194 item 3): an entry linked to a copied hook page says how it is hooked and
+# where the chain leads, with the page's name in the database now (names; else the ELF's label); any other row keeps the
+# scan's line (a syscall slot, int3, a target outside the ELF, a target with a real symbol).
+entry = {(row[1]): (text, page) for row, (address, text, page) in zip(findings, ps.entry_comments(image, findings, list(links.values()), names))}
+assert [address for address, _, _ in ps.entry_comments(image, findings, list(links.values()), names)] == [row[0] for row in findings]
+assert entry["traced_a"] == entry["traced_b"] == ("MemLens: hooked (ftrace): call -> ftrace_tramp_%x -> function_trace_call" % P["F"], P["F"]), entry
+assert entry["movjmp"] == ("MemLens: hooked (BPF trampoline): jmp -> bpf_tramp_movjmp -> __bpf_tramp_enter", P["B"]), entry["movjmp"]
+assert entry["pushret"] == ("MemLens: hooked: jmp -> memlens_target_%x (hook code; first call: some_helper)" % P["U"], P["U"]), entry["pushret"]
+assert entry["modhook"] == ("MemLens: hooked (module callback): call -> module_hook_modhook -> evilmod.fh_cb; owner: evilmod.fh_cb "
+                            "(module callback)", P["M"]), entry["modhook"]
+assert entry["alias_a"] == entry["alias_b"] == ("MemLens: hooked (ftrace): call -> ftrace_tramp_alias_a -> function_trace_call", P["A"]), entry
+assert entry["ripjmp"] == ("MemLens: jmp [rip+0] at entry real_tramp", None), entry["ripjmp"]
+assert entry["int3_fn"] == ("MemLens: int3 at entry (kprobe or breakpoint) ", None), entry["int3_fn"]
+assert entry["far"] == ("MemLens: call to memory with no symbol 0xffffffffc0001000 (no symbol)", None), entry["far"]
+assert entry["sys_call_table[0]"] == ("MemLens: syscall entry outside the handlers memlens_target_%x" % P["F"], None), entry["sys_call_table[0]"]
+# With no names from the database the page keeps the ELF's label; with no links every row keeps the scan's line.
+traced_a = [row for row in findings if row[1] == "traced_a"]
+assert ps.entry_comments(image, traced_a, list(links.values()), {}) == [(BASE, "MemLens: hooked (ftrace): call -> memlens_target_%x -> "
+                                                                          "function_trace_call" % P["F"], P["F"])], ps.entry_comments(image, traced_a, list(links.values()), {})
+assert ps.entry_comments(image, findings, [], names) == [(row[0], "MemLens: %s %s" % (row[2], row[3]), None) for row in findings]
+# An owner is named after the chain (tests/test_owner.py has how owners are found).
+owned = links["traced_a"]._replace(owner=ps.Owner("evilmod.cb (ftrace_ops evilmod.ops)", None, "ftrace_ops", []))
+assert ps.entry_comments(image, traced_a, [owned], names)[0][1].endswith("-> function_trace_call; owner: evilmod.cb (ftrace_ops evilmod.ops)")
 
 rows = {row[1]: row for row in ps.list_rows(image, findings, list(links.values()), names)}
 assert rows["traced_a"][3:6] == ("ftrace_tramp_%x" % P["F"], "function_trace_call (ftrace)", FTRACE), rows["traced_a"]
@@ -242,6 +266,10 @@ for path in sys.argv[1:]:
         assert image.by_name[handler][0] == link.handler, link
         assert names[link.target] == name, (names, link)
         assert ps.describe(image, link.target) == "%s%x" % (ps.TARGET_PREFIX, link.target)
+    for (address, text, page), link in zip(ps.entry_comments(image, findings, links, names), links):
+        site, handler_offset, handler, kind, name = EXPECTED[link.function]
+        assert (address, page) == (link.entry, link.target) and text == "MemLens: hooked (%s): call -> %s -> %s%s" % (
+            kind, name, handler, "; owner: %s" % link.owner.text if link.owner else ""), (text, link)
     xrefs = ps.hook_xrefs(links)
     owner_refs = {ref for link in links if link.owner for ref in link.owner.refs}  # tests/test_owner.py checks them
     assert len(xrefs) == 2 * len(links) + len(owner_refs) and owner_refs <= set(xrefs), xrefs

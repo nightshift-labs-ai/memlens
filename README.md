@@ -185,6 +185,7 @@ flowchart LR
   isf --> ida
   ida --> types[kernel types + typed globals]
   ida --> pcpu["per-CPU copies (cpu0.runqueues, ...)"]
+  vj["vol -r json (hook plugins)"] --> ida
   ida --> hooks[patched functions list]
 ```
 
@@ -193,8 +194,9 @@ flowchart LR
 - **Typed globals**: kernel data symbols get their real type, so `init_task` becomes a `struct task_struct`.
 - **Per-CPU variables, one copy per CPU**: each CPU's live copy (`cpu0.runqueues`, `cpu1.pcpu_hot`, ...), typed like the globals.
 - **Patched kernel functions**: entries rewritten by ftrace, kprobes, BPF trampolines or hook code, and syscall slots that leave the handlers, with the hook's owner when the memory shows it (the BPF program, the `ftrace_ops` and its callback, or a module's callback; for an ftrace-based kprobe, in an export from v0.3.30 on, the probe itself: its tracefs event name or the module function its `pre_handler` is, for a kretprobe its `handler`).
+- **Volatility's hook findings in the same list**: what `linux.tracing.tracepoints`, `linux.malware.check_idt`, `linux.malware.netfilter`, `linux.malware.keyboard_notifiers`, `linux.malware.check_afinfo` and `linux.tracing.ftrace` report (`vol -r json`), one row per entry with a Source column; an ftrace row with the same `ftrace_ops` as a MemLens row is merged into that row ([above](#volatilitys-other-hook-findings-in-the-ida-list)).
 
-The full description of each is under [Details](docs/OUTPUT.md#details).
+The full description of each is under [Details](docs/OUTPUT.md#details) (of the Volatility rows, in [docs/USAGE.md](docs/USAGE.md#usage), item 5).
 
 ## Usage
 

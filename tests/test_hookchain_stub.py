@@ -322,7 +322,7 @@ symbols = [("__x64_sys_kill", BASE, 0x100), ("do_sys_openat2", BASE + 0x100, 0x1
            ("evilmod.fh_kill", THUNK, 0x100), ("kprobe_ftrace_handler", KPROBE_H, 0x100), ("linux_banner", BASE + TEXT, 0x20),
            ("evilmod.fh_ops", OPS, 0x40), ("kprobe_ipmodify_ops", KOPS, 0x40)]
 symbols += [("%s%x" % (ps.TARGET_PREFIX, page), page, 0) for page in (PAGE, KPAGE)]
-def flags_blob(flags, kprobe_flags=0x1845):
+def flags_blob(flags, kprobe_flags=0x1845, symbols=symbols):
     """The ELF with these ftrace_ops flags at offset 16 of the module's ops (and of the kprobe layer's ops)."""
     rodata = (b"Linux version 6.12\0".ljust(0x40, b"\0") + struct.pack("<QQQ", THUNK, 0, flags).ljust(0x40, b"\0")
               + struct.pack("<QQQ", KPROBE_H, 0, kprobe_flags).ljust(0x40, b"\0"))
@@ -330,9 +330,9 @@ def flags_blob(flags, kprobe_flags=0x1845):
 with tempfile.TemporaryDirectory() as work:
     path = os.path.join(work, "kernel.elf")
     nalt.get_input_file_path = lambda: path
-    def flags_run(flags, layout, types=("ftrace_ops",)):
+    def flags_run(flags, layout, types=("ftrace_ops",), kprobe_flags=0x1845):
         """A fresh database of the ELF with these flags, the layout and the types given; returns (settype calls, out)."""
-        blob = flags_blob(flags)
+        blob = flags_blob(flags, kprobe_flags)
         with open(path, "wb") as handle:
             handle.write(blob)
         database(blob)
@@ -393,6 +393,26 @@ with tempfile.TemporaryDirectory() as work:
                    {"ftrace_ops.flags": 16, "FTRACE_OPS_FL": {"FTRACE_OPS_FL_IPMODIFY": "0x1000"}}):
         flags_run(0x101007, broken)
         assert flag_lines() == {}, (broken, comments)
+    # A kprobe trampoline as kernels before 5.11 build it (review s193 MAJOR): kprobe_ftrace_ops and kprobe_ipmodify_ops
+    # have no RECURSION_SAFE there, so the page calls ftrace_ops_assist_func, not kprobe_ftrace_handler. Its kind is then
+    # "ftrace" and its Owner comes from the ops, whose func is kprobe_ftrace_handler: still no flags comment and no type,
+    # with IPMODIFY set (kprobe_ipmodify_ops, live) or not (kprobe_ftrace_ops); the module's trampoline keeps its comment.
+    trampoline(KPAGE, ASSIST, KOPS)
+    text = "MemLens: ftrace_ops flags 0x857 = ENABLED|DYNAMIC|SAVE_REGS|RECURSION|INITIALIZED|ALLOC_TRAMP; " + NO_IPMODIFY
+    for kprobe_flags in (0x1845, 0x845):
+        settype, out = flags_run(0x857, layout, kprobe_flags=kprobe_flags)
+        assert flag_lines() == {PAGE: [text], OPS: [text]} and settype == [(OPS, "struct ftrace_ops;")], (kprobe_flags, flag_lines(), settype)
+        assert KOPS not in comments and "ftrace_ops flags" not in comments.get(KPAGE, ""), (kprobe_flags, comments)
+        assert m._open_list.OnGetLine(1)[4:] == ["ftrace_ops_assist_func (ftrace)", "kprobe_ftrace_handler (ftrace_ops kprobe_ipmodify_ops)"], m._open_list.OnGetLine(1)
+    # The same page when kprobe_ftrace_handler has no symbol in the ELF: only the export's kprobe list (a probe recorded at
+    # the patched instruction) says that it is a kprobe's; without the list it reads as an ftrace page.
+    image = ps.Image(flags_blob(0x857, 0x1845, [s for s in symbols if s[0] != "kprobe_ftrace_handler"]))
+    links = ps.hook_links(image, ps.scan(None, image))
+    assert ps.ftrace_ops_pages(image, links) == {PAGE: OPS, KPAGE: KOPS}, ps.ftrace_ops_pages(image, links)
+    image.kprobes = {BASE + 0x104: [{"addr": BASE + 0x104, "pre_handler": THUNK, "post_handler": 0, "offset": 0, "symbol": "do_sys_openat2",
+                                     "event": None, "tracefs": None, "flags": 0, "ret_handler": None, "ret_entry": None}]}
+    assert ps.ftrace_ops_pages(image, links) == {PAGE: OPS} and ps.module_ops(image, links) == [OPS], ps.ftrace_ops_pages(image, links)
+    trampoline(KPAGE, KPROBE_H, KOPS)
     nalt.get_input_file_path = lambda: ""
 known_types.clear()
 

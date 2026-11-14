@@ -87,10 +87,10 @@ if os.path.isfile(demo):
     print("kernel.elf %s: checkable" % demo)
 else:
     print("SKIP: no %s to check that a real export is still scanned (pass the demo kernel.elf as argv[2])" % demo)
-print("ran %d of 2 non-kernel cases" % ran)
 
 
 # The first try on your own file (judge s194 item 5): one line with the next step, and no list.
+landed = []
 def landing(path, kind, what):
     nalt.get_input_file_path = lambda: path
     m._open_list = None
@@ -107,6 +107,7 @@ def landing(path, kind, what):
     assert os.path.basename(path) in text, (what, text)
     assert m._open_list is None, "a patch list was opened for %s" % what
     print("landing OK (%s -> %s: %s)" % (what, kind, text))
+    landed.append(kind)
 
 
 def elf(e_type, machine, sections=None, loads=()):
@@ -160,3 +161,5 @@ with tempfile.TemporaryDirectory() as work:
     struct.pack_into("<H", pe, 0x84, 0x8664)
     landing(write("program.exe", bytes(pe)), "other", "PE (MZ...PE)")
     landing(write("arm64.elf", elf(2, 183, sections=[(".text", bytes(16))])), "other", "ARM64 ELF")
+print("ran %d of 2 non-kernel cases; %d own-file warnings name the next step (%s)"
+      % (ran, len(landed), ", ".join("%d %s" % (landed.count(k), k) for k in KEYS)))

@@ -1,0 +1,20 @@
+0xffffffff8e4f9250	bpf_lsm_file_open	call to memory with no symbol	memlens_target_ffffffffc0004940 (calls __bpf_tramp_enter, BPF trampoline)
+0xffffffff8e642210	do_sys_openat2	call to memory with no symbol	memlens_target_ffffffffc0b2d000 (calls kprobe_ftrace_handler, kprobe via ftrace)
+0xffffffff8e64e370	vfs_getattr	call to memory with no symbol	memlens_target_ffffffffc0b2b000 (calls function_trace_call, ftrace)
+xref	0xffffffff8e4f9254	0xffffffffc0004940	call	bpf_lsm_file_open+0x4 -> memlens_target_ffffffffc0004940
+xref	0xffffffff8e642210	0xffffffffc0b2d000	call	do_sys_openat2 -> memlens_target_ffffffffc0b2d000
+xref	0xffffffff8e64e374	0xffffffffc0b2b000	call	vfs_getattr+0x4 -> memlens_target_ffffffffc0b2b000
+xref	0xffffffff8ff42660	0xffffffff8e434a40	data	global_ops -> function_trace_call
+xref	0xffffffff900670e0	0xffffffff8e294ed0	data	kprobe_ftrace_ops -> kprobe_ftrace_handler
+xref	0xffffffffc0004963	0xffffffff8e4cea70	call	memlens_target_ffffffffc0004940+0x23 -> __bpf_tramp_enter
+xref	0xffffffffc0004993	0xffffffffc0004664	call	memlens_target_ffffffffc0004940+0x53 -> bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems
+xref	0xffffffffc0b2b094	0xffffffff8e434a40	call	memlens_target_ffffffffc0b2b000+0x94 -> function_trace_call
+xref	0xffffffffc0b2b0dd	0xffffffff8ff42660	data	memlens_target_ffffffffc0b2b000+0xdd -> global_ops
+xref	0xffffffffc0b2d0d9	0xffffffff8e294ed0	call	memlens_target_ffffffffc0b2d000+0xd9 -> kprobe_ftrace_handler
+xref	0xffffffffc0b2d162	0xffffffff900670e0	data	memlens_target_ffffffffc0b2d000+0x162 -> kprobe_ftrace_ops
+rename	0xffffffffc0004940	memlens_target_ffffffffc0004940	bpf_tramp_bpf_lsm_file_open
+rename	0xffffffffc0b2b000	memlens_target_ffffffffc0b2b000	ftrace_tramp_vfs_getattr
+rename	0xffffffffc0b2d000	memlens_target_ffffffffc0b2d000	kprobe_ftrace_tramp_do_sys_openat2
+owner	0xffffffffc0004940	0xffffffffc0004664	bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems (BPF program)
+owner	0xffffffffc0b2b000	0xffffffff8e434a40	function_trace_call (ftrace_ops global_ops)
+owner	0xffffffffc0b2d000	0xffffffff8e463660	kprobe memlens_kp on do_sys_openat2 (tracefs kprobe event; pre_handler kprobe_dispatcher)

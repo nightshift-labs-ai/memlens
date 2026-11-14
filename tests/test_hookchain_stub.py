@@ -3,9 +3,12 @@
 tests/test_plugin_stub.py, which record every add_cref, set_name and comment). Checks our logic only; this is not a
 test in real IDA.
 
-usage: python3 tests/test_hookchain_stub.py [kernel.elf]
-A hand-made kernel ELF always; with the demo kernel.elf (or another MemLens export) also that file, where the
-recorded calls are counted. The fake database starts with the ELF's memlens_target_ labels as its names.
+usage: python3 tests/test_hookchain_stub.py [kernel.elf ...]
+A hand-made kernel ELF always; with the demo kernel.elf (or other MemLens exports, such as the second sample's) also
+each of those, where the recorded calls are counted and the rows printed: first with no layout recorded and no type
+imported (as before Apply kernel types), then on a fresh database with the layout Apply kernel types records (from the
+ISF in MEMLENS_ISF, else ftrace_ops.func = 0), which must give the same rows. The fake database starts with the ELF's
+memlens_target_ labels as its names.
 """
 import contextlib, io, json, os, runpy, struct, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -302,11 +305,25 @@ with tempfile.TemporaryDirectory() as work:
     nalt.get_input_file_path = lambda: ""
 print("hook chain stub test OK (hand-made ELFs; fake IDA modules)")
 
-for path in sys.argv[1:2]:
+# The list needs neither the kernel types nor finished auto-analysis (README Try it, step 2): the action never waits for
+# auto-analysis (no ida_auto call on its path), reads kernel.elf from disk and the ELF's own symbol table, imports no
+# type, and without the layout Apply kernel types records it reads ftrace_ops.func at offset 0 (patchscan.FTRACE_OPS_FUNC).
+import inspect
+for function in (m.FindPatches.activate, m.scan_current_input, m.link_hooks, m.load_layout):
+    assert "ida_auto" not in inspect.getsource(function), function
+layout_offset, layout_source = ps.FTRACE_OPS_FUNC, "patchscan.FTRACE_OPS_FUNC, no ISF given"
+if os.path.isfile(os.environ.get("MEMLENS_ISF", "")):  # what Apply kernel types records for that ISF
+    import isf2c
+    layout_offset = ps.ftrace_ops_func_offset(isf2c.load_isf(os.environ["MEMLENS_ISF"]))
+    layout_source = os.path.basename(os.environ["MEMLENS_ISF"])
+
+for path in sys.argv[1:]:
     blob = open(path, "rb").read()
     nalt.get_input_file_path = lambda: path
     database(blob)
+    assert m.load_layout() == {}, m.load_layout()  # as before Apply kernel types: no layout recorded
     crefs, renames, out = run()
+    assert not [c for c in calls if c[0] in ("parse", "settype")], calls  # no type imported or applied
     drefs = [c for c in calls if c[0] == "dref"]
     assert crefs and all(kind == CALL for _, _, kind in crefs) and all(c[3] == DATA for c in drefs), (crefs, drefs)
     second = run()
@@ -332,3 +349,12 @@ for path in sys.argv[1:2]:
             assert calls and calls[-1] == ("jump", owners[where]), (where, calls)
             jumped += 1
     print("  Jump to owner: %d of %d rows jump to their owner" % (jumped, table.OnGetSize()))
+    # The same list after Apply kernel types (a fresh database with the layout it records): the same rows.
+    rows = [table.OnGetLine(n) for n in range(table.OnGetSize())]
+    database(blob)
+    m.save_layout({"ftrace_ops.func": layout_offset})
+    run()
+    typed = [m._open_list.OnGetLine(n) for n in range(m._open_list.OnGetSize())]
+    assert typed == rows, (typed, rows)
+    print("  with the layout Apply kernel types records (ftrace_ops.func = %d, from %s): the same %d rows"
+          % (layout_offset, layout_source, len(rows)))

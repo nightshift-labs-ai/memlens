@@ -25,7 +25,7 @@ USAGE = ("usage: python3 tests/run_all.py [--ida-stubs <folder with ida_*.pyi>] 
 KERNEL_TESTS = {"test_demo_injection.py", "test_demo_percpu_index.py", "test_hookchain.py", "test_hookchain_stub.py",
                 "test_owner.py"}
 # tests that also check the second sample's kernel.elf (a hook set by a module), passed after the demo
-TESTHOOK_TESTS = {"test_hookchain.py", "test_owner.py"}
+TESTHOOK_TESTS = {"test_hookchain.py", "test_hookchain_stub.py", "test_owner.py"}
 
 
 def status(rc, out):

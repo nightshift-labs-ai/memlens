@@ -155,6 +155,15 @@ owner	0xffffffffc0cd0000	0xffffffffc0cc6010	memlens_testhook.th_kill_callback (f
 owner	0xffffffffc0cd2000	0xffffffffc0cc6040	memlens_testhook.th_getdents_pre (kprobe pre_handler)
 ```
 
+The **Show patched kernel functions** list for this `kernel.elf`, all six columns, as the plugin code builds it (run with fake IDA modules by `tests/test_hookchain_stub.py`, not in IDA; columns separated by `|` and aligned here; the list gives the patched functions in address order):
+
+```
+Address          | Where                | What                          | Target                                   | Handler                                   | Owner
+FFFFFFFFB08DCAC0 | __x64_sys_kill       | call to memory with no symbol | ftrace_tramp___x64_sys_kill              | ftrace_ops_assist_func (ftrace)           | memlens_testhook.th_kill_callback (ftrace_ops memlens_testhook.th_kill_ops)
+FFFFFFFFB0AF9250 | bpf_lsm_file_open    | call to memory with no symbol | bpf_tramp_bpf_lsm_file_open              | __bpf_tramp_enter (BPF trampoline)        | bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems (BPF program)
+FFFFFFFFB0C65950 | __x64_sys_getdents64 | call to memory with no symbol | kprobe_ftrace_tramp___x64_sys_getdents64 | kprobe_ftrace_handler (kprobe via ftrace) | memlens_testhook.th_getdents_pre (kprobe pre_handler)
+```
+
 The kprobe on `__x64_sys_getdents64` runs through ftrace too, so its page's `ftrace_ops` is the shared `kprobe_ftrace_ops`; the Owner comes from the kernel's kprobe list in the export (`.memlens.kprobes`), whose probe at `__x64_sys_getdents64+0x4` has the module's `pre_handler`. The guest's own view right before the dump (tracefs `enabled_functions`, the kprobes list and `/proc/kallsyms`) is in [tests/vm/testhook/hook-truth-guest.txt](../tests/vm/testhook/hook-truth-guest.txt).
 
 ## Details

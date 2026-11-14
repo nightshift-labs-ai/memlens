@@ -100,9 +100,11 @@ def apply_types(isf_path, confirm=None):
     mismatch = banner_mismatch(isf)
     if mismatch and confirm and not confirm(*mismatch):
         return None
-    # where Show patched kernel functions reads ops->func and ops->flags, and the FTRACE_OPS_FL_* values: this ISF's
-    # replace those of an ISF imported before, which may be another kernel's
-    save_layout(dict({key: value for key, value in load_layout().items() if key not in LAYOUT_KEYS}, **isf_layout(isf)))
+    # where Show patched kernel functions reads ops->func and ops->flags, and the FTRACE_OPS_FL_* values: when this ISF
+    # has struct ftrace_ops, its keys replace those of an ISF imported before, which may be another kernel's
+    layout = isf_layout(isf)
+    if layout:
+        save_layout(dict({key: value for key, value in load_layout().items() if key not in LAYOUT_KEYS}, **layout))
     generator = isf2c.Generator(isf)
 
     stopped = {}

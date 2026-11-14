@@ -1,9 +1,20 @@
-echo HOOK_TRUTH_BEGIN; cat /sys/kernel/tracing/enabled_functions; cat /sys/kernel/debug/kprobes/list; echo HOOK_TRUTH_END </dev/null; echo __DO""NE629810000__
-[?2004hVMOK# echo HOOK_TRUTH_BEGIN; cat /sys/kernel/tracing/enabled_functions; cat /sys/kernel/debug/kprobes/list; echo HOOK_TRUTH_END </dev/null; echo __DO""NE629810000__
-[?2004lHOOK_TRUTH_BEGIN
+# Captured in the guest right before the memory dump (tests/vm/scenario_testhook_d13.sh).
+# uname -r:
+6.12.115+deb13.1-amd64
+# dmesg:
+[   28.198132] memlens_testhook: loading out-of-tree module taints kernel.
+[   28.198469] memlens_testhook: module verification failed: signature and/or required key missing - tainting kernel
+[   28.489335] memlens_testhook: ftrace callback on __x64_sys_kill, kprobe on __x64_sys_getdents64 (counting only)
+# /proc/modules:
+memlens_testhook 12288 0 - Live 0xffffffffc0cc6000 (OE)
+# /sys/kernel/tracing/enabled_functions, then /sys/kernel/debug/kprobes/list:
 __x64_sys_kill (1) R         	tramp: 0xffffffffc0cd0000 (th_kill_callback+0x0/0x20 [memlens_testhook]) ->ftrace_ops_assist_func+0x0/0xf0
 bpf_lsm_file_open (1) R   D   M 	tramp: ftrace_regs_caller+0x0/0x65 (call_direct_funcs+0x0/0x20)
 	direct-->bpf_trampoline_6442509381+0x0/0xee
 __x64_sys_getdents64 (1) R         	tramp: 0xffffffffc0cd2000 (kprobe_ftrace_handler+0x0/0x1d0) ->kprobe_ftrace_handler+0x0/0x1d0
 ffffffffb0c65954  k  __x64_sys_getdents64+0x4    [FTRACE]
-HOOK_TRUTH_END
+# /proc/kallsyms lines of the test module's callbacks and hook objects:
+ffffffffc0cc6010 t th_kill_callback	[memlens_testhook]
+ffffffffc0cc6040 t th_getdents_pre	[memlens_testhook]
+ffffffffc0cc80a0 d th_kill_ops	[memlens_testhook]
+ffffffffc0cc8020 d th_getdents_kp	[memlens_testhook]

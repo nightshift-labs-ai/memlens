@@ -84,6 +84,21 @@ FFFFFFFF8E64E370 | vfs_getattr       | call to memory with no symbol | ftrace_tr
 
 The rest of the demo output (the patch scan, the hook chain's cross-references, owners and renames, the type header and the typed globals): [docs/OUTPUT.md](docs/OUTPUT.md#what-you-get-real-output-from-the-demo-not-ida-screenshots).
 
+### A hook set by a module (second sample)
+
+The demo's hooks come from the kernel's own tracing. For the rootkit-style case, a second capture of the same kernel loads a small test module, [tests/vm/testhook](tests/vm/testhook/README.md). It hooks `__x64_sys_kill` with an ftrace callback and `__x64_sys_getdents64` with a kprobe. These are the APIs that ftrace-based rootkits use; this module only counts calls. Here is the same list for its `kernel.elf`, built the same way (fake IDA modules, `tests/test_hookchain_stub.py`):
+
+```
+Address          | Where                | Target                                   | Handler                                   | Owner
+FFFFFFFFB08DCAC0 | __x64_sys_kill       | ftrace_tramp___x64_sys_kill              | ftrace_ops_assist_func (ftrace)           | memlens_testhook.th_kill_callback (ftrace_ops memlens_testhook.th_kill_ops)
+FFFFFFFFB0AF9250 | bpf_lsm_file_open    | bpf_tramp_bpf_lsm_file_open              | __bpf_tramp_enter (BPF trampoline)        | bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems (BPF program)
+FFFFFFFFB0C65950 | __x64_sys_getdents64 | kprobe_ftrace_tramp___x64_sys_getdents64 | kprobe_ftrace_handler (kprobe via ftrace) | memlens_testhook.th_getdents_pre (kprobe pre_handler)
+```
+
+The What column (`call to memory with no symbol` in all three rows) is left out here. **Jump to owner** leads to the module's callback. Both owner addresses (`0xffffffffc0cc6010`, `0xffffffffc0cc6040`) match the guest's `/proc/kallsyms` at capture time; see [tests/vm/testhook/hook-truth-guest.txt](tests/vm/testhook/hook-truth-guest.txt).
+
+To try it, download `memlens-demo-testhook.zip` (21 MB) from the same [demo-data release](https://github.com/nightshift-labs-ai/memlens/releases/tag/demo-data) and follow steps 1-3 of Try it; it holds the `kernel.elf`, the same ISF and the expected output. The memory image itself, `testhook.elf.xz` (91 MB), is in the [Volatility samples release](https://github.com/nightshift-labs-ai/volatility-2026-samples/releases/tag/samples), so you can also export it yourself.
+
 ## What it does
 
 ```mermaid

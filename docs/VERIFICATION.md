@@ -12,6 +12,8 @@ Part of the MemLens documentation; start with the [README](../README.md).
 
 `tests/test_compare.py` checks the README section [What Volatility already tells you](../README.md#what-volatility-already-tells-you) and the hidden-module rows of [LIMITS.md](LIMITS.md) against Volatility 2.28.2 output recorded on both public memory images and on two edited copies of the second sample's image (`tests/fixtures/vol-2.28.2/compare`, with `record.sh` and a README.txt), and, with the two samples, against `patchscan.py --links`: each cell, the Named counts, the `+0x4` sites, and that Volatility's `ftrace_ops` address is the ops MemLens reads from the same trampoline. It then changes each table cell in turn and fails if a change passes.
 
+Why **Show patched kernel functions** should work before the types are imported and before auto-analysis finishes (README, Try it, step 2): `scan_current_input` in `memlens_entry.py` reads `kernel.elf` from disk with its own symbol table, and without the types `link_hooks` reads `ftrace_ops.func` at offset 0, its offset in this kernel's ISF (checked with fake IDA modules by `tests/test_hookchain_stub.py`, not in IDA).
+
 Memory images were captured from QEMU guests; addresses differ per boot because of KASLR.
 
 | Kernel | Symbols in ELF | From modules | Loaded by Ghidra 12.2: functions disassembled at the right address, per-CPU data at the ELF address |

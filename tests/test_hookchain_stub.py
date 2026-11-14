@@ -7,8 +7,11 @@ usage: python3 tests/test_hookchain_stub.py [kernel.elf ...]
 A hand-made kernel ELF always; with the demo kernel.elf (or other MemLens exports, such as the second sample's) also
 each of those, where the recorded calls are counted and the rows printed: first with no layout recorded and no type
 imported (as before Apply kernel types), then on a fresh database with the layout Apply kernel types records (from the
-ISF in MEMLENS_ISF, else ftrace_ops.func = 0), which must give the same rows. The fake database starts with the ELF's
-memlens_target_ labels as its names.
+ISF in MEMLENS_ISF, else ftrace_ops.func = 0), which must give the same rows. With that kernel's ISF (MEMLENS_ISF, else
+the *.json.xz next to the kernel.elf) also the full layout (ftrace_ops.flags and the FTRACE_OPS_FL_* values) and struct
+ftrace_ops in the database: the same rows, the ftrace_ops flags comments and the module ops' type (on the two public
+samples exactly the expected ones), nothing added by a second run, and no flags comment without the enum. The fake
+database starts with the ELF's memlens_target_ labels as its names.
 """
 import contextlib, io, json, os, runpy, struct, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -23,6 +26,35 @@ dummy_names, netnode, xref, iname = g["dummy_names"], g["netnode"], g["xref"], g
 elf, call, BASE, TEXT = builder["elf"], builder["call"], builder["BASE"], builder["TEXT"]
 CALL, JUMP = 17 | 32, 19 | 32  # fl_CN | XREF_USER, fl_JN | XREF_USER
 RENAME = 256 | 64  # SN_NOWARN | SN_NON_AUTO: a user name, so IDA does not replace it as it may an auto name
+
+# ftrace_ops flags (judge s192 item 5): the comment texts, the small ISFs the hand-made cases take their layout from, and
+# the database's types (the fake tinfo_t knows struct ftrace_ops only while known_types has it, as after Apply kernel types).
+NO_IPMODIFY = ("no IPMODIFY: the ops does not declare that its callback may change where the hooked function continues (a "
+               "declaration, not a guarantee: read the callback to be sure)")
+IPMODIFY_TEXT = ("IPMODIFY: the ops declares that its callback may change where the hooked function continues (as livepatch "
+                 "and ftrace hooks that replace a function do)")
+FL_6_12 = ["ENABLED", "DYNAMIC", "SAVE_REGS", "SAVE_REGS_IF_SUPPORTED", "RECURSION", "STUB", "INITIALIZED", "DELETED", "ADDING",
+           "REMOVING", "MODIFYING", "ALLOC_TRAMP", "IPMODIFY", "PID", "RCU", "TRACE_ARRAY", "PERMANENT", "DIRECT", "SUBOP"]
+def flags_isf(names, flags_field=True):
+    """A small ISF: struct ftrace_ops (func at 0, flags at 16) and an anonymous enum with FTRACE_OPS_FL_<name> = bit n."""
+    fields = {"func": {"offset": 0, "type": {"kind": "base", "name": "unsigned long"}}}
+    if flags_field:
+        fields["flags"] = {"offset": 16, "type": {"kind": "base", "name": "unsigned long"}}
+    constants = {"FTRACE_OPS_FL_" + name: 1 << bit for bit, name in enumerate(names)}
+    return {"base_types": {"unsigned long": {"size": 8, "signed": False, "kind": "int"}},
+            "user_types": {"ftrace_ops": {"kind": "struct", "size": 24, "fields": fields}},
+            "enums": {"unnamed_3584957e6fdd2840": {"size": 4, "base": "unsigned int", "constants": constants},
+                      "trace_flag_type": {"size": 4, "base": "unsigned int", "constants": {"TRACE_FLAG_IRQS_OFF": 1}}},
+            "symbols": {}}
+FLAGS_ISF = flags_isf(FL_6_12)
+known_types = set()
+good_get_named_type = g["ti"].tinfo_t.get_named_type
+def get_named_type(self, til, name):
+    if name in known_types:
+        self.size = 216
+        return True
+    return good_get_named_type(self, til, name)
+g["ti"].tinfo_t.get_named_type = get_named_type
 
 
 def run():
@@ -227,7 +259,7 @@ put(PAGE - BASE + 0x74, b"\x48\x8b\x15" + struct.pack("<i", (PAGE + 0xdd) - (PAG
 put(PAGE - BASE + 0x94, call(PAGE + 0x94, ASSIST))
 put(PAGE - BASE + 0xd8, b"\xc3\xcc\x00\x00\x00" + struct.pack("<Q", OPS))
 put(0x000, b"\xf3\x0f\x1e\xfa" + call(BASE + 4, PAGE))
-rodata = b"Linux version 6.12\0".ljust(0x40, b"\0") + struct.pack("<QQ", THUNK, ASSIST)  # ops: func, then a decoy at +8
+rodata = b"Linux version 6.12\0".ljust(0x40, b"\0") + struct.pack("<QQQ", THUNK, ASSIST, 1)  # ops: func, a decoy at +8, flags ENABLED
 symbols = [("__x64_sys_getdents64", BASE, 0x100), ("ftrace_ops_assist_func", ASSIST, 0x100), ("evilmod.fh_ftrace_thunk", THUNK, 0x100),
            ("linux_banner", BASE + TEXT, 0x20), ("evilmod.hooks", OPS - 0x20, 0x80), ("%s%x" % (ps.TARGET_PREFIX, PAGE), PAGE, 0)]
 blob = elf(code, symbols, rodata)
@@ -259,7 +291,187 @@ with tempfile.TemporaryDirectory() as work:
     crefs, renames, out = run()
     assert m._open_list.OnGetLine(0)[5] == "ftrace_ops_assist_func (ftrace_ops evilmod.hooks+0x20)", m._open_list.OnGetLine(0)
     assert sorted(c[1:] for c in calls if c[0] == "dref") == [(PAGE + 0xdd, OPS, DATA), (OPS + 8, ASSIST, DATA)], calls
+    # With the flags layout and struct ftrace_ops in the database: the flags (ENABLED only here) are decoded at the page
+    # and the ops, but an ops inside a bigger module object (evilmod.hooks+0x20, the ftrace_hook array) is not retyped.
+    database(blob)
+    known_types.add("ftrace_ops")
+    m.save_layout(m.isf_layout(FLAGS_ISF))
+    run()
+    assert not [c for c in calls if c[0] == "settype"], calls
+    assert comments[OPS] == comments[PAGE].split("\n")[1] == "MemLens: ftrace_ops flags 0x1 = ENABLED; " + NO_IPMODIFY, comments
+    known_types.clear()
     nalt.get_input_file_path = lambda: ""
+
+# ftrace_ops flags (judge s192 item 5): Apply kernel types records the offset of ftrace_ops.flags and the FTRACE_OPS_FL_*
+# values, read by name from the ISF's (anonymous) enum. For each ftrace trampoline whose Owner comes from its ftrace_ops,
+# the page and the ops get a comment that decodes the ops' flags, and an ops a module symbol starts at is typed as
+# struct ftrace_ops once (when the database has that struct). kprobe pages get nothing: a pre_handler can change
+# regs->ip and no flag says so. Without the layout, without the enum's IPMODIFY, or when the flags lack ENABLED, nothing is said.
+code = bytearray(b"\x90" * TEXT)
+ASSIST, THUNK, KPROBE_H, PAGE, KPAGE = BASE + 0x1000, BASE + 0x1100, BASE + 0x1200, BASE + 0x2000, BASE + 0x2400
+OPS, KOPS = BASE + TEXT + 0x40, BASE + TEXT + 0x80
+def trampoline(page, handler, ops):
+    put(page - BASE + 0x74, b"\x48\x8b\x15" + struct.pack("<i", (page + 0xdd) - (page + 0x7b)))
+    put(page - BASE + 0x94, call(page + 0x94, handler))
+    put(page - BASE + 0xd8, b"\xc3\xcc\x00\x00\x00" + struct.pack("<Q", ops))
+trampoline(PAGE, ASSIST, OPS)
+trampoline(KPAGE, KPROBE_H, KOPS)
+put(0x000, b"\xf3\x0f\x1e\xfa" + call(BASE + 4, PAGE))                          # __x64_sys_kill -> the module's trampoline
+put(0x100, b"\xf3\x0f\x1e\xfa" + call(BASE + 0x104, KPAGE))                     # do_sys_openat2 -> a kprobe trampoline
+symbols = [("__x64_sys_kill", BASE, 0x100), ("do_sys_openat2", BASE + 0x100, 0x100), ("ftrace_ops_assist_func", ASSIST, 0x100),
+           ("evilmod.fh_kill", THUNK, 0x100), ("kprobe_ftrace_handler", KPROBE_H, 0x100), ("linux_banner", BASE + TEXT, 0x20),
+           ("evilmod.fh_ops", OPS, 0x40), ("kprobe_ipmodify_ops", KOPS, 0x40)]
+symbols += [("%s%x" % (ps.TARGET_PREFIX, page), page, 0) for page in (PAGE, KPAGE)]
+def flags_blob(flags, kprobe_flags=0x1845, symbols=symbols):
+    """The ELF with these ftrace_ops flags at offset 16 of the module's ops (and of the kprobe layer's ops)."""
+    rodata = (b"Linux version 6.12\0".ljust(0x40, b"\0") + struct.pack("<QQQ", THUNK, 0, flags).ljust(0x40, b"\0")
+              + struct.pack("<QQQ", KPROBE_H, 0, kprobe_flags).ljust(0x40, b"\0"))
+    return elf(code, symbols, rodata)
+with tempfile.TemporaryDirectory() as work:
+    path = os.path.join(work, "kernel.elf")
+    nalt.get_input_file_path = lambda: path
+    def flags_run(flags, layout, types=("ftrace_ops",), kprobe_flags=0x1845, fresh=True):
+        """A fresh database (fresh=False: the same one) of the ELF with these flags, the layout and the types given;
+        returns (settype calls, out)."""
+        blob = flags_blob(flags, kprobe_flags)
+        with open(path, "wb") as handle:
+            handle.write(blob)
+        if fresh:
+            database(blob)
+        known_types.clear(); known_types.update(types)
+        if layout is not None:
+            m.save_layout(layout)
+        _, _, out = run()
+        return [c[1:] for c in calls if c[0] == "settype"], out
+    def flag_lines():
+        return {ea: [line for line in text.split("\n") if "ftrace_ops flags" in line] for ea, text in comments.items()
+                if "ftrace_ops flags" in text}
+    # What Apply kernel types records: the offsets and the values by name (the other enum is not taken).
+    layout = m.isf_layout(FLAGS_ISF)
+    assert layout == {"ftrace_ops.func": 0, "ftrace_ops.flags": 16,
+                      "FTRACE_OPS_FL": {"FTRACE_OPS_FL_" + name: 1 << bit for bit, name in enumerate(FL_6_12)}}, layout
+    assert layout["FTRACE_OPS_FL"]["FTRACE_OPS_FL_IPMODIFY"] == 0x1000, layout
+    # IPMODIFY set, plus a bit the enum does not name (shown as a number, not dropped; above bit 31: flags is an
+    # unsigned long, read as 8 bytes).
+    settype, out = flags_run(0x10000001007, layout)
+    text = "MemLens: ftrace_ops flags 0x10000001007 = ENABLED|DYNAMIC|SAVE_REGS|IPMODIFY|0x10000000000; " + IPMODIFY_TEXT
+    assert flag_lines() == {PAGE: [text], OPS: [text]}, flag_lines()
+    assert comments[OPS] == text and comments[PAGE].split("\n")[0].startswith("MemLens: hook page no module owns"), comments
+    assert settype == [(OPS, "struct ftrace_ops;")], settype
+    assert out.endswith("; 1 module ftrace_ops typed as struct ftrace_ops\n"), out
+    table = m._open_list
+    assert table.OnGetLine(0)[1] == "__x64_sys_kill" and table.OnGetLine(0)[5] == "evilmod.fh_kill (ftrace_ops evilmod.fh_ops)", table.OnGetLine(0)
+    # kprobe page: its ops (here with IPMODIFY set) gets no flags comment and is not typed, its Owner is unchanged.
+    assert table.OnGetLine(1)[5] == "kprobe_ftrace_handler (ftrace_ops kprobe_ipmodify_ops)" and KOPS not in comments, (table.OnGetLine(1), comments)
+    # Second run: no type applied again, no comment line added.
+    before = dict(comments)
+    crefs, renames, out = run()
+    assert crefs == [] and renames == [] and not [c for c in calls if c[0] in ("settype", "cmt")], calls
+    assert comments == before and out.endswith("; 0 module ftrace_ops typed as struct ftrace_ops (1 already typed by an earlier run)\n"), out
+    # No IPMODIFY: the 6.12 values of th_kill_ops in the second sample.
+    settype, out = flags_run(0x857, layout)
+    text = "MemLens: ftrace_ops flags 0x857 = ENABLED|DYNAMIC|SAVE_REGS|RECURSION|INITIALIZED|ALLOC_TRAMP; " + NO_IPMODIFY
+    assert flag_lines() == {PAGE: [text], OPS: [text]} and settype == [(OPS, "struct ftrace_ops;")], (flag_lines(), settype)
+    # The values are read by name: with an older numbering (a CONTROL flag at bit 2 shifts the rest, IPMODIFY = 0x2000) the
+    # same 0x1000 bit is ALLOC_TRAMP, not IPMODIFY.
+    old = m.isf_layout(flags_isf(["ENABLED", "DYNAMIC", "CONTROL", "SAVE_REGS", "SAVE_REGS_IF_SUPPORTED", "RECURSION_SAFE", "STUB",
+                                  "INITIALIZED", "DELETED", "ADDING", "REMOVING", "MODIFYING", "ALLOC_TRAMP", "IPMODIFY", "PID"]))
+    assert old["FTRACE_OPS_FL"]["FTRACE_OPS_FL_IPMODIFY"] == 0x2000, old
+    flags_run(0x10000001007, old)
+    text = "MemLens: ftrace_ops flags 0x10000001007 = ENABLED|DYNAMIC|CONTROL|ALLOC_TRAMP|0x10000000000; " + NO_IPMODIFY
+    assert flag_lines() == {PAGE: [text], OPS: [text]}, flag_lines()
+    # Then, on the same database, Apply kernel types with the right ISF and the list again (review s193 MINOR): the flags
+    # line the other ISF decoded is replaced, not kept next to the new one; the other lines stay; a third run changes nothing.
+    settype, out = flags_run(0x10000001007, layout, fresh=False)
+    text = "MemLens: ftrace_ops flags 0x10000001007 = ENABLED|DYNAMIC|SAVE_REGS|IPMODIFY|0x10000000000; " + IPMODIFY_TEXT
+    assert flag_lines() == {PAGE: [text], OPS: [text]} and settype == [], (flag_lines(), settype)
+    assert comments[OPS] == text and comments[PAGE].split("\n")[0].startswith("MemLens: hook page no module owns"), comments
+    before = dict(comments)
+    run()
+    assert not [c for c in calls if c[0] in ("settype", "cmt")] and comments == before, calls
+    # A note the analyst added to that line stays on a rerun, as add_comment keeps it (review s194 NIT); a flags line
+    # another ISF decoded that has the same start is still replaced.
+    comments[OPS] = text + "  (analyst: checked, it only counts)"
+    before = dict(comments)
+    run()
+    assert not [c for c in calls if c[0] == "cmt"] and comments == before, calls
+    comments[OPS] = "MemLens: ftrace_ops flags 0x10000001007 = ENABLED|DYNAMIC|CONTROL|ALLOC_TRAMP|0x10000000000; " + NO_IPMODIFY
+    run()
+    assert comments[OPS] == text, comments[OPS]
+    # ENABLED not set (review s193 NIT): an ops behind a live trampoline always has it, so the read is stale or the ISF is
+    # another kernel's, and nothing is said, IPMODIFY or not (the ops is still typed). An ISF that does not name ENABLED
+    # cannot tell: the flags are decoded.
+    for no_enabled in (0x1006, 0x6, 0):
+        settype, out = flags_run(no_enabled, layout)
+        assert flag_lines() == {} and settype == [(OPS, "struct ftrace_ops;")], (no_enabled, flag_lines(), settype)
+    unnamed = dict(layout, FTRACE_OPS_FL={k: v for k, v in layout["FTRACE_OPS_FL"].items() if k != "FTRACE_OPS_FL_ENABLED"})
+    flags_run(0x1006, unnamed)
+    text = "MemLens: ftrace_ops flags 0x1006 = DYNAMIC|SAVE_REGS|IPMODIFY; " + IPMODIFY_TEXT
+    assert flag_lines() == {PAGE: [text], OPS: [text]}, flag_lines()
+    # struct ftrace_ops not in the database (types not imported): the flags are decoded, nothing is typed.
+    settype, out = flags_run(0x101007, layout, types=())
+    assert settype == [] and len(flag_lines()) == 2 and "typed as struct ftrace_ops" not in out, (settype, out)
+    # Nothing is said without the layout, without the enum, without its IPMODIFY or without the flags field.
+    for no_flags in (None, m.isf_layout(dict(FLAGS_ISF, enums={})), m.isf_layout(flags_isf([n for n in FL_6_12 if n != "IPMODIFY"])),
+                     m.isf_layout(flags_isf(FL_6_12, flags_field=False))):
+        flags_run(0x101007, no_flags)
+        assert flag_lines() == {}, (no_flags, comments)
+    assert "FTRACE_OPS_FL" not in m.isf_layout(dict(FLAGS_ISF, enums={})), m.isf_layout(dict(FLAGS_ISF, enums={}))
+    assert "ftrace_ops.flags" not in m.isf_layout(flags_isf(FL_6_12, flags_field=False))
+    # A damaged layout record (a flags offset that is not a number, values that are not a table): nothing said, no crash.
+    for broken in ({"ftrace_ops.flags": "16", "FTRACE_OPS_FL": layout["FTRACE_OPS_FL"]}, {"ftrace_ops.flags": 16, "FTRACE_OPS_FL": [1, 2]},
+                   {"ftrace_ops.flags": 16, "FTRACE_OPS_FL": {"FTRACE_OPS_FL_IPMODIFY": "0x1000"}}):
+        flags_run(0x101007, broken)
+        assert flag_lines() == {}, (broken, comments)
+    # A kprobe trampoline as kernels before 5.11 build it (review s193 MAJOR): kprobe_ftrace_ops and kprobe_ipmodify_ops
+    # have no RECURSION_SAFE there, so the page calls ftrace_ops_assist_func, not kprobe_ftrace_handler. Its kind is then
+    # "ftrace" and its Owner comes from the ops, whose func is kprobe_ftrace_handler: still no flags comment and no type,
+    # with IPMODIFY set (kprobe_ipmodify_ops, live) or not (kprobe_ftrace_ops); the module's trampoline keeps its comment.
+    trampoline(KPAGE, ASSIST, KOPS)
+    text = "MemLens: ftrace_ops flags 0x857 = ENABLED|DYNAMIC|SAVE_REGS|RECURSION|INITIALIZED|ALLOC_TRAMP; " + NO_IPMODIFY
+    for kprobe_flags in (0x1845, 0x845):
+        settype, out = flags_run(0x857, layout, kprobe_flags=kprobe_flags)
+        assert flag_lines() == {PAGE: [text], OPS: [text]} and settype == [(OPS, "struct ftrace_ops;")], (kprobe_flags, flag_lines(), settype)
+        assert KOPS not in comments and "ftrace_ops flags" not in comments.get(KPAGE, ""), (kprobe_flags, comments)
+        assert m._open_list.OnGetLine(1)[4:] == ["ftrace_ops_assist_func (ftrace)", "kprobe_ftrace_handler (ftrace_ops kprobe_ipmodify_ops)"], m._open_list.OnGetLine(1)
+    # The same page when kprobe_ftrace_handler has no symbol in the ELF: only the export's kprobe list (a probe recorded at
+    # the patched instruction) says that it is a kprobe's; without the list it reads as an ftrace page.
+    image = ps.Image(flags_blob(0x857, 0x1845, [s for s in symbols if s[0] != "kprobe_ftrace_handler"]))
+    links = ps.hook_links(image, ps.scan(None, image))
+    assert ps.ftrace_ops_pages(image, links) == {PAGE: OPS, KPAGE: KOPS}, ps.ftrace_ops_pages(image, links)
+    image.kprobes = {BASE + 0x104: [{"addr": BASE + 0x104, "pre_handler": THUNK, "post_handler": 0, "offset": 0, "symbol": "do_sys_openat2",
+                                     "event": None, "tracefs": None, "flags": 0, "ret_handler": None, "ret_entry": None}]}
+    assert ps.ftrace_ops_pages(image, links) == {PAGE: OPS} and ps.module_ops(image, links) == [OPS], ps.ftrace_ops_pages(image, links)
+    # A probe recorded at the module's site that is disabled (2: a tracefs event defined but not enabled) or gone (1) is
+    # disarmed: the kprobe layer's ops is off that site, so the page there is not a kprobe's and keeps its flags comment
+    # and its type (review s194). An enabled probe there (0) makes it a kprobe's page.
+    for off, pages in ((1, {PAGE: OPS}), (2, {PAGE: OPS}), (3, {PAGE: OPS}), (0, {})):
+        image.kprobes[BASE + 4] = [dict(image.kprobes[BASE + 0x104][0], addr=BASE + 4, symbol="__x64_sys_kill", flags=off)]
+        assert ps.ftrace_ops_pages(image, links) == pages, (off, ps.ftrace_ops_pages(image, links))
+        assert ps.module_ops(image, links) == sorted(pages.values()), (off, ps.module_ops(image, links))
+    # Two records at one site (an aggregate probe): one enabled is enough.
+    image.kprobes[BASE + 4] = [dict(image.kprobes[BASE + 4][0], flags=2), dict(image.kprobes[BASE + 4][0], flags=0)]
+    assert ps.ftrace_ops_pages(image, links) == {}, ps.ftrace_ops_pages(image, links)
+    trampoline(KPAGE, KPROBE_H, KOPS)
+    nalt.get_input_file_path = lambda: ""
+known_types.clear()
+
+# Apply kernel types records that layout in the database: a second ISF without the enum drops the old values (they
+# would be another kernel's), and keys it does not set stay; an ISF without struct ftrace_ops leaves the record alone,
+# also when it has the enum (review s193 NIT: it must not drop the offsets an earlier ISF gave).
+with tempfile.TemporaryDirectory() as work:
+    blobs.clear()
+    m.save_layout({"other.key": 1})
+    for isf, expected in ((FLAGS_ISF, dict(m.isf_layout(FLAGS_ISF), **{"other.key": 1})),
+                          (dict(FLAGS_ISF, enums={}), {"ftrace_ops.func": 0, "ftrace_ops.flags": 16, "other.key": 1}),
+                          (FLAGS_ISF, dict(m.isf_layout(FLAGS_ISF), **{"other.key": 1})),
+                          (dict(FLAGS_ISF, user_types={}, enums={}), dict(m.isf_layout(FLAGS_ISF), **{"other.key": 1})),
+                          (dict(FLAGS_ISF, user_types={}), dict(m.isf_layout(FLAGS_ISF), **{"other.key": 1}))):
+        isf_path = os.path.join(work, "isf.json")
+        with open(isf_path, "w") as handle:
+            json.dump(isf, handle)
+        assert m.apply_types(isf_path) is not None
+        assert m.load_layout() == expected, m.load_layout()
 
 # Hook pages with no ftrace, kprobe or BPF role (judge s160 finding 5). Page MP's first named call is a module's function,
 # a module callback: MP is renamed module_hook_<entry>, the Handler and Owner columns name the callback and Ctrl+E jumps
@@ -311,11 +523,34 @@ print("hook chain stub test OK (hand-made ELFs; fake IDA modules)")
 import inspect
 for function in (m.FindPatches.activate, m.scan_current_input, m.link_hooks, m.load_layout):
     assert "ida_auto" not in inspect.getsource(function), function
+import glob, hashlib, isf2c
+loaded_isfs = {}
+def load_isf(isf_path):
+    if isf_path not in loaded_isfs:
+        loaded_isfs.clear()  # one at a time: a kernel's ISF takes about 300 MB once loaded
+        loaded_isfs[isf_path] = isf2c.load_isf(isf_path)
+    return loaded_isfs[isf_path]
 layout_offset, layout_source = ps.FTRACE_OPS_FUNC, "patchscan.FTRACE_OPS_FUNC, no ISF given"
 if os.path.isfile(os.environ.get("MEMLENS_ISF", "")):  # what Apply kernel types records for that ISF
-    import isf2c
-    layout_offset = ps.ftrace_ops_func_offset(isf2c.load_isf(os.environ["MEMLENS_ISF"]))
+    layout_offset = ps.ftrace_ops_func_offset(load_isf(os.environ["MEMLENS_ISF"]))
     layout_source = os.path.basename(os.environ["MEMLENS_ISF"])
+# The flags comments and types on the two public samples, after Apply kernel types with their ISF (both: the Debian 13
+# 6.12.115 kernel; values read from memory, judge s192): demo kernel.elf, the function tracer's global_ops 0x2841 on the
+# trampoline of vfs_getattr (a kernel global, typed by Apply kernel types itself); second sample, the test module's
+# th_kill_ops 0x857 on the trampoline of __x64_sys_kill (a module symbol: typed here). Neither has IPMODIFY; the kprobe
+# pages (do_sys_openat2, __x64_sys_getdents64, ops kprobe_ftrace_ops 0x845) get no flags comment.
+FLAGS_2841 = "MemLens: ftrace_ops flags 0x2841 = ENABLED|INITIALIZED|ALLOC_TRAMP|PID; " + NO_IPMODIFY
+FLAGS_857 = "MemLens: ftrace_ops flags 0x857 = ENABLED|DYNAMIC|SAVE_REGS|RECURSION|INITIALIZED|ALLOC_TRAMP; " + NO_IPMODIFY
+REAL_FLAGS = {  # kernel.elf SHA-256: ({address: [flags comment line]}, SetType calls)
+    "1481bdbfd0d12b907e208b873d5810c6d1e2adacdf8dbc9cebfb0ae8ad80efa5":
+        ({0xffffffffc0b2b000: [FLAGS_2841], 0xffffffff8ff42660: [FLAGS_2841]}, []),
+    "8d95998eacc39055c81417983f3dcdf7bea1d1c811272b13725035971dd149f9":
+        ({0xffffffffc0cd0000: [FLAGS_857], 0xffffffffc0cc80a0: [FLAGS_857]}, [(0xffffffffc0cc80a0, "struct ftrace_ops;")]),
+}
+def flag_comments():
+    """{address: [comment lines with ftrace_ops flags]} in the fake database."""
+    return {ea: [line for line in text.split("\n") if "ftrace_ops flags" in line] for ea, text in comments.items()
+            if "ftrace_ops flags" in text}
 
 for path in sys.argv[1:]:
     blob = open(path, "rb").read()
@@ -324,6 +559,7 @@ for path in sys.argv[1:]:
     assert m.load_layout() == {}, m.load_layout()  # as before Apply kernel types: no layout recorded
     crefs, renames, out = run()
     assert not [c for c in calls if c[0] in ("parse", "settype")], calls  # no type imported or applied
+    assert flag_comments() == {}, flag_comments()  # no layout: nothing said about ftrace_ops flags
     drefs = [c for c in calls if c[0] == "dref"]
     assert crefs and all(kind == CALL for _, _, kind in crefs) and all(c[3] == DATA for c in drefs), (crefs, drefs)
     second = run()
@@ -358,3 +594,57 @@ for path in sys.argv[1:]:
     assert typed == rows, (typed, rows)
     print("  with the layout Apply kernel types records (ftrace_ops.func = %d, from %s): the same %d rows"
           % (layout_offset, layout_source, len(rows)))
+    assert flag_comments() == {} and not [c for c in calls if c[0] == "settype"], calls  # no flags layout, no struct
+    # After Apply kernel types with this kernel's ISF (MEMLENS_ISF, else the *.json.xz next to kernel.elf): the layout it
+    # records (offsets of ftrace_ops.func and .flags, the FTRACE_OPS_FL_* values by name) and struct ftrace_ops in the
+    # database. The same rows (the Owner column does not change); the flags comments and the module ops' type; a second
+    # run adds nothing; an ISF without the FTRACE_OPS_FL_ enum gives no flags comment.
+    sha = hashlib.sha256(blob).hexdigest()
+    isf_path = os.environ.get("MEMLENS_ISF", "")
+    if not os.path.isfile(isf_path):
+        isf_path = (sorted(glob.glob(os.path.join(os.path.dirname(os.path.abspath(path)), "*.json.xz"))) or [""])[0]
+    if not isf_path:
+        print("SKIP: ftrace_ops flags of %s: no ISF (set MEMLENS_ISF, or put the kernel's *.json.xz next to it)" % path)
+        continue
+    isf = load_isf(isf_path)
+    isf_banner = m.isf_linux_banner(isf)
+    elf_banner = image.read(image.by_name["linux_banner"][0], len(isf_banner)) if isf_banner and "linux_banner" in image.by_name else None
+    if isf_banner is None or elf_banner != isf_banner:
+        print("SKIP: ftrace_ops flags of %s: %s is not this kernel's ISF (its linux_banner differs)" % (path, os.path.basename(isf_path)))
+        continue
+    layout = m.isf_layout(isf)
+    assert isinstance(layout.get("ftrace_ops.flags"), int) and layout["FTRACE_OPS_FL"].get("FTRACE_OPS_FL_IPMODIFY"), layout
+    database(blob)
+    known_types.add("ftrace_ops")
+    m.save_layout(layout)
+    _, _, flags_out = run()
+    settype = [c[1:] for c in calls if c[0] == "settype"]
+    assert [m._open_list.OnGetLine(n) for n in range(m._open_list.OnGetSize())] == rows
+    flagged = flag_comments()
+    if sha in REAL_FLAGS:
+        assert (flagged, settype) == REAL_FLAGS[sha], (flagged, settype)
+    assert all(len(lines) == 1 and lines[0].startswith("MemLens: ftrace_ops flags 0x") for lines in flagged.values()), flagged
+    links = ps.hook_links(image, ps.scan(None, image))
+    assert not [link for link in links if link.kind == ps.KPROBE_KIND and link.target in flagged], flagged  # no kprobe page
+    before = dict(comments)
+    second = run()
+    assert second[:2] == ([], []) and not [c for c in calls if c[0] in ("settype", "cmt", "dref")] and comments == before, calls
+    print("  after Apply kernel types with %s (ftrace_ops.flags = %d, %d FTRACE_OPS_FL_* values by name, IPMODIFY = %#x): the same %d rows"
+          % (os.path.basename(isf_path), layout["ftrace_ops.flags"], len(layout["FTRACE_OPS_FL"]),
+             layout["FTRACE_OPS_FL"]["FTRACE_OPS_FL_IPMODIFY"], len(rows)))
+    print("    " + next(line for line in flags_out.splitlines() if "hook chain:" in line))
+    for ea, lines in sorted(flagged.items()):
+        print("    comment at %#x (%s): %s" % (ea, iname.get_name(ea) or ps.at(image, ea), lines[0]))
+    for ea, declaration in settype:
+        print("    SetType(%#x (%s), %r)" % (ea, iname.get_name(ea) or ps.at(image, ea), declaration))
+    print("    %d SetType; second run: 0 SetType, 0 comments changed%s" % (
+        len(settype), "; as expected for this public sample" if sha in REAL_FLAGS else ""))
+    # The same ISF without its FTRACE_OPS_FL_ enum: no flags comment (no guessed values); the struct is still there.
+    enums = {name: enum for name, enum in isf["enums"].items()
+             if not any(key.startswith("FTRACE_OPS_FL_") for key in (enum.get("constants") or {}))}
+    database(blob)
+    m.save_layout(m.isf_layout(dict(isf, enums=enums)))
+    run()
+    assert flag_comments() == {} and [c[1:] for c in calls if c[0] == "settype"] == settype, (comments, calls)
+    print("    with that ISF's FTRACE_OPS_FL_ enum removed: no flags comment, the same %d SetType" % len(settype))
+    known_types.clear()

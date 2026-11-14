@@ -100,9 +100,11 @@ def apply_types(isf_path, confirm=None):
     mismatch = banner_mismatch(isf)
     if mismatch and confirm and not confirm(*mismatch):
         return None
-    func_offset = patchscan.ftrace_ops_func_offset(isf)
-    if func_offset is not None:  # where Show patched kernel functions reads ops->func
-        save_layout(dict(load_layout(), **{"ftrace_ops.func": func_offset}))
+    # where Show patched kernel functions reads ops->func and ops->flags, and the FTRACE_OPS_FL_* values: when this ISF
+    # has struct ftrace_ops, its keys replace those of an ISF imported before, which may be another kernel's
+    layout = isf_layout(isf)
+    if "ftrace_ops.func" in layout:  # the struct is there (an ISF with only the enum must not drop the offsets)
+        save_layout(dict({key: value for key, value in load_layout().items() if key not in LAYOUT_KEYS}, **layout))
     generator = isf2c.Generator(isf)
 
     stopped = {}
@@ -957,14 +959,39 @@ def add_comment(address, text):
     idc.set_cmt(address, "\n".join(lines + [text]), False)
 
 
+def set_flags_comment(address, text):
+    """add_comment for an ftrace_ops flags line, after dropping any other flags line at address: one an earlier ISF
+    decoded differently (a wrong ISF applied first, then the right one) must not stay next to it (review s193). Our
+    line with a note the analyst added after it stays, as add_comment keeps it (review s194)."""
+    old = idc.get_cmt(address, False) or ""
+    lines = old.split("\n")
+    kept = [line for line in lines if not (line.startswith(patchscan.OPS_FLAGS_PREFIX) and text not in line)]
+    if kept != lines:
+        idc.set_cmt(address, "\n".join(kept), False)
+    add_comment(address, text)
+
+
 HOOK_RECORD = "$ memlens.hooks"  # netnode: what MemLens linked and renamed, so running it again adds nothing twice
 HOOK_RECORD_TAG = "B"
 LAYOUT_RECORD = "$ memlens.layout"  # netnode: struct offsets from the ISF that Apply kernel types imported
 LAYOUT_TAG = "L"
 
 
+LAYOUT_KEYS = ("ftrace_ops.func", "ftrace_ops.flags", "FTRACE_OPS_FL")
+
+
+def isf_layout(isf):
+    """What Apply kernel types records from a loaded ISF: {"ftrace_ops.func": offset, "ftrace_ops.flags": offset,
+    "FTRACE_OPS_FL": {"FTRACE_OPS_FL_ENABLED": 1, ...}}, each key only when the ISF has it (the values are read by name
+    from the ISF's enum, which is anonymous in Linux and numbered differently across versions)."""
+    layout = {"ftrace_ops.func": patchscan.ftrace_ops_func_offset(isf),
+              "ftrace_ops.flags": patchscan.ftrace_ops_field_offset(isf, "flags"),
+              "FTRACE_OPS_FL": patchscan.ftrace_ops_flag_values(isf)}
+    return {key: value for key, value in layout.items() if value is not None and value != {}}
+
+
 def load_layout():
-    """{"ftrace_ops.func": offset} as Apply kernel types recorded it, or {} (no ISF applied yet, or an unreadable record)."""
+    """isf_layout's record as Apply kernel types saved it, or {} (no ISF applied yet, or an unreadable record)."""
     blob = ida_netnode.netnode(LAYOUT_RECORD, 0, True).getblob(0, LAYOUT_TAG)
     try:
         layout = json.loads(blob.decode("utf-8")) if blob else {}
@@ -978,14 +1005,24 @@ def save_layout(layout):
 
 
 def load_hook_record():
-    """(netnode, record) with record = {"xrefs": [[from, to, flow], ...], "names": [[page, old name, new name], ...]}."""
+    """(netnode, record) with record = {"xrefs": [[from, to, flow], ...], "names": [[page, old name, new name], ...],
+    "types": [[address, type], ...]}."""
     node = ida_netnode.netnode(HOOK_RECORD, 0, True)
     blob = node.getblob(0, HOOK_RECORD_TAG)
     try:
         record = json.loads(blob.decode("utf-8")) if blob else {}
     except ValueError:
         record = {}
-    return node, {"xrefs": list(record.get("xrefs", [])), "names": list(record.get("names", []))}
+    return node, {"xrefs": list(record.get("xrefs", [])), "names": list(record.get("names", [])),
+                  "types": list(record.get("types", []))}
+
+
+OPS_TYPE = "struct ftrace_ops"
+
+
+def ops_type_known():
+    """True when the database has struct ftrace_ops (Apply kernel types imported it)."""
+    return ida_typeinf.tinfo_t().get_named_type(ida_typeinf.get_idati(), "ftrace_ops")
 
 
 def link_hooks(image, findings):
@@ -996,9 +1033,14 @@ def link_hooks(image, findings):
     kept in the HOOK_RECORD netnode, so a second run adds no xref and renames nothing again, and an xref or name the
     user removed since is not put back. The owner's references are added too: the call to a BPF program, and for an
     ftrace trampoline user data xrefs (dr_O) from its ftrace_ops slot to the ops and from ops->func to the callback;
-    ops->func is read at the ISF's offset when Apply kernel types recorded one. Returns
-    (links, counts)."""
-    func_offset = load_layout().get("ftrace_ops.func")
+    ops->func is read at the ISF's offset when Apply kernel types recorded one.
+
+    After Apply kernel types (its layout has ftrace_ops.flags and the FTRACE_OPS_FL_* values): a comment at each such
+    trampoline (not a kprobe's) and at its ops decodes the ops' flags, saying whether IPMODIFY is set; nothing is said
+    without that layout. When the database has struct ftrace_ops, an ops that a module's symbol starts at gets that
+    type once (kept in HOOK_RECORD too). Returns (links, counts)."""
+    layout = load_layout()
+    func_offset = layout.get("ftrace_ops.func")
     if isinstance(func_offset, int):
         image.ftrace_ops_func = func_offset
     links = patchscan.hook_links(image, findings)
@@ -1006,7 +1048,7 @@ def link_hooks(image, findings):
     node, record = load_hook_record()
     done = {tuple(xref) for xref in record["xrefs"]}
     counts = dict.fromkeys(("xrefs", "xrefs_before", "xrefs_failed", "drefs", "drefs_before", "drefs_failed", "renamed",
-                            "named_before", "kept", "rename_failed"), 0)
+                            "named_before", "kept", "rename_failed", "typed", "typed_before", "type_failed"), 0)
     for source, target, flow in patchscan.hook_xrefs(links):
         kind = "drefs" if flow == "data" else "xrefs"
         if (source, target, flow) in done:
@@ -1033,6 +1075,18 @@ def link_hooks(image, findings):
             counts["rename_failed"] += 1  # IDA refused it, for example because the name is used elsewhere
     for page, text in patchscan.page_comments(links).items():
         add_comment(page, text)
+    typed = {address for address, _ in record["types"]}
+    for ops in (patchscan.module_ops(image, links) if ops_type_known() else []):
+        if ops in typed:
+            counts["typed_before"] += 1  # also when the user retyped it since: leave it
+        elif idc.SetType(ops, OPS_TYPE + ";"):
+            record["types"].append([ops, OPS_TYPE])
+            counts["typed"] += 1
+        else:
+            counts["type_failed"] += 1
+    flags = patchscan.ops_flags_comments(image, links, layout.get("ftrace_ops.flags"), layout.get("FTRACE_OPS_FL"))
+    for address, text in sorted(flags.items()):
+        set_flags_comment(address, text)
     node.setblob(json.dumps(record).encode("utf-8"), 0, HOOK_RECORD_TAG)
     return links, counts
 
@@ -1054,6 +1108,11 @@ def link_report(links, counts):
                       ("rename_failed", "%d refused by IDA")):
         if counts[key]:
             line += ", " + text % counts[key]
+    typed, before, failed = (counts.get(key, 0) for key in ("typed", "typed_before", "type_failed"))
+    if typed or before or failed:  # module ftrace_ops; the line is unchanged without any
+        line += "; %d module ftrace_ops typed as %s" % (typed, OPS_TYPE)
+        extra = [("%d already typed by an earlier run" % before) if before else "", ("%d refused by IDA" % failed) if failed else ""]
+        line += "".join(" (%s)" % text for text in extra if text)
     return line + "\n"
 
 

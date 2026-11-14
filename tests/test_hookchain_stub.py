@@ -370,12 +370,12 @@ with tempfile.TemporaryDirectory() as work:
     crefs, renames, out = run()
     assert m._open_list.OnGetLine(0)[5] == "ftrace_ops_assist_func (ftrace_ops evilmod.hooks+0x20)", m._open_list.OnGetLine(0)
     assert comments[BASE].endswith("; owner: ftrace_ops_assist_func (ftrace_ops evilmod.hooks+0x20)"), comments[BASE]
+    assert sorted(c[1:] for c in calls if c[0] == "dref") == [(PAGE + 0xdd, OPS, DATA), (OPS + 8, ASSIST, DATA)], calls
     # The same database with the layout read at offset 0 again: the owner changes, so the entry's line is replaced.
     m.save_layout({"ftrace_ops.func": 0})
     run()
     assert memlens_lines(BASE) == [comments[BASE]] and comments[BASE].endswith(
         "; owner: evilmod.fh_ftrace_thunk (ftrace_ops evilmod.hooks+0x20)"), comments[BASE]
-    assert sorted(c[1:] for c in calls if c[0] == "dref") == [(PAGE + 0xdd, OPS, DATA), (OPS + 8, ASSIST, DATA)], calls
     # With the flags layout and struct ftrace_ops in the database: the flags (ENABLED only here) are decoded at the page
     # and the ops, but an ops inside a bigger module object (evilmod.hooks+0x20, the ftrace_hook array) is not retyped.
     database(blob)

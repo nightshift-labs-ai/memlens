@@ -5,7 +5,8 @@ Three actions under Edit > Plugins:
   * Apply kernel types from ISF: imports every struct, union and enum of that kernel.
   * Show patched kernel functions: lists hooked entries and odd syscall slots, Enter jumps there; links each hooked
     entry to its hook page and the page to its handler (code xrefs) and to its owner (the BPF program, or the
-    ftrace_ops and its callback), and names the hook pages by role.
+    ftrace_ops and its callback), names the hook pages by role, and comments each hooked entry (and the function that
+    starts there) with that chain and its owner.
 """
 import base64
 import hashlib
@@ -22,6 +23,7 @@ import tempfile
 import time
 
 import ida_bytes
+import ida_funcs
 import ida_idaapi
 import ida_kernwin
 import ida_nalt
@@ -961,6 +963,72 @@ def add_comment(address, text):
     idc.set_cmt(address, "\n".join(lines + [text]), False)
 
 
+def entry_line_stale(line, page):
+    """True for a MemLens line at a hooked entry that a new patchscan.entry_text line replaces: an earlier one (its
+    page name or owner may differ now), or the scan's line an older MemLens wrote there, which names the page by its
+    exporter label (memlens_target_<page>, renamed since) and no owner (judge s194 F2)."""
+    if line.startswith(patchscan.ENTRY_PREFIX):
+        return True
+    label = r"(?<![0-9A-Za-z_])%s%x(?![0-9A-Za-z_])" % (patchscan.TARGET_PREFIX, page)
+    return line.startswith("MemLens: ") and re.search(label, line) is not None
+
+
+def set_entry_comment(address, text, page):
+    """Our entry_text line at a hooked entry that leads to page: the lines it replaces (entry_line_stale) are dropped,
+    so a re-run on a database an older MemLens annotated ends with one MemLens line there; the analyst's lines stay, and
+    so does our line with a note the analyst added after it, as add_comment keeps it."""
+    old = idc.get_cmt(address, False) or ""
+    lines = [line for line in old.split("\n") if text in line or not entry_line_stale(line, page)] if old else []
+    if not any(text in line for line in lines):
+        lines.append(text)
+    if "\n".join(lines) != old:
+        idc.set_cmt(address, "\n".join(lines), False)
+
+
+def set_function_comment(address, text):
+    """text also as the comment of the function that starts at address, which Hex-Rays prints at the top of its
+    pseudocode. Only when IDA has a function starting there, and its comment is empty or holds only lines an earlier
+    run wrote (patchscan.ENTRY_PREFIX): never over the analyst's. Returns True when it was set."""
+    pfn = ida_funcs.get_func(address)
+    if pfn is None or pfn.start_ea != address:
+        return False  # no function there yet, or address is inside another function
+    old = ida_funcs.get_func_cmt(pfn, False) or ""
+    if text in old or any(not line.startswith(patchscan.ENTRY_PREFIX) for line in (old.split("\n") if old else [])):
+        return False
+    return bool(ida_funcs.set_func_cmt(pfn, text, False))
+
+
+def database_names(image, findings):
+    """{hook page: its name in the database now} for the copied hook pages the findings point at."""
+    return {page: ida_name.get_name(page) for page in patchscan.copied_targets(image, findings)}
+
+
+def comment_entries(image, findings, links, names):
+    """Each finding's comment (patchscan.entry_comments, with names: the database's names after link_hooks). An entry
+    linked to a copied hook page gets the chain and its owner (set_entry_comment), and the function that starts there
+    the same text (set_function_comment); any other row gets the scan's line, as before. Returns the number of function
+    comments set."""
+    set_functions = 0
+    for address, text, page in patchscan.entry_comments(image, findings, links, names):
+        if page is None:
+            add_comment(address, text)
+        else:
+            set_entry_comment(address, text, page)
+            set_functions += set_function_comment(address, text)
+    return set_functions
+
+
+def set_page_comment(address, text):
+    """add_comment for a patchscan.page_comments line, after dropping the line an older MemLens wrote at that page with
+    the old wording (patchscan.OLD_PAGE_PREFIX), which read as "no owner" next to an owner (judge s194 F3)."""
+    old = idc.get_cmt(address, False) or ""
+    lines = old.split("\n")
+    kept = [line for line in lines if not line.startswith(patchscan.OLD_PAGE_PREFIX)]
+    if kept != lines:
+        idc.set_cmt(address, "\n".join(kept), False)
+    add_comment(address, text)
+
+
 def set_flags_comment(address, text):
     """add_comment for an ftrace_ops flags line, after dropping any other flags line at address: one an earlier ISF
     decoded differently (a wrong ISF applied first, then the right one) must not stay next to it (review s193). Our
@@ -1076,7 +1144,7 @@ def link_hooks(image, findings):
         else:
             counts["rename_failed"] += 1  # IDA refused it, for example because the name is used elsewhere
     for page, text in patchscan.page_comments(links).items():
-        add_comment(page, text)
+        set_page_comment(page, text)
     typed = {address for address, _ in record["types"]}
     for ops in (patchscan.module_ops(image, links) if ops_type_known() else []):
         if ops in typed:
@@ -1095,11 +1163,11 @@ def link_hooks(image, findings):
 
 def refresh_hook_chain():
     """After Apply kernel types: when Show patched kernel functions already ran on this database (its hook record is
-    there), scan kernel.elf and apply the hook chain again, so that the module ops' struct ftrace_ops type and the
-    ftrace_ops flags comments, which need the types and the layout just imported, appear without opening the list a
-    second time (README Try it opens the list first). On a database where the list never ran it does nothing and reads no
-    file. An error here is printed to the Output window and never hides the types report printed before it. Returns
-    True when the hook chain was applied again."""
+    there), scan kernel.elf and apply the hook chain again, with the entries' comments as the list writes them, so that
+    the module ops' struct ftrace_ops type and the ftrace_ops flags comments, which need the types and the layout just
+    imported, appear without opening the list a second time (README Try it opens the list first). On a database where
+    the list never ran it does nothing and reads no file. An error here is printed to the Output window and never hides
+    the types report printed before it. Returns True when the hook chain was applied again."""
     try:
         if not ida_netnode.netnode(HOOK_RECORD, 0, True).getblob(0, HOOK_RECORD_TAG):
             return False
@@ -1108,7 +1176,9 @@ def refresh_hook_chain():
             ida_kernwin.msg("[MemLens] hook chain not applied again (no kernel.elf); run Show patched kernel functions "
                             "to apply it\n")
             return False
-        links, counts = link_hooks(*scanned)
+        image, findings = scanned
+        links, counts = link_hooks(image, findings)
+        comment_entries(image, findings, links, database_names(image, findings))  # as Show patched kernel functions does
         ida_kernwin.msg(link_report(links, counts))
         ida_kernwin.msg("[MemLens] hook chain applied again with the ftrace_ops layout recorded in this database (Show "
                         "patched kernel functions ran before Apply kernel types)\n")
@@ -1151,8 +1221,6 @@ class FindPatches(ida_kernwin.action_handler_t):
         if scanned is None:
             return 0
         image, findings = scanned
-        for address, _, what, target, _ in findings:
-            add_comment(address, "MemLens: %s %s" % (what, target))
         ida_kernwin.msg("[MemLens] %d patched entries or odd syscall slots\n" % len(findings))
         try:
             links, counts = link_hooks(image, findings)
@@ -1161,7 +1229,11 @@ class FindPatches(ida_kernwin.action_handler_t):
             links = []
             ida_kernwin.msg("[MemLens] hook chain stopped by this error (xrefs or names added before it are not "
                             "recorded in the database):\n%s\n" % traceback.format_exc())
-        names = {page: ida_name.get_name(page) for page in patchscan.copied_targets(image, findings)}
+        names = database_names(image, findings)
+        try:  # after link_hooks, so that each hooked entry names its hook page as renamed, and its owner (judge s194 F2)
+            comment_entries(image, findings, links, names)
+        except Exception:  # the list is still worth showing
+            ida_kernwin.msg("[MemLens] comments at the hooked entries stopped by this error:\n%s\n" % traceback.format_exc())
         global _open_list  # a non-modal chooser must outlive this call
         _open_list = PatchList(patchscan.list_rows(image, findings, links, names))
         _open_list.Show()

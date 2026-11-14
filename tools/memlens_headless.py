@@ -6,8 +6,8 @@
 Opens kernel.elf as an IDA database, imports the ISF's types and types the globals (per-CPU copies too), adds
 a comment at every patched entry, links hooked entries to their hook pages, handlers and owners (code and data xrefs,
 role names), prints the same report and patch list as the plugin, and saves the database.
-It calls the plugin's own functions (memlens_entry.apply_types, report, add_comment, link_hooks and patchscan.scan), so
-the result should match the menu actions. Not yet run with a real idalib: we have no IDA licence.
+It calls the plugin's own functions (memlens_entry.apply_types, report, link_hooks, comment_entries and patchscan.scan),
+so the result should match the menu actions. Not yet run with a real idalib: we have no IDA licence.
 
 idalib setup (from Hex-Rays): install the idapro wheel shipped in <IDA>/idalib/python and run its
 py-activate-idalib.py once, or set IDADIR to your IDA folder.
@@ -66,10 +66,14 @@ def main(argv=None):
             print("memlens_headless: patch list needs the kernel.elf MemLens exported: %s" % error, file=sys.stderr)
             return 1
         for address, name, what, target, _ in findings:
-            memlens_entry.add_comment(address, "MemLens: %s %s" % (what, target))
             print("0x%x\t%s\t%s\t%s" % (address, name, what, target))
         print("[MemLens] %d patched entries or odd syscall slots" % len(findings))
-        sys.stdout.write(memlens_entry.link_report(*memlens_entry.link_hooks(image, findings)))
+        links = []
+        try:
+            links, counts = memlens_entry.link_hooks(image, findings)
+            sys.stdout.write(memlens_entry.link_report(links, counts))
+        finally:  # the entries' comments name the chain linked just now (the scan's line where none is, also on an error)
+            memlens_entry.comment_entries(image, findings, links, memlens_entry.database_names(image, findings))
         return 0
     finally:
         idapro.close_database(True)

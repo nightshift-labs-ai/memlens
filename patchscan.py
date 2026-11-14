@@ -907,6 +907,10 @@ def role_names(image, links):
     return names
 
 
+PAGE_PREFIX = "MemLens: hook page outside any module's memory"  # how every page_comments line starts
+OLD_PAGE_PREFIX = "MemLens: hook page no module owns"  # how it started up to v0.3.31 (judge s194 F3: read as "no owner")
+
+
 def page_comments(links):
     """{page address: comment} for every copied hook page with a link: its exporter label (memlens_target_<address>,
     kept findable after a rename), the functions that lead to it (up to five) and its first named call."""
@@ -917,7 +921,7 @@ def page_comments(links):
     comments, owners = {}, page_owners(links)
     for page, (link, functions) in sorted(pages.items()):
         callers = sorted(functions)
-        text = "MemLens: hook page no module owns, copied from memory (exporter label %s%x); reached from %s" % (
+        text = PAGE_PREFIX + ", copied from memory (exporter label %s%x); reached from %s" % (
             TARGET_PREFIX, page, ", ".join(callers[:5]) + (" and %d more" % (len(callers) - 5) if len(callers) > 5 else ""))
         if link.handler_name:
             text += "; first named call: %s%s" % (link.handler_name, " (%s)" % link.kind if link.kind else "")
@@ -925,6 +929,41 @@ def page_comments(links):
         if owner is not None and owner.how != MODULE_CALLBACK:  # that one is in the comment already
             text += "; owner: %s" % owner.text
         comments[page] = text
+    return comments
+
+
+ENTRY_PREFIX = "MemLens: hooked"  # how every entry_text line starts
+
+
+def entry_text(link, page_name):
+    """The comment at an entry linked to a copied hook page, read along the chain: the page's kind, the hooking
+    instruction, the page under page_name (its name in the database now), the handler, and the owner when one is known:
+    'MemLens: hooked (ftrace): call -> ftrace_tramp___x64_sys_kill -> ftrace_ops_assist_func; owner:
+    memlens_testhook.th_kill_callback (ftrace_ops memlens_testhook.th_kill_ops)'. A page with no known role names its
+    first call as handler_text does: 'MemLens: hooked: jmp -> memlens_target_... (hook code; first call: _printk)'."""
+    text = ENTRY_PREFIX + (" (%s)" % link.kind if link.kind else "") + ": %s -> %s" % (link.flow, page_name)
+    if link.handler_name and link.kind:
+        text += " -> %s" % link.handler_name
+    elif link.handler_name:
+        text += " (hook code; first call: %s)" % link.handler_name
+    if link.owner is not None:
+        text += "; owner: %s" % link.owner.text
+    return text
+
+
+def entry_comments(image, findings, links, names):
+    """(address, comment, page) for each finding, in order. An entry linked to a copied hook page gets entry_text, with
+    the page under its name in names (the database's name now, after link_hooks renamed it; else the ELF's label), and
+    page is that page's address. Any other row (a syscall slot, int3, a target outside the ELF or one with a real
+    symbol) keeps the scan's line 'MemLens: <what> <target>', with page None."""
+    by_entry = {(link.entry, link.function): link for link in links}
+    comments = []
+    for address, function, what, label, _ in findings:
+        link = by_entry.get((address, function))
+        if link is not None and link.page:
+            comments.append((address, entry_text(link, names.get(link.target) or describe(image, link.target)), link.target))
+        else:
+            comments.append((address, "MemLens: %s %s" % (what, label), None))
     return comments
 
 

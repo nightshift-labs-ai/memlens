@@ -25,7 +25,7 @@ No memory image or Volatility needed for steps 1-3. Download `memlens-demo-debia
 
 1. Unzip it, then open `kernel.elf` in IDA.
 2. **MemLens: Apply kernel types from ISF** and pick the `.json.xz` file.
-3. **MemLens: Show patched kernel functions**. The lab VM's script set an ftrace filter on `vfs_getattr` and a kprobe on `do_sys_openat2`; a third patched entry, `bpf_lsm_file_open`, was not set by the script: its hook page is a BPF trampoline that runs the BPF program at `0xffffffffc0004664`, which an export made with this version names `bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems` (the demo zip holds an older export, without BPF names). All three should be listed as `call to memory with no symbol` (each entry calls a trampoline page that no module owns, copied in as `memlens_target_<address>`), and each label names the handler that page calls: `function_trace_call` (ftrace), `kprobe_ftrace_handler` (kprobe via ftrace) and `__bpf_tramp_enter` (a BPF trampoline), as in `expected-patched-functions.txt`. In the list, the Target column should show each hook page under its new name (`ftrace_tramp_vfs_getattr`, `kprobe_ftrace_tramp_do_sys_openat2`, `bpf_tramp_bpf_lsm_file_open`), the Handler column the function it calls, and the Owner column who put the hook there: `function_trace_call (ftrace_ops global_ops)`, `kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)` and `BPF program at 0xffffffffc0004664`. Enter should jump to the function, the list's Edit command (usually Ctrl+E) to the handler and its Insert command (usually Ins, captioned **Jump to owner**) to the owner; the keys are not checked in IDA.
+3. **MemLens: Show patched kernel functions**. The lab VM's script set an ftrace filter on `vfs_getattr` and a kprobe on `do_sys_openat2`; a third patched entry, `bpf_lsm_file_open`, was not set by the script: its hook page is a BPF trampoline that runs the BPF program `bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems` (systemd's BPF LSM program). All three should be listed as `call to memory with no symbol` (each entry calls a trampoline page that no module owns, copied in as `memlens_target_<address>`), and each label names the handler that page calls: `function_trace_call` (ftrace), `kprobe_ftrace_handler` (kprobe via ftrace) and `__bpf_tramp_enter` (a BPF trampoline), as in `expected-patched-functions.txt`. In the list, the Target column should show each hook page under its new name (`ftrace_tramp_vfs_getattr`, `kprobe_ftrace_tramp_do_sys_openat2`, `bpf_tramp_bpf_lsm_file_open`), the Handler column the function it calls, and the Owner column who put the hook there: `function_trace_call (ftrace_ops global_ops)`, `kprobe memlens_kp on do_sys_openat2 (tracefs kprobe event; pre_handler kprobe_dispatcher)` and `bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems (BPF program)`, as in `expected-hook-chain.txt`. Enter should jump to the function, the list's Edit command (usually Ctrl+E) to the handler and its Insert command (usually Ins, captioned **Jump to owner**) to the owner; the keys are not checked in IDA.
 
 ### Export it yourself
 
@@ -40,7 +40,7 @@ v/bin/vol -q -p <memlens>/vol_plugins -s symbols -o out -f trace.elf linux.kerne
 python3 <memlens>/patchscan.py out/kernel.elf
 ```
 
-A fresh export also holds the kernel's kprobe list (the section `.memlens.kprobes`), so `python3 <memlens>/patchscan.py --links out/kernel.elf` names the probe on `do_sys_openat2`: `kprobe memlens_kp on do_sys_openat2 (tracefs kprobe event; pre_handler kprobe_dispatcher)`. The demo `kernel.elf` is older and shows `kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)` there.
+A fresh export also holds the kernel's kprobe list (the section `.memlens.kprobes`), so `python3 <memlens>/patchscan.py --links out/kernel.elf` names the probe on `do_sys_openat2`: `kprobe memlens_kp on do_sys_openat2 (tracefs kprobe event; pre_handler kprobe_dispatcher)`. The demo `kernel.elf` is such an export (MemLens 0.3.30), so it shows the same; exports from v0.3.28 or older show `kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)` there.
 
 On Windows the same steps in PowerShell would be the following (we have no Windows machine, so these lines are not tested; `7z` is 7-Zip):
 
@@ -77,8 +77,8 @@ The **Show patched kernel functions** list for the same `kernel.elf`, as the plu
 
 ```
 Address          | Where             | What                          | Target                             | Handler                                   | Owner
-FFFFFFFF8E4F9250 | bpf_lsm_file_open | call to memory with no symbol | bpf_tramp_bpf_lsm_file_open        | __bpf_tramp_enter (BPF trampoline)        | BPF program at 0xffffffffc0004664
-FFFFFFFF8E642210 | do_sys_openat2    | call to memory with no symbol | kprobe_ftrace_tramp_do_sys_openat2 | kprobe_ftrace_handler (kprobe via ftrace) | kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)
+FFFFFFFF8E4F9250 | bpf_lsm_file_open | call to memory with no symbol | bpf_tramp_bpf_lsm_file_open        | __bpf_tramp_enter (BPF trampoline)        | bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems (BPF program)
+FFFFFFFF8E642210 | do_sys_openat2    | call to memory with no symbol | kprobe_ftrace_tramp_do_sys_openat2 | kprobe_ftrace_handler (kprobe via ftrace) | kprobe memlens_kp on do_sys_openat2 (tracefs kprobe event; pre_handler kprobe_dispatcher)
 FFFFFFFF8E64E370 | vfs_getattr       | call to memory with no symbol | ftrace_tramp_vfs_getattr           | function_trace_call (ftrace)              | function_trace_call (ftrace_ops global_ops)
 ```
 

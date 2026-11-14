@@ -2,9 +2,10 @@
 turns each row into a row of the list (Python 3.8, standard library only).
 
 Volatility's JSON is not a stable API, so the field names are pinned to Volatility 2.28.2 (the plugins' column names
-there). A file is told apart by its field names, not by its file name; a field 2.28.2 does not write is ignored, and a
-file of any other plugin is skipped, each with one warning line. Volatility writes kernel addresses cut to 48 bits
-(281473643531984 = 0xffffb0894ed0 for 0xffffffffb0894ed0); they are sign-extended back to 64 bits here.
+there). A file is told apart by its field names, not by its file name; a field 2.28.2 does not write is ignored (except
+in a keyboard notifiers file, see EXACT), and a file of any other plugin is skipped, each with one warning line.
+Volatility writes kernel addresses cut to 48 bits (281473643531984 = 0xffffb0894ed0 for 0xffffffffb0894ed0); they are
+sign-extended back to 64 bits here.
 """
 import collections
 import json
@@ -24,6 +25,10 @@ PLUGINS = (
     ("linux.malware.check_afinfo", ("Symbol Name", "Member", "Handler Address"), ()),
     ("linux.malware.keyboard_notifiers", ("Address", "Module", "Symbol"), ()),
 )
+# Keyboard notifiers' three fields are also written, with one more, by check_idt (Index) and tty_check (Name, a plugin
+# MemLens does not read): a file with more fields than these three is not taken for keyboard notifiers.
+EXACT = ("linux.malware.keyboard_notifiers",)
+LAST = ("linux.malware.check_idt",)  # its rows go after the other Volatility rows: it lists every vector it checks
 CHILDREN = "__children"  # the JSON renderer's nesting, not a field
 MEMLENS = "MemLens"
 
@@ -53,7 +58,7 @@ def rows_of(rows):
 def plugin_of(fields):
     """(plugin, fields it does not know) for a file's set of field names, or None."""
     for plugin, known, optional in PLUGINS:
-        if set(known) <= fields:
+        if set(known) <= fields and (plugin not in EXACT or fields <= set(known) | set(optional)):
             return plugin, sorted(fields - set(known) - set(optional))
     return None
 
@@ -99,10 +104,14 @@ def finding(plugin, row):
 
 def read_rows(path):
     """(rows, problem): the renderer's top-level row list, or None and why the file is not one."""
-    if os.path.getsize(path) > MAX_SIZE:
-        return None, "not read, %d bytes is more than a findings file has (the limit is %d)" % (os.path.getsize(path), MAX_SIZE)
-    with open(path, "rb") as handle:
-        raw = handle.read()
+    try:
+        size = os.path.getsize(path)
+        if size > MAX_SIZE:
+            return None, "not read, %d bytes is more than a findings file has (the limit is %d)" % (size, MAX_SIZE)
+        with open(path, "rb") as handle:
+            raw = handle.read()
+    except OSError as error:  # no permission, gone since the folder was listed, ...
+        return None, "not read (%s)" % (error.strerror or error)
     try:
         rows = json.loads(raw)  # bytes: UTF-8, or UTF-16 as PowerShell's > writes it
     except ValueError as error:
@@ -171,7 +180,8 @@ def repeats(item, by_ops):
 
 def merge(rows, ops, findings, name_at):
     """(rows, sources, merged): the MemLens rows (patchscan.list_rows) with a Source each, then one row per finding that
-    repeats none of them, and the number of findings merged into MemLens rows instead.
+    repeats none of them (in the order of findings, the IDT rows last; an exact repeat once), and the number of findings
+    merged into MemLens rows instead.
 
     ops[i] is the ftrace_ops that MemLens row i's hook page loads, or None; an ftrace finding with that ops adds Volatility
     to that row's Source. name_at(address) is kernel.elf's name for an address, or None when it is not in the ELF. A
@@ -182,7 +192,7 @@ def merge(rows, ops, findings, name_at):
         if value is not None:
             by_ops.setdefault(value, []).append(index)
     out, sources, seen, merged = list(rows), [MEMLENS] * len(rows), set(), 0
-    for item in findings:
+    for item in sorted(findings, key=lambda item: item.plugin in LAST):  # stable: file order otherwise
         same = repeats(item, by_ops)
         if same:
             for index in same:

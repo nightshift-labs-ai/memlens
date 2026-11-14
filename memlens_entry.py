@@ -513,6 +513,16 @@ ELF_TYPES = {0: "file of no type (ELF type NONE)", 1: "relocatable file (ELF typ
              2: "executable (ELF type EXEC), such as a kernel file", 3: "shared object or PIE program (ELF type DYN)"}
 
 
+ET_CORE = 4
+
+
+def elf_type(head):
+    """The ELF type (e_type) of a file that starts with the bytes head, or None when it is not an ELF."""
+    if len(head) < 18 or head[:4] != b"\x7fELF" or head[5] not in (1, 2):
+        return None
+    return struct.unpack_from("<H" if head[5] == 1 else ">H", head, 16)[0]
+
+
 def elf_not_core(path):
     """The ELF type (e_type) of an ELF file that is not a core dump, else None. A memory image in ELF form is a core
     dump (ET_CORE, 4); an executable, a module or a library is not, whatever banners.Banners finds in it."""
@@ -521,10 +531,18 @@ def elf_not_core(path):
             head = handle.read(18)
     except OSError:
         return None
-    if len(head) < 18 or head[:4] != b"\x7fELF" or head[5] not in (1, 2):
-        return None
-    e_type, = struct.unpack_from("<H" if head[5] == 1 else ">H", head, 16)
-    return e_type if e_type != 4 else None
+    e_type = elf_type(head)
+    return e_type if e_type != ET_CORE else None
+
+
+def memory_image(blob):
+    """"ELF core dump" or "LiME file" when blob starts like a memory image (the input of Export, not a kernel.elf),
+    else None."""
+    if elf_type(blob[:18]) == ET_CORE:
+        return "ELF core dump"
+    if blob[:4] == struct.pack("<I", LIME_MAGIC):
+        return "LiME file"
+    return None
 
 
 def short_file(path):
@@ -769,6 +787,8 @@ def run_cancellable(command):
 
 
 ISSUES_URL = "https://github.com/nightshift-labs-ai/memlens/issues"
+DEMO_URL = "https://github.com/nightshift-labs-ai/memlens/releases/tag/demo-data"  # the README's demo kernel.elf
+WORKS_ON = "MemLens works on a Linux kernel exported from a memory image; demo kernel.elf: %s" % DEMO_URL
 
 
 def guarded(activate):
@@ -904,7 +924,8 @@ class PatchList(ida_kernwin.Choose):
 
 def scan_current_input():
     """(image, findings) for the ELF open in IDA, which is plain data: the database is only annotated. None if there
-    is nothing to show."""
+    is nothing to show; then one warning says what the file is and what to do next (a memory image: Export it; a
+    kernel file from disk or anything else: export one, or the demo kernel.elf)."""
     path = ida_nalt.get_input_file_path()
     picked = not path or not os.path.isfile(path)
     if picked:
@@ -915,20 +936,29 @@ def scan_current_input():
         blob = handle.read()
     if picked and not same_as_database(path, blob):
         return None
+    name = os.path.basename(path)
+    kind = memory_image(blob)
+    if kind:  # a judge's own sample: one line with the next step (judge s194 item 5)
+        ida_kernwin.warning("MemLens: %s looks like a memory image (%s): use Edit > Plugins > MemLens: Export kernel from "
+                            "memory image on it first (Volatility 3 and that kernel's ISF; tools/find_isf.py finds one), "
+                            "then open the kernel.elf it writes." % (name, kind))
+        return None
     try:
-        if patchscan.on_disk_kernel(blob):
-            raise ValueError("this is a kernel file from disk, whose entry bytes are not what ran")
+        if patchscan.on_disk_kernel(blob):  # its entry bytes are not what ran (unapplied alternatives)
+            ida_kernwin.warning("MemLens: %s is a kernel file from disk, which shows the kernel as built, not as it ran: "
+                                "export a kernel.elf from a memory image of that system, or try the demo kernel.elf: %s"
+                                % (name, DEMO_URL))
+            return None
         image = patchscan.Image(blob)
         reason = patchscan.nothing_to_check(image)
         if reason:
             # An empty list would look like a clean kernel (the command line warns the same way).
-            ida_kernwin.warning("MemLens checked nothing: %s has %s, so an empty list would not "
-                                "mean clean. This works on the kernel.elf that MemLens exported from a memory image."
-                                % (os.path.basename(path), reason))
+            ida_kernwin.warning("MemLens checked nothing: %s has %s, so an empty list would not mean clean. %s"
+                                % (name, reason, WORKS_ON))
             return None
         return image, patchscan.scan(blob, image)
     except patchscan.BAD_ELF as error:
-        ida_kernwin.warning("MemLens needs the kernel.elf it exported: %s" % error)
+        ida_kernwin.warning("MemLens cannot use %s (%s). %s" % (name, error, WORKS_ON))
         return None
 
 

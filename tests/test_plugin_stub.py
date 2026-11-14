@@ -79,12 +79,14 @@ kw.ASKBTN_NO, kw.ASKBTN_YES = 0, 1
 # Functions and function comments (names as in the IDA 9.1-9.4 stubs, ida_funcs.pyi): none unless a case adds one to
 # functions (start -> end); get_func gives the function an address is in, which may start before it.
 funcs = types.ModuleType("ida_funcs")
-functions, func_comments = {}, {}
+# A function has two comment slots, regular and repeatable (the repeatable one IDA also shows where the function is called).
+functions, func_comments, func_rep_comments = {}, {}, {}
 class func_t:
     def __init__(self, start, end): self.start_ea, self.end_ea = start, end
 funcs.get_func = lambda ea: next((func_t(s, e) for s, e in functions.items() if s <= ea < e), None)
-funcs.get_func_cmt = lambda pfn, repeatable: func_comments.get(pfn.start_ea)
-funcs.set_func_cmt = lambda pfn, cmt, repeatable: calls.append(("funccmt", pfn.start_ea, cmt, repeatable)) or func_comments.__setitem__(pfn.start_ea, cmt) or True
+funcs.get_func_cmt = lambda pfn, repeatable: (func_rep_comments if repeatable else func_comments).get(pfn.start_ea)
+funcs.set_func_cmt = lambda pfn, cmt, repeatable: calls.append(("funccmt", pfn.start_ea, cmt, repeatable)) or (
+    func_rep_comments if repeatable else func_comments).__setitem__(pfn.start_ea, cmt) or True
 sys.modules.update(ida_kernwin=kw, ida_idaapi=api, ida_typeinf=ti, ida_nalt=nalt, idc=idc, ida_bytes=dbytes, idautils=autils,
                    ida_xref=xref, ida_name=iname, ida_netnode=nnode, ida_funcs=funcs)
 import memlens_entry as m

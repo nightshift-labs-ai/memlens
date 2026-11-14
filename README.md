@@ -71,6 +71,14 @@ Volatility 2.28.2 is the version we tested; the exporter uses Volatility's Linux
 
 The export takes about 20-50 s on our machine. With this version, `out/kernel.elf` is byte-identical to the demo's (its SHA-256 is in `SHA256SUMS.txt`). v0.3.27 or older writes no BPF names or BPF program pages (v0.3.20 to v0.3.27: 234,081 symbols instead of 234,095), and v0.3.28 and v0.3.29 write no kprobe list; all of them list the same three `patched` rows. In IDA, **MemLens: Export kernel from memory image** does the same: choose `trace.elf`, then the ISF from the demo folder. It runs Volatility's `vol` command from your PATH, or asks where it is (`v/bin/vol` above). The ELF is written next to the image (`kernel-1.elf` if a `kernel.elf` is already there).
 
+### Your own image
+
+- **Formats:** the export runs Volatility 3, which reads raw images, LiME, 64-bit ELF core dumps, VMware `.vmem` (with its `.vmss` or `.vmsn`), QEMU suspend images, Xen core dumps, AVML (with the snappy library) and xz, gzip or bzip2 copies of these ([docs/EXPORT.md](docs/EXPORT.md#when-the-export-fails)).
+- **Tested:** only images of QEMU guests; the second sample's was dumped from the QEMU monitor with `dump-guest-memory /path/to/image.elf`, which writes an ELF core ([tests/vm](tests/vm/testhook/README.md#capture)). The other formats are what Volatility reads, not captures of ours.
+- **ISF:** `python3 tools/find_isf.py <image> --download` reads the kernel's version line from the image and prints the matching ISF's URL from the community index, or how to build one with dwarf2json ([docs/EXPORT.md](docs/EXPORT.md#an-isf-for-your-own-image)).
+- **Export:** in IDA, **MemLens: Export kernel from memory image**, choose the image, then that ISF; open the `kernel.elf` it writes next to the image and go on with step 2 of Try it.
+- Opened the image itself, or a `vmlinux`? **Show patched kernel functions** should then name the next step instead of showing a list (checked with fake IDA modules, not in IDA).
+
 ## Before and after (real output from the demo, not IDA screenshots)
 
 We have no IDA, so there are no IDA screenshots. These excerpts are real output for the demo, from binutils `objdump` and from the plugin's own code run with fake IDA modules.

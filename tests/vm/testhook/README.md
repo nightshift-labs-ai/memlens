@@ -38,4 +38,5 @@ Secure Boot this kernel locks down and refuses unsigned modules.
 
 `../scenario_testhook_d13.sh` runs in the guest (Debian 13 nocloud image 20261103-2651, root password emptied,
 `systemd-firstboot` masked), with `th.img` as a second virtio disk, and the memory is dumped with QEMU's
-`dump-guest-memory`.
+`dump-guest-memory`: the monitor command `dump-guest-memory /path/to/image.elf` (no options), which writes an ELF core
+(`readelf -h`: Type CORE, Machine X86-64).

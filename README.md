@@ -1,10 +1,6 @@
 # MemLens
 
-Reverse engineer a Linux kernel **as it was running**, from a memory image, in IDA. A memory image holds the live kernel: its modules and its patched code. MemLens exports it as `kernel.elf`, an ordinary ELF with the kernel and every loaded module at their real (KASLR) addresses and a full symbol table; with the kernel's Volatility 3 ISF it types it in IDA and lists the kernel functions someone hooked (ftrace, kprobes, BPF trampolines or hook code), with the hook code copied from memory and, when its role is known, its handler and who put the hook there.
-
-## Status: read this first
-
-**MemLens has not yet been run inside real IDA.** It was built without access to an IDA installation. What was verified, and how, is listed in [docs/VERIFICATION.md](docs/VERIFICATION.md): the ELF and the type header are checked with independent tools, including a real disassembler (Ghidra), but that is not IDA. The IDA-specific layer (`memlens_entry.py`) is small and was written against the official IDAPython sources, but it has only been exercised with fake `ida_*` modules; its 54 `ida_*` / `idc` names also exist in the stubs of IDA 9.1 to 9.5 (`tests/check_ida_names.py` on the PyPI `idapro` packages 0.0.5, 0.0.7, 0.0.9, 0.0.11 and 0.0.12). Bug reports are very welcome.
+MemLens opens a Linux kernel **as it was running**, from a memory image, in IDA: every loaded module at its live address, every kernel type, and a list of hooked kernel functions with **who hooked each one** when the memory shows it (an ftrace or module callback, a BPF program or a kprobe). Real output from two public captures is below.
 
 MemLens was built by an AI agent (Claude, operated by Nightshift Labs).
 
@@ -18,6 +14,8 @@ pipx install volatility3==2.28.2
 The plugin index can lag a day or more behind the [GitHub releases](https://github.com/nightshift-labs-ai/memlens/releases); if `hcli plugin status` shows an older version, install a release zip directly: `hcli plugin install https://github.com/nightshift-labs-ai/memlens/archive/refs/tags/v0.3.29.zip`.
 
 Or copy this folder (from the latest release) into your IDA `plugins` directory. You also need an ISF symbol file for the kernel in the image; [dwarf2json](https://github.com/volatilityfoundation/dwarf2json) builds one from the kernel's debug package.
+
+**Status:** tested with fake IDA modules, with its IDA API names checked against the IDAPython stubs of IDA 9.1 to 9.5, but **not yet run in a real IDA**. What was verified, and how: [docs/VERIFICATION.md](docs/VERIFICATION.md). Bug reports are very welcome.
 
 ## Try it
 
@@ -73,13 +71,13 @@ ffffffff8e64e374:	call   ffffffffc0b2b000 <memlens_target_ffffffffc0b2b000>
 ffffffffc0b2b094:	call   ffffffff8e434a40 <function_trace_call>
 ```
 
-The **Show patched kernel functions** list for the same `kernel.elf`, as the plugin code builds it for the demo (run with fake IDA modules by `tests/test_hookchain_stub.py`, not in IDA; columns separated by `|` and aligned here):
+The **Show patched kernel functions** list for the same `kernel.elf`, as the plugin code builds it for the demo (run with fake IDA modules by `tests/test_hookchain_stub.py`, not in IDA). Only the Where, Owner and Handler columns are shown here; the Address, What and Target columns are in the full rows in [docs/OUTPUT.md](docs/OUTPUT.md#what-you-get-real-output-from-the-demo-not-ida-screenshots):
 
 ```
-Address          | Where             | What                          | Target                             | Handler                                   | Owner
-FFFFFFFF8E4F9250 | bpf_lsm_file_open | call to memory with no symbol | bpf_tramp_bpf_lsm_file_open        | __bpf_tramp_enter (BPF trampoline)        | bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems (BPF program)
-FFFFFFFF8E642210 | do_sys_openat2    | call to memory with no symbol | kprobe_ftrace_tramp_do_sys_openat2 | kprobe_ftrace_handler (kprobe via ftrace) | kprobe memlens_kp on do_sys_openat2 (tracefs kprobe event; pre_handler kprobe_dispatcher)
-FFFFFFFF8E64E370 | vfs_getattr       | call to memory with no symbol | ftrace_tramp_vfs_getattr           | function_trace_call (ftrace)              | function_trace_call (ftrace_ops global_ops)
+Where             | Owner                                                                                     | Handler
+bpf_lsm_file_open | bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems (BPF program)                          | __bpf_tramp_enter (BPF trampoline)
+do_sys_openat2    | kprobe memlens_kp on do_sys_openat2 (tracefs kprobe event; pre_handler kprobe_dispatcher) | kprobe_ftrace_handler (kprobe via ftrace)
+vfs_getattr       | function_trace_call (ftrace_ops global_ops)                                               | function_trace_call (ftrace)
 ```
 
 The rest of the demo output (the patch scan, the hook chain's cross-references, owners and renames, the type header and the typed globals): [docs/OUTPUT.md](docs/OUTPUT.md#what-you-get-real-output-from-the-demo-not-ida-screenshots).

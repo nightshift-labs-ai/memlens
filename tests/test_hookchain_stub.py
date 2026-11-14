@@ -330,12 +330,14 @@ def flags_blob(flags, kprobe_flags=0x1845, symbols=symbols):
 with tempfile.TemporaryDirectory() as work:
     path = os.path.join(work, "kernel.elf")
     nalt.get_input_file_path = lambda: path
-    def flags_run(flags, layout, types=("ftrace_ops",), kprobe_flags=0x1845):
-        """A fresh database of the ELF with these flags, the layout and the types given; returns (settype calls, out)."""
+    def flags_run(flags, layout, types=("ftrace_ops",), kprobe_flags=0x1845, fresh=True):
+        """A fresh database (fresh=False: the same one) of the ELF with these flags, the layout and the types given;
+        returns (settype calls, out)."""
         blob = flags_blob(flags, kprobe_flags)
         with open(path, "wb") as handle:
             handle.write(blob)
-        database(blob)
+        if fresh:
+            database(blob)
         known_types.clear(); known_types.update(types)
         if layout is not None:
             m.save_layout(layout)
@@ -378,6 +380,15 @@ with tempfile.TemporaryDirectory() as work:
     flags_run(0x10000001007, old)
     text = "MemLens: ftrace_ops flags 0x10000001007 = ENABLED|DYNAMIC|CONTROL|ALLOC_TRAMP|0x10000000000; " + NO_IPMODIFY
     assert flag_lines() == {PAGE: [text], OPS: [text]}, flag_lines()
+    # Then, on the same database, Apply kernel types with the right ISF and the list again (review s193 MINOR): the flags
+    # line the other ISF decoded is replaced, not kept next to the new one; the other lines stay; a third run changes nothing.
+    settype, out = flags_run(0x10000001007, layout, fresh=False)
+    text = "MemLens: ftrace_ops flags 0x10000001007 = ENABLED|DYNAMIC|SAVE_REGS|IPMODIFY|0x10000000000; " + IPMODIFY_TEXT
+    assert flag_lines() == {PAGE: [text], OPS: [text]} and settype == [], (flag_lines(), settype)
+    assert comments[OPS] == text and comments[PAGE].split("\n")[0].startswith("MemLens: hook page no module owns"), comments
+    before = dict(comments)
+    run()
+    assert not [c for c in calls if c[0] in ("settype", "cmt")] and comments == before, calls
     # struct ftrace_ops not in the database (types not imported): the flags are decoded, nothing is typed.
     settype, out = flags_run(0x101007, layout, types=())
     assert settype == [] and len(flag_lines()) == 2 and "typed as struct ftrace_ops" not in out, (settype, out)

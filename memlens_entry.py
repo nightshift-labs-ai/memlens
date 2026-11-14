@@ -959,6 +959,17 @@ def add_comment(address, text):
     idc.set_cmt(address, "\n".join(lines + [text]), False)
 
 
+def set_flags_comment(address, text):
+    """add_comment for an ftrace_ops flags line, after dropping any other flags line at address: one an earlier ISF
+    decoded differently (a wrong ISF applied first, then the right one) must not stay next to it (review s193)."""
+    old = idc.get_cmt(address, False) or ""
+    lines = old.split("\n")
+    kept = [line for line in lines if not (line.startswith(patchscan.OPS_FLAGS_PREFIX) and line != text)]
+    if kept != lines:
+        idc.set_cmt(address, "\n".join(kept), False)
+    add_comment(address, text)
+
+
 HOOK_RECORD = "$ memlens.hooks"  # netnode: what MemLens linked and renamed, so running it again adds nothing twice
 HOOK_RECORD_TAG = "B"
 LAYOUT_RECORD = "$ memlens.layout"  # netnode: struct offsets from the ISF that Apply kernel types imported
@@ -1074,7 +1085,7 @@ def link_hooks(image, findings):
             counts["type_failed"] += 1
     flags = patchscan.ops_flags_comments(image, links, layout.get("ftrace_ops.flags"), layout.get("FTRACE_OPS_FL"))
     for address, text in sorted(flags.items()):
-        add_comment(address, text)
+        set_flags_comment(address, text)
     node.setblob(json.dumps(record).encode("utf-8"), 0, HOOK_RECORD_TAG)
     return links, counts
 

@@ -503,6 +503,7 @@ def ftrace_ops_func_offset(isf):
 # function). It is a declaration: the x86 trampolines of both samples copy regs->ip back after every callback.
 FTRACE_OPS_FL = "FTRACE_OPS_FL_"
 IPMODIFY = FTRACE_OPS_FL + "IPMODIFY"
+OPS_FLAGS_PREFIX = "MemLens: ftrace_ops flags "  # how every ops_flags_text line starts
 
 
 def ftrace_ops_flag_values(isf):
@@ -541,7 +542,7 @@ def ops_flags_text(flags, values):
     else:
         meaning = ("no IPMODIFY: the callback did not declare that it may change where the hooked function continues (a "
                    "declaration, not a guarantee: read the callback to be sure)")
-    return "MemLens: ftrace_ops flags %#x = %s; %s" % (flags, "|".join(names) or "none", meaning)
+    return OPS_FLAGS_PREFIX + "%#x = %s; %s" % (flags, "|".join(names) or "none", meaning)
 
 
 def ftrace_ops_pages(image, links):

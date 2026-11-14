@@ -389,6 +389,15 @@ with tempfile.TemporaryDirectory() as work:
     before = dict(comments)
     run()
     assert not [c for c in calls if c[0] in ("settype", "cmt")] and comments == before, calls
+    # A note the analyst added to that line stays on a rerun, as add_comment keeps it (review s194 NIT); a flags line
+    # another ISF decoded that has the same start is still replaced.
+    comments[OPS] = text + "  (analyst: checked, it only counts)"
+    before = dict(comments)
+    run()
+    assert not [c for c in calls if c[0] == "cmt"] and comments == before, calls
+    comments[OPS] = "MemLens: ftrace_ops flags 0x10000001007 = ENABLED|DYNAMIC|CONTROL|ALLOC_TRAMP|0x10000000000; " + NO_IPMODIFY
+    run()
+    assert comments[OPS] == text, comments[OPS]
     # ENABLED not set (review s193 NIT): an ops behind a live trampoline always has it, so the read is stale or the ISF is
     # another kernel's, and nothing is said, IPMODIFY or not (the ops is still typed). An ISF that does not name ENABLED
     # cannot tell: the flags are decoded.
@@ -433,6 +442,16 @@ with tempfile.TemporaryDirectory() as work:
     image.kprobes = {BASE + 0x104: [{"addr": BASE + 0x104, "pre_handler": THUNK, "post_handler": 0, "offset": 0, "symbol": "do_sys_openat2",
                                      "event": None, "tracefs": None, "flags": 0, "ret_handler": None, "ret_entry": None}]}
     assert ps.ftrace_ops_pages(image, links) == {PAGE: OPS} and ps.module_ops(image, links) == [OPS], ps.ftrace_ops_pages(image, links)
+    # A probe recorded at the module's site that is disabled (2: a tracefs event defined but not enabled) or gone (1) is
+    # disarmed: the kprobe layer's ops is off that site, so the page there is not a kprobe's and keeps its flags comment
+    # and its type (review s194). An enabled probe there (0) makes it a kprobe's page.
+    for off, pages in ((1, {PAGE: OPS}), (2, {PAGE: OPS}), (3, {PAGE: OPS}), (0, {})):
+        image.kprobes[BASE + 4] = [dict(image.kprobes[BASE + 0x104][0], addr=BASE + 4, symbol="__x64_sys_kill", flags=off)]
+        assert ps.ftrace_ops_pages(image, links) == pages, (off, ps.ftrace_ops_pages(image, links))
+        assert ps.module_ops(image, links) == sorted(pages.values()), (off, ps.module_ops(image, links))
+    # Two records at one site (an aggregate probe): one enabled is enough.
+    image.kprobes[BASE + 4] = [dict(image.kprobes[BASE + 4][0], flags=2), dict(image.kprobes[BASE + 4][0], flags=0)]
+    assert ps.ftrace_ops_pages(image, links) == {}, ps.ftrace_ops_pages(image, links)
     trampoline(KPAGE, KPROBE_H, KOPS)
     nalt.get_input_file_path = lambda: ""
 known_types.clear()

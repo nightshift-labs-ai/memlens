@@ -552,11 +552,14 @@ def ftrace_ops_pages(image, links):
     """{page: ftrace_ops address} for the copied ftrace trampolines among the links whose Owner comes from the ops they
     load (Owner.how 'ftrace_ops') and whose ops is in the ELF. kprobe pages are left out, also when their Owner is the
     kprobe layer's ops (exports without the kprobe list): a kprobe's pre_handler can change regs->ip, and no flag says so.
-    A page is a kprobe's when it calls kprobe_ftrace_handler, when the export's kprobe list has a probe at the patched
-    instruction, or when its ops' func is kprobe_ftrace_handler (review s193)."""
+    A page is a kprobe's when it calls kprobe_ftrace_handler, when the export's kprobe list has an enabled probe at the
+    patched instruction (review s194: not a disabled or gone one), or when its ops' func is kprobe_ftrace_handler
+    (review s193)."""
     # Before 5.11, kprobe_ftrace_ops and kprobe_ipmodify_ops have no RECURSION_SAFE, so their trampoline calls
     # ftrace_ops_assist_func (kind "ftrace"), which calls ops->func = kprobe_ftrace_handler.
-    kprobe_pages = {link.target for link in links if link.page and (link.kind == KPROBE_KIND or image.kprobes.get(link.site))}
+    # A disabled or gone probe is disarmed (kprobe_ftrace_ops is taken off its site), so only an enabled one counts.
+    kprobe_pages = {link.target for link in links if link.page and (link.kind == KPROBE_KIND or any(
+        not (record.get("flags") or 0) & KPROBE_OFF for record in image.kprobes.get(link.site) or ()))}
     pages = {}
     for page, owner in sorted(page_owners(links).items()):
         if owner.how != "ftrace_ops" or page in kprobe_pages or (

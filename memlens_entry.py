@@ -961,10 +961,11 @@ def add_comment(address, text):
 
 def set_flags_comment(address, text):
     """add_comment for an ftrace_ops flags line, after dropping any other flags line at address: one an earlier ISF
-    decoded differently (a wrong ISF applied first, then the right one) must not stay next to it (review s193)."""
+    decoded differently (a wrong ISF applied first, then the right one) must not stay next to it (review s193). Our
+    line with a note the analyst added after it stays, as add_comment keeps it (review s194)."""
     old = idc.get_cmt(address, False) or ""
     lines = old.split("\n")
-    kept = [line for line in lines if not (line.startswith(patchscan.OPS_FLAGS_PREFIX) and line != text)]
+    kept = [line for line in lines if not (line.startswith(patchscan.OPS_FLAGS_PREFIX) and text not in line)]
     if kept != lines:
         idc.set_cmt(address, "\n".join(kept), False)
     add_comment(address, text)

@@ -97,7 +97,7 @@ FFFFFFFFB0C65950 | __x64_sys_getdents64 | kprobe_ftrace_tramp___x64_sys_getdents
 
 The What column (`call to memory with no symbol` in all three rows) is left out here. **Jump to owner** leads to the module's callback. Both owner addresses (`0xffffffffc0cc6010`, `0xffffffffc0cc6040`) match the guest's `/proc/kallsyms` at capture time; see [tests/vm/testhook/hook-truth-guest.txt](tests/vm/testhook/hook-truth-guest.txt).
 
-To try it, download `memlens-demo-testhook.zip` (21 MB) from the same [demo-data release](https://github.com/nightshift-labs-ai/memlens/releases/tag/demo-data) and follow steps 1-3 of Try it; it holds the `kernel.elf`, the same ISF and the expected output. The memory image itself, `testhook.elf.xz` (91 MB), is in the [Volatility samples release](https://github.com/nightshift-labs-ai/volatility-2026-samples/releases/tag/samples), so you can also export it yourself.
+To try it, download `memlens-demo-testhook.zip` (21 MB) from the same [demo-data release](https://github.com/nightshift-labs-ai/memlens/releases/tag/demo-data) and follow steps 1-3 of Try it; it holds the `kernel.elf`, the same ISF and the expected output. The memory image itself, `testhook.elf.xz` (91 MB), is in the [Volatility samples release](https://github.com/nightshift-labs-ai/volatility-2026-samples/releases/tag/samples), so you can also export it yourself. The hooked entry, the trampoline and the module's code at its live address, in `objdump`: [docs/OUTPUT.md](docs/OUTPUT.md#the-second-sample-in-full-a-hook-set-by-a-module).
 
 ## What it does
 

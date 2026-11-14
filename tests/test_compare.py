@@ -7,10 +7,12 @@
 
 Every Volatility cell must be what the recorded plugin printed for that hook, every Volatility row must be used once, the
 "Named" row must be the count of the cells above it, and the section's other numbers and plugin names must match the
-recordings. With a sample's kernel.elf, every MemLens cell must be what `patchscan.py --links` prints for it, a `-` in
+recordings, and each row's hook kind must fit Volatility's callback (kprobe: kprobe_ftrace_handler, BPF: call_direct_funcs,
+both ways). With a sample's kernel.elf, every MemLens cell must be what `patchscan.py --links` prints for it, a `-` in
 Volatility's hooked-function column must be exactly a hook site after the function's start, and the ftrace_ops address
 Volatility prints must be the ops MemLens reads from that hook's trampoline. The hidden-module rows of docs/LIMITS.md are
-checked against the recorded owner lines too. Then each cell is changed in turn, and every change must fail the check.
+checked against the recorded owner lines too. Then each hook label (kind, who set it, capture), each code span (the
+MemLens ones with the samples given) and each Named number is changed in turn, and every change must fail the check.
 No IDA, no Volatility, no network.
 """
 import os
@@ -27,6 +29,10 @@ SAMPLES = (("MEMLENS_DEMO_ELF", "demo"), ("MEMLENS_TESTHOOK_ELF", "th"))
 # callbacks every hook of a kind shares (the kprobe layer's, the direct-call one, none): not the hook's own owner
 SHARED = {"-", "kprobe_ftrace_handler", "call_direct_funcs"}
 FORBIDDEN = re.compile(r"\bonly\b|\bunique\b|no other tool", re.I)
+# changes of a hook label (first column) for the mutants: its kind, who set the hook, its capture
+LABEL_SWAPS = (("ftrace, ", "kprobe, "), ("kprobe, ", "ftrace, "), ("ftrace, test module", "BPF LSM program"),
+               ("kprobe, tracefs", "BPF LSM program"), ("BPF LSM program", "ftrace, tracefs"), ("test module", "tracefs"),
+               ("tracefs", "test module"), ("(demo)", "(second sample)"), ("(second sample)", "(demo)"))
 
 
 def read(*parts):
@@ -130,13 +136,16 @@ def check(readme, limits, output_md, links):
             totals = cells
             continue
         capture = re.search(r"\((%s)\)$" % "|".join(CAPTURES), cells[0])
+        label = re.fullmatch(r"(?:(ftrace|kprobe), (test module|tracefs)|BPF LSM program) \((?:%s)\)" % "|".join(CAPTURES), cells[0])
         vol = cells[1].split(" / ", 1)
         mine = cells[2].split(" / ", 1)
         owner = re.fullmatch(r"`([^`]+)`(?:, Module `([^`]+)`)?", vol[1]) if len(vol) == 2 else None
-        if not capture or len(vol) != 2 or len(mine) != 2 or not owner or None in (code(vol[0]), code(mine[0]), code(mine[1])):
+        if not capture or not label or len(vol) != 2 or len(mine) != 2 or not owner \
+                or None in (code(vol[0]), code(mine[0]), code(mine[1])):
             errors.append("cannot read table row %r" % cells)
             continue
-        rows.append({"kind": cells[0], "tag": CAPTURES[capture.group(1)], "hooked": code(vol[0]),
+        rows.append({"kind": cells[0], "hook": label.group(1) or "BPF", "setter": label.group(2),
+                     "tag": CAPTURES[capture.group(1)], "hooked": code(vol[0]),
                      "callback": owner.group(1), "module": owner.group(2) or "__kernel__",
                      "where": code(mine[0]), "owner": code(mine[1])})
     sites = re.search(r"For the (\d+) hook sites", text)
@@ -166,8 +175,13 @@ def check(readme, limits, output_md, links):
                 errors.append("%s: linux.ebpf did not list restrict_filesy as BPF_PROG_TYPE_LSM" % row["kind"])
             if any("attach" in column.lower() for column in columns):
                 errors.append("%s: linux.ebpf has an attach column %r" % (row["kind"], columns))
-        if row["kind"].startswith("kprobe") and row["callback"] != "kprobe_ftrace_handler":
-            errors.append("%s: a kprobe row whose Volatility owner is not kprobe_ftrace_handler" % row["kind"])
+        # both ways, so a relabelled kind fails too: kprobe <=> kprobe_ftrace_handler, BPF <=> call_direct_funcs
+        for hook, callback in (("kprobe", "kprobe_ftrace_handler"), ("BPF", "call_direct_funcs")):
+            if (row["hook"] == hook) != (row["callback"] == callback):
+                errors.append("%s: the hook kind does not match Volatility's callback %s" % (row["kind"], row["callback"]))
+        # the test module is loaded in the second sample, the demo's hooks were set through tracefs
+        if row["setter"] and (row["setter"] == "test module") != (row["tag"] == "th"):
+            errors.append("%s: the test module's hooks are in the second sample, the tracefs ones in the demo" % row["kind"])
     for tag in used:
         if sorted(used[tag]) != sorted(r["ftrace_ops address"] for r in ftrace[tag]):
             errors.append("%s: the README uses Volatility's ftrace rows %s, it printed %s"
@@ -226,6 +240,8 @@ def check(readme, limits, output_md, links):
                 continue
             if not entry["owner"] or not (entry["owner"] == row["owner"] or entry["owner"].startswith(row["owner"] + " (")):
                 errors.append("%s: MemLens's owner is %r, the README says %r" % (row["kind"], entry["owner"], row["owner"]))
+            if row["setter"] and entry["owner"] and (row["setter"] == "test module") != entry["owner"].startswith("memlens_testhook."):
+                errors.append("%s: MemLens's owner is %r" % (row["kind"], entry["owner"]))
             if (row["hooked"] == "-") != bool(entry["offset"]):
                 errors.append("%s: the hook site is %s+%s, but Volatility's cell is %r"
                               % (row["kind"], row["where"], entry["offset"], row["hooked"]))
@@ -240,14 +256,17 @@ def check(readme, limits, output_md, links):
 
 
 def mutants(readme, sampled):
-    """README texts with one table cell changed: each code span (MemLens cells only for the samples given) and each
-    number of the Named row."""
+    """README texts with one table cell changed: each hook label's kind, setter and capture, each code span (MemLens
+    cells only for the samples given) and each number of the Named row."""
     text = section(readme)
     out = []
     for line in [l for l in text.splitlines() if l.startswith("|")][2:]:
         cells = line.strip().strip("|").split("|")
         capture = re.search(r"\((%s)\)\s*$" % "|".join(CAPTURES), cells[0])
         named = cells[0].strip() == "**Named**"
+        for old, changed in LABEL_SWAPS if not named else ():
+            if old in cells[0]:
+                out.append(readme.replace(line, "|" + "|".join([cells[0].replace(old, changed, 1)] + cells[1:]) + "|", 1))
         for index in (1, 2):
             if index == 2 and not named and not (capture and CAPTURES[capture.group(1)] in sampled):
                 continue

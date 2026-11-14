@@ -1,0 +1,3 @@
+owner	0xffffffffc01a0940	0xffffffffc01a0668	bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems (BPF program)
+owner	0xffffffffc0cd0000	-	ftrace_ops at 0xffffffffc0cc80a0 (no symbol: module memory MemLens did not export)
+owner	0xffffffffc0cd2000	-	kprobe pre_handler at 0xffffffffc0cc6040 (no symbol)

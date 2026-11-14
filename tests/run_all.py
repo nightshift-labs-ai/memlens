@@ -66,7 +66,7 @@ def main(argv):
         runs.append(("check_ida_api.py", ["check_ida_api.py", folders["--ida-sdk"]]))
     if "--ida-stubs" in folders:
         runs.append(("check_ida_names.py", ["check_ida_names.py", folders["--ida-stubs"]]))
-    env = dict(os.environ, MEMLENS_DEMO_ELF=demo)
+    env = dict(os.environ, MEMLENS_DEMO_ELF=demo, MEMLENS_TESTHOOK_ELF=testhook)  # absolute: the tests run from the repository
     if demo and not env.get("MEMLENS_ISF"):  # the demo zip's ISF next to kernel.elf (test_export_failure_stub uses it)
         env["MEMLENS_ISF"] = (sorted(glob.glob(os.path.join(os.path.dirname(demo), "*.json.xz"))) or [""])[0]
     rows, failed = [], []

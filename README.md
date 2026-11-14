@@ -111,6 +111,28 @@ __x64_sys_getdents64 | memlens_testhook.th_getdents_pre (kprobe pre_handler)    
 
 To try it, download `memlens-demo-testhook.zip` (21 MB) from the same [demo-data release](https://github.com/nightshift-labs-ai/memlens/releases/tag/demo-data), follow steps 1-3 of Try it and compare with its `expected-hook-chain.txt`; it holds the `kernel.elf`, the same ISF and the module source. The memory image itself, `testhook.elf.xz` (91 MB), is in the [Volatility samples release](https://github.com/nightshift-labs-ai/volatility-2026-samples/releases/tag/samples), so you can also export it yourself. The hooked entry, the trampoline and the module's code at its live address, in `objdump`: [docs/OUTPUT.md](docs/OUTPUT.md#the-second-sample-in-full-a-hook-set-by-a-module).
 
+## What Volatility already tells you
+
+Volatility 3 already lists ftrace callbacks (`linux.tracing.ftrace`), and MemLens uses Volatility for its export. For the 6 hook sites in the two public captures, stock Volatility 2.28.2 (cells as printed) and the MemLens list (Owner text before its parenthesis) name:
+
+| Hook (capture) | Volatility 2.28.2: hooked function / owner | MemLens: hooked function / owner |
+|---|---|---|
+| ftrace, test module (second sample) | `-` / `-`, Module `memlens_testhook` | `__x64_sys_kill` / `memlens_testhook.th_kill_callback` |
+| kprobe, test module (second sample) | `-` / `kprobe_ftrace_handler` | `__x64_sys_getdents64` / `memlens_testhook.th_getdents_pre` |
+| BPF LSM program (second sample) | `-` / `call_direct_funcs` | `bpf_lsm_file_open` / `bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems` |
+| BPF LSM program (demo) | `-` / `call_direct_funcs` | `bpf_lsm_file_open` / `bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems` |
+| kprobe, tracefs (demo) | `do_sys_openat2` / `kprobe_ftrace_handler` | `do_sys_openat2` / `kprobe memlens_kp on do_sys_openat2` |
+| ftrace, tracefs (demo) | `-` / `function_trace_call` | `vfs_getattr` / `function_trace_call` |
+| **Named** | hooked function 1 of 6, owner 1 of 6 (and 1 module name) | hooked function 6 of 6, owner 6 of 6 |
+
+- **Why `-`:** 5 of the 6 sites are at function+0x4, after `endbr64`, and the plugin looks up exact symbol addresses (`do_sys_openat2` has no `endbr64`). A later Volatility could name them.
+- **The other gaps:** Volatility 2.28.2 has no kprobe plugin, so a probe's own handler is not shown, just the shared `kprobe_ftrace_handler`; `linux.ebpf` lists the program (`restrict_filesy`, `BPF_PROG_TYPE_LSM`) but not where it is attached (`call_direct_funcs` is the kernel's callback for all direct calls); the module's callback is shown by address, with no symbol.
+- **Independent of the kernel's lists** (simulated on a copy of the second sample's image): with the module's `ftrace_ops` unlinked from `ftrace_ops_list` (one pointer edited), `linux.tracing.ftrace` printed 2 rows instead of 3, without the module's, and MemLens still named `memlens_testhook.th_kill_callback`, from the ops pointer in the trampoline's code.
+- **Where Volatility does more:** it checks hook kinds MemLens does not scan (tracepoint probes, the IDT, keyboard notifiers, afinfo and tty ops, netfilter hooks), lists every BPF program with its type (MemLens lists a program when a trampoline runs it), and finds modules hidden from the module list (`linux.hidden_modules`, `linux.malware.modxview`), which MemLens does not export ([Limits](#limits)). `--show-ftrace-flags` decodes the `ftrace_ops` flags, the same set MemLens comments after Apply kernel types. Use both.
+- **In IDA,** the list should be the way into the code: hooked entry, hook page, then the owner at its live address (not checked in IDA). `patchscan.py --links` prints the same answer without IDA.
+
+Commands and recorded outputs: [tests/fixtures/vol-2.28.2/compare](tests/fixtures/vol-2.28.2/compare/README.txt); `tests/test_compare.py` checks this table against them and against MemLens's output on both samples.
+
 ## What it does
 
 ```mermaid
@@ -170,7 +192,7 @@ All limits, with measurements: [docs/LIMITS.md](docs/LIMITS.md).
 - When the export fails: [docs/EXPORT.md](docs/EXPORT.md#when-the-export-fails)
 - An ISF for your own image: [docs/EXPORT.md](docs/EXPORT.md#an-isf-for-your-own-image)
 - What was verified (Ghidra, binutils, gcc, the tests): [docs/VERIFICATION.md](docs/VERIFICATION.md)
-- Run every test: `python3 tests/run_all.py` (no IDA, no packages; with `MEMLENS_DEMO_ELF=kernel.elf` it also checks the demo export: 16 passed on the demo `kernel.elf`)
+- Run every test: `python3 tests/run_all.py` (no IDA, no packages; with `MEMLENS_DEMO_ELF=kernel.elf` it also checks the demo export: 17 passed on the demo `kernel.elf`)
 - Limits in full: [docs/LIMITS.md](docs/LIMITS.md)
 - The exporter on its own, as a Volatility 3 plugin: [docs/README-kernel2elf.md](docs/README-kernel2elf.md), [docs/WRITEUP-kernel2elf.md](docs/WRITEUP-kernel2elf.md)
 

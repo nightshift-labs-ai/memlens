@@ -10,21 +10,26 @@ Always:
   link or event attribute (GitHub sanitises SVG). Panel i is sample i (top: testhook, bottom: demo), checked against the
   stdout lines of docs/img/expected-hook-chain.testhook.txt and .demo.txt (copies of the two demo zips'
   expected-hook-chain.txt): every text node is a piece of one field of that output, each bold text a piece of an
-  'owner' line, and lane by lane (problems, lane_problems): its site, first edge and page label are an xref line of
-  that type; its page name is that page's rename; its handler and kind are the entry line's '(calls H, kind)' and the
-  edge to it that xref's type; its owner lines joined are that page's owner line (the name in bold) and the down edge a
-  piece of it; every --links link is one lane. Each text sits in one box of its role, each arrow goes from the right box
-  to the right box with its head at its end and its label beside it. Mutants fail: an owner renamed, truncated or moved
-  to another lane, a handler, kind, page name or site swapped between lanes, an edge label changed, a hand-typed label,
-  a line kind ('owner') or two fields as a label, a text outside the panels, a site made bold, an owner box removed, an
-  arrowhead reversed, the panels swapped, a panel too many.
+  'owner' line. The only exceptions are the tool's own words, exactly these strings in their places (HEADING, LEGEND):
+  panel i's heading at its top, outside the lanes, and the colour legend line above the panels, each colour square in
+  the colours of its role's boxes (COLOURS, which every box of that role has). Lane by lane (problems, lane_problems):
+  its site, first edge and page label are an xref line of that type; its page name is that page's rename; its handler
+  and kind are the entry line's '(calls H, kind)' and the edge to it that xref's type; its owner lines joined are that
+  page's owner line (the name in bold) and the down edge a piece of it; every --links link is one lane. Each text sits
+  in one box of its role, each arrow goes from the right box to the right box with its head at its end and its label
+  beside it. Mutants fail: an owner renamed, truncated or moved to another lane, a handler, kind, page name or site
+  swapped between lanes, an edge label changed, a hand-typed label, a line kind ('owner') or two fields as a label, a
+  text outside the panels, a site made bold, an owner box removed, an arrowhead reversed, the panels swapped, a panel
+  too many, a heading reworded, swapped, dropped, doubled or replaced by a --links word, the legend reworded,
+  reordered, recoloured, extended or dropped, a box recoloured.
 - docs/img/hookchain.png is the SVG rasterised at device scale SCALE (its size the SVG's times SCALE) and under 300 KB.
 - docs/img/README.md has the README snippet with the caption, the image paths (which exist), and a Where | Handler |
   Owner table that is the top panel's lanes, row by row, from the testhook --links text.
 - A hand-made kernel.elf (ftrace, module callback and unknown-role pages): the tool's SVG for it passes the same check
   against a fresh `patchscan.py --links` of it, the CLI and the function give the same bytes, and the exit codes.
 With a demo kernel.elf (its sha256 is DEMO_SHA or TESTHOOK_SHA): `patchscan.py --links` on it must print its sample's
-expected stdout lines (else the picture is stale: FAIL), and the tool's SVG for it alone passes the check; with both,
+expected stdout lines (else the picture is stale: FAIL), and the tool's SVG for it alone (under its heading) passes the
+check; with both,
 the tool gives docs/img/hookchain.svg byte for byte, twice (and through the CLI). A kernel.elf with another sha256 (your
 own export) is checked against its own --links output only (SKIP for the picture).
 """
@@ -65,6 +70,18 @@ FAMILY = {"site": "site", "page": "page", "page-label": "page", "handler": "hand
           "owner": "owner"}  # text class -> the box it belongs in
 EDGES = {("site", "page"): "flow", ("page", "handler"): "hflow", ("page", "owner"): "how"}  # arrow (from box, to box)
 TOUCH, NEAR = 2, 12  # px: an arrow starts and ends this close to its boxes; its label's anchor this close to its line
+# The tool's own words, the only texts in the picture that are not pieces of the --links output, typed here again so that
+# a word changed in tools/hookgraph.py fails: the heading of each demo sample's panel (no other kernel.elf gets one) and
+# the colour legend, whose colour words name the colours the boxes of each role are drawn in.
+HEADING = {"testhook": "Second sample: test module hooks", "demo": "Demo: Debian 13 6.12 memory image"}
+LEGEND = (("site", "white = hooked function"), ("page", "orange = hook page MemLens named"),
+          ("handler", "blue = handler"), ("owner", "purple = owner"))
+COLOURS = {"site": ("#ffffff", "#8c959f"),  # (fill, stroke): white, grey border
+           "page": ("#fff1e5", "#e16f24"),  # orange
+           "handler": ("#ddf4ff", "#218bff"),  # blue
+           "owner": ("#fbefff", "#8250df")}  # purple
+assert hookgraph.HEADINGS == {TESTHOOK_SHA: HEADING["testhook"], DEMO_SHA: HEADING["demo"]}, hookgraph.HEADINGS
+assert tuple(hookgraph.LEGEND) == LEGEND and hookgraph.STYLE == COLOURS, (hookgraph.LEGEND, hookgraph.STYLE)
 
 
 def read(path, mode="r"):
@@ -157,7 +174,7 @@ def tag_of(element):
 def lane_parts(lane):
     """(boxes, edges, found) for a lane: boxes {role: [(class, text, bold)]} from the texts in each box, edges {(from
     role, to role): label} from each line + arrowhead + label, and what is wrong with the drawing itself."""
-    found, rects, texts, arrows = [], [], [], []
+    found, rects, elements, texts, arrows = [], [], [], [], []
     children, index = list(lane), 0
     while index < len(children):
         child, tag = children[index], tag_of(children[index])
@@ -167,6 +184,7 @@ def lane_parts(lane):
                 found.append("a box without its size")
             else:
                 rects.append(rect)
+                elements.append(child)
         elif tag == "text" and child.get("class") in FAMILY:
             texts.append(child)
         elif tag == "line":
@@ -191,7 +209,7 @@ def lane_parts(lane):
         roles[holders[0]].add(FAMILY[text.get("class")])
         lines[holders[0]].append((text.get("class"), text.text, text.get("font-weight") == "bold"))
     boxes, role_of = {}, []
-    for role, box in zip(roles, lines):
+    for role, box, element in zip(roles, lines, elements):
         if len(role) != 1:
             found.append("a box with %s lines" % (" and ".join(sorted(role)) or "no"))
             role_of.append(None)
@@ -199,6 +217,9 @@ def lane_parts(lane):
         role = role.pop()
         if role in boxes:
             found.append("two %s boxes" % role)
+        if (element.get("fill"), element.get("stroke")) != COLOURS[role]:
+            found.append("a %s box in %s/%s, not its colours %s/%s" % (
+                (role, element.get("fill"), element.get("stroke")) + COLOURS[role]))
         boxes[role] = box
         role_of.append(role)
     edges = {}
@@ -287,22 +308,68 @@ def lane_problems(lane, parsed):
     return found, (site, target)
 
 
-def problems(svg_text, expected):
-    """What is wrong with an SVG drawn from len(expected) kernel.elf files, panel i from the --links output expected[i]:
-    [] when every text node in panel i is a substring of expected[i], and of one of its fields (fields), each bold text a
-    piece of one of its owner lines, every lane passes lane_problems, its lanes are the links of expected[i], no text is
-    outside a lane, and there are as many panels as texts."""
-    root = ET.fromstring(svg_text)
+def legend_problems(root):
+    """(what is wrong with the legend, its texts): one <g class="legend"> at the top level, before and above the panels,
+    holding for each LEGEND entry, in order, a colour square in its role's COLOURS and then its words beside it."""
+    children = list(root)
+    groups = [g for g in root.iter(NS + "g") if g.get("class") == "legend"]
+    if len(groups) != 1 or groups[0] not in children:
+        return ["%d legend lines at the top level, not one" % sum(1 for g in groups if g in children)], set()
+    items = list(groups[0])
+    pairs = list(zip(items[0::2], items[1::2]))
+    if len(items) != 2 * len(LEGEND) or any(tag_of(square) != "rect" or tag_of(words) != "text" or words.get("class") != "legend"
+                                            for square, words in pairs):
+        return ["the legend is not a colour square and its words for each of the %d roles" % len(LEGEND)], set()
     found = []
+    panels = [child for child in children if tag_of(child) == "g" and child.get("class") == "panel"]
+    first = numbers(panels[0][0], "y") if panels and len(panels[0]) and tag_of(panels[0][0]) == "rect" else None
+    if panels and (children.index(groups[0]) > children.index(panels[0]) or first is None):
+        found.append("the legend is not before the panels")
+    for (square, words), (role, want) in zip(pairs, LEGEND):
+        box, at = numbers(square, "x", "y", "width", "height"), numbers(words, "x", "y")
+        if words.text != want:
+            found.append("legend %r, not %r" % (words.text, want))
+        if (square.get("fill"), square.get("stroke")) != COLOURS[role]:
+            found.append("legend %r: its square is %s/%s, the %s boxes %s/%s" % (
+                (words.text, square.get("fill"), square.get("stroke"), role) + COLOURS[role]))
+        if box is None or at is None or not (box[0] + box[2] <= at[0] <= box[0] + box[2] + NEAR
+                                             and box[1] <= at[1] <= box[1] + box[3]):
+            found.append("legend %r is not beside its square" % words.text)
+        elif first and first[0] is not None and box[1] + box[3] > first[0]:
+            found.append("legend %r is not above the panels" % words.text)
+    return found, {words for _, words in pairs}
+
+
+def problems(svg_text, expected, headings=None):
+    """What is wrong with an SVG drawn from len(expected) kernel.elf files, panel i from the --links output expected[i]
+    under the heading headings[i] (None: no heading): [] when every text node in panel i is a substring of expected[i],
+    and of one of its fields (fields), each bold text a piece of one of its owner lines, every lane passes
+    lane_problems, its lanes are the links of expected[i], no text is outside a lane, and there are as many panels as
+    texts; the only exceptions, the tool's own words: panel i's heading, at its top and outside its lanes, and the
+    legend line (legend_problems)."""
+    root = ET.fromstring(svg_text)
+    found, inside = legend_problems(root)
+    headings = list(headings) if headings else [None] * len(expected)
     panels = [g for g in root.iter(NS + "g") if g.get("class") == "panel"]
     if len(panels) != len(expected):
         found.append("%d panels for %d samples" % (len(panels), len(expected)))
-    inside = set()
-    for number, (panel, text) in enumerate(zip(panels, expected), 1):
+    for number, (panel, text, heading) in enumerate(zip(panels, expected, headings), 1):
         owners, pieces, parsed = owner_texts(text), fields(text), parse(text)
         lanes = [g for g in panel.iter(NS + "g") if g.get("class") == "lane"]
         in_lanes = {node for lane in lanes for node in lane.iter()}
+        titles = [element for element in panel.iter() if element.get("class") == "heading"]
+        if [title.text for title in titles] != ([heading] if heading else []):
+            found.append("panel %d: headings %r, not %r" % (number, [title.text for title in titles], heading))
+        lane_tops = [numbers(rect, "y")[0] for lane in lanes for rect in lane if tag_of(rect) == "rect" and numbers(rect, "y")]
+        for title in titles:
+            at = numbers(title, "y")
+            if title.text == heading and title in list(panel) and at and lane_tops and at[0] < min(lane_tops):
+                inside.add(title)  # the tool's own words, in their place
+            else:
+                found.append("panel %d: heading %r is not %r at the top of the panel, outside its lanes" % (number, title.text, heading))
         for element in panel.iter():
+            if element in inside:
+                continue
             if element.text and element.text.strip():
                 inside.add(element)
                 if element not in in_lanes:
@@ -381,9 +448,10 @@ def table_rows(text):
 
 # 1. The committed picture against the committed --links texts.
 texts = [read(path) for _, path, _ in SAMPLES]
+headings = [HEADING[name] for name, _, _ in SAMPLES]
 svg_text = read(SVG_PATH)
 assert safe(svg_text) == [], safe(svg_text)
-assert problems(svg_text, texts) == [], problems(svg_text, texts)
+assert problems(svg_text, texts, headings) == [], problems(svg_text, texts, headings)
 panels = lanes_of(svg_text)
 entries = [sum(1 for line in stdout_lines(text) if line.startswith("0x")) for text in texts]
 assert [len(panel) for panel in panels] == entries, ([len(panel) for panel in panels], entries)  # one lane per patched entry
@@ -394,6 +462,13 @@ for panel, text in zip(panels, texts):
 root = ET.fromstring(svg_text)
 width, height = int(root.get("width")), int(root.get("height"))
 assert root.get("viewBox") == "0 0 %d %d" % (width, height) and 880 <= width <= 1000, (width, height)
+
+
+def in_legend(svg_text, old, new):
+    """svg_text with the first old in the legend (before the first panel) replaced by new."""
+    head, rest = svg_text.split('<g class="panel">', 1)
+    assert old in head, old
+    return head.replace(old, new, 1) + '<g class="panel">' + rest
 
 
 def head_reversed(match):
@@ -422,12 +497,29 @@ mutants = {
     "owner arrow label swapped": in_panel(svg_text, 2, ">kprobe<", ">ftrace_ops<"),
     "owner box removed": in_panel(svg_text, 1, r'<rect [^>]*fill="%s"[^>]*/>\n' % hookgraph.STYLE["owner"][0], ""),
     "arrowhead reversed": re.sub(r'<polygon points="(\d+),(\d+) (\d+),(\d+) (\d+),(\d+)"', head_reversed, svg_text, count=1),
+    "heading reworded": in_panel(svg_text, 1, ">Second sample: test module hooks<", ">Second sample: rootkit hooks<"),
+    "headings swapped": svg_text.replace(HEADING["testhook"], "@").replace(HEADING["demo"], HEADING["testhook"]).replace(
+        "@", HEADING["demo"]),
+    "heading dropped": in_panel(svg_text, 2, r'<text class="heading"[^>]*>[^<]*</text>\n', ""),
+    "heading doubled into a lane": in_panel(svg_text, 1, r'(<g class="lane">\n)',
+                                            r'\1<text class="heading" x="22" y="90" font-size="15" fill="#1f2328">%s</text>\n'
+                                            % HEADING["testhook"]),
+    "a --links word as the heading": in_panel(svg_text, 2, ">%s<" % HEADING["demo"], ">kprobe<"),
+    "legend reworded": in_legend(svg_text, ">purple = owner<", ">red = owner<"),
+    "legend reordered": in_legend(in_legend(svg_text, ">blue = handler<", ">@<"), ">purple = owner<", ">blue = handler<").replace(
+        ">@<", ">purple = owner<", 1),
+    "legend square recoloured": in_legend(svg_text, 'fill="%s" stroke="%s"' % COLOURS["owner"], 'fill="#ffebe9" stroke="#cf222e"'),
+    "legend extended": in_legend(svg_text, "</g>", '<rect x="800" y="10" width="14" height="14" rx="3" fill="#ffffff" stroke="#8c959f"/>\n'
+                                 '<text class="legend" x="820" y="21" font-size="12" fill="#1f2328">grey = trampoline</text>\n</g>'),
+    "legend dropped": re.sub(r'<g class="legend">.*?</g>\n', "", svg_text, count=1, flags=re.S),
+    "a box recoloured": in_panel(svg_text, 2, 'fill="%s" stroke="%s"' % COLOURS["page"], 'fill="%s" stroke="%s"' % COLOURS["handler"]),
 }
 for name, mutant in mutants.items():
     assert mutant != svg_text, name
-    assert problems(mutant, texts), name
-assert problems(svg_text, texts[::-1]), "panels swapped"
-assert problems(svg_text, texts[:1]), "a panel too many"
+    assert problems(mutant, texts, headings), name
+assert problems(svg_text, texts[::-1], headings[::-1]), "panels swapped"
+assert problems(svg_text, texts[:1], headings[:1]), "a panel too many"
+assert problems(svg_text, texts), "headings where none are expected"
 assert safe(svg_text.replace("<rect ", '<rect onclick="x" ', 1)) and safe(svg_text.replace('font-family="monospace"', 'font-family="Fira Code"'))
 
 # 2. The PNG and the README snippet.
@@ -479,8 +571,9 @@ with tempfile.TemporaryDirectory() as work:
         handle.write(elf(code, symbols))
     linked = subprocess.run(PATCHSCAN + ["--links", path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     assert linked.returncode == 0, linked.stderr
+    assert hookgraph.heading(path) is None  # not a demo kernel.elf: no heading
     made = hookgraph.svg([hookgraph.lanes(path)])
-    assert made == hookgraph.svg([hookgraph.lanes(path)])
+    assert made == hookgraph.svg([hookgraph.lanes(path)], [None])
     cli = subprocess.run(TOOL + [path, "-o", out], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     assert cli.returncode == 0 and read(out, "rb") == made.encode("utf-8"), (cli.returncode, cli.stderr)
     assert safe(made) == [] and problems(made, [linked.stdout]) == [], (safe(made), problems(made, [linked.stdout]))
@@ -514,18 +607,18 @@ for path in given:
     digest = sha256(path)
     run = subprocess.run(PATCHSCAN + ["--links", path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     assert run.returncode == 0, (path, run.stderr)
-    alone = hookgraph.svg([hookgraph.lanes(path)])
+    alone = hookgraph.svg([hookgraph.lanes(path)], [hookgraph.heading(path)])
     sample = [index for index, (_, _, sha) in enumerate(SAMPLES) if sha == digest]
     if not sample:
         print("SKIP: %s (sha256 %s) is neither demo kernel.elf; checked against its own --links output only" % (path, digest))
-        assert problems(alone, [run.stdout]) == [], problems(alone, [run.stdout])
+        assert problems(alone, [run.stdout]) == [], problems(alone, [run.stdout])  # and with no heading
         continue
     name = SAMPLES[sample[0]][0]
     text = texts[sample[0]]
     assert run.stdout.splitlines() == stdout_lines(text), (
         "%s is the %s sample's kernel.elf (by sha256) but patchscan.py --links no longer prints docs/img/expected-hook-chain.%s.txt: "
         "redraw docs/img (README steps 1-3)" % (path, name, name))
-    assert problems(alone, [text]) == [], problems(alone, [text])
+    assert problems(alone, [text], [HEADING[name]]) == [], problems(alone, [text], [HEADING[name]])
     beside = os.path.join(os.path.dirname(os.path.abspath(path)), "expected-hook-chain.txt")
     if os.path.isfile(beside):  # the zip's own copy, when kernel.elf is where the zip put it (stdout lines: a re-upload
         assert stdout_lines(read(beside)) == stdout_lines(text), beside  # may drop the stderr line)
@@ -533,8 +626,8 @@ for path in given:
     print("%s: the %s sample (%d lanes, every label in its expected-hook-chain.txt)" % (path, name, len(lanes_of(alone)[0])))
 if set(matched) == {name for name, _, _ in SAMPLES}:
     both = [matched[name] for name, _, _ in SAMPLES]  # the panel order: testhook on top
-    first = hookgraph.svg([hookgraph.lanes(path) for path in both])
-    second = hookgraph.svg([hookgraph.lanes(path) for path in both])
+    first = hookgraph.svg([hookgraph.lanes(path) for path in both], [hookgraph.heading(path) for path in both])
+    second = hookgraph.svg([hookgraph.lanes(path) for path in both], [hookgraph.heading(path) for path in both])
     assert first == second, "two runs differ"
     with tempfile.TemporaryDirectory() as work:
         out = os.path.join(work, "hookchain.svg")

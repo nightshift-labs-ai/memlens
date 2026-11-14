@@ -1,145 +1,157 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="820" viewBox="0 0 900 820" font-family="monospace">
-<rect width="900" height="820" fill="#ffffff"/>
-<g class="panel">
-<rect x="10" y="10" width="880" height="394" rx="10" fill="#f6f8fa" stroke="#d1d9e0"/>
-<g class="lane">
-<rect x="22" y="22" width="211" height="44" rx="6" fill="#ffffff" stroke="#8c959f"/>
-<text class="site" x="32" y="48" font-size="13" fill="#1f2328">__x64_sys_kill+0x4</text>
-<rect x="289" y="22" width="338" height="44" rx="6" fill="#fff1e5" stroke="#e16f24"/>
-<text class="page" x="299" y="41" font-size="13" fill="#1f2328">ftrace_tramp___x64_sys_kill</text>
-<text class="page-label" x="299" y="56" font-size="11" fill="#59636e">memlens_target_ffffffffc0cd0000</text>
-<rect x="683" y="22" width="195" height="44" rx="6" fill="#ddf4ff" stroke="#218bff"/>
-<text class="handler" x="693" y="41" font-size="13" fill="#1f2328">ftrace_ops_assist_func</text>
-<text class="handler-label" x="693" y="56" font-size="11" fill="#59636e">ftrace</text>
-<line x1="234" y1="44" x2="281" y2="44" stroke="#59636e" stroke-width="1.5"/>
-<polygon points="288,44 280,40 280,48" fill="#59636e"/>
-<text class="edge" x="261" y="39" font-size="11" text-anchor="middle" fill="#59636e">call</text>
-<line x1="628" y1="44" x2="675" y2="44" stroke="#59636e" stroke-width="1.5"/>
-<polygon points="682,44 674,40 674,48" fill="#59636e"/>
-<text class="edge" x="655" y="39" font-size="11" text-anchor="middle" fill="#59636e">call</text>
-<line x1="317" y1="67" x2="317" y2="84" stroke="#59636e" stroke-width="1.5"/>
-<polygon points="317,91 313,83 321,83" fill="#59636e"/>
-<text class="edge" x="325" y="83" font-size="11" fill="#59636e">ftrace_ops</text>
-<rect x="289" y="92" width="296" height="44" rx="6" fill="#fbefff" stroke="#8250df"/>
-<text class="owner" x="299" y="111" font-size="13" font-weight="bold" fill="#1f2328">memlens_testhook.th_kill_callback</text>
-<text class="owner" x="299" y="126" font-size="11" fill="#59636e">(ftrace_ops memlens_testhook.th_kill_ops)</text>
-</g>
-<line x1="18" y1="143" x2="882" y2="143" stroke="#d1d9e0"/>
-<g class="lane">
-<rect x="22" y="150" width="211" height="44" rx="6" fill="#ffffff" stroke="#8c959f"/>
-<text class="site" x="32" y="176" font-size="13" fill="#1f2328">bpf_lsm_file_open+0x4</text>
-<rect x="289" y="150" width="338" height="44" rx="6" fill="#fff1e5" stroke="#e16f24"/>
-<text class="page" x="299" y="169" font-size="13" fill="#1f2328">bpf_tramp_bpf_lsm_file_open</text>
-<text class="page-label" x="299" y="184" font-size="11" fill="#59636e">memlens_target_ffffffffc01a0940</text>
-<rect x="683" y="150" width="195" height="44" rx="6" fill="#ddf4ff" stroke="#218bff"/>
-<text class="handler" x="693" y="169" font-size="13" fill="#1f2328">__bpf_tramp_enter</text>
-<text class="handler-label" x="693" y="184" font-size="11" fill="#59636e">BPF trampoline</text>
-<line x1="234" y1="172" x2="281" y2="172" stroke="#59636e" stroke-width="1.5"/>
-<polygon points="288,172 280,168 280,176" fill="#59636e"/>
-<text class="edge" x="261" y="167" font-size="11" text-anchor="middle" fill="#59636e">call</text>
-<line x1="628" y1="172" x2="675" y2="172" stroke="#59636e" stroke-width="1.5"/>
-<polygon points="682,172 674,168 674,176" fill="#59636e"/>
-<text class="edge" x="655" y="167" font-size="11" text-anchor="middle" fill="#59636e">call</text>
-<line x1="317" y1="195" x2="317" y2="212" stroke="#59636e" stroke-width="1.5"/>
-<polygon points="317,219 313,211 321,211" fill="#59636e"/>
-<text class="edge" x="325" y="211" font-size="11" fill="#59636e">BPF program</text>
-<rect x="289" y="220" width="417" height="44" rx="6" fill="#fbefff" stroke="#8250df"/>
-<text class="owner" x="299" y="239" font-size="13" font-weight="bold" fill="#1f2328">bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems</text>
-<text class="owner" x="299" y="254" font-size="11" fill="#59636e">(BPF program)</text>
-</g>
-<line x1="18" y1="271" x2="882" y2="271" stroke="#d1d9e0"/>
-<g class="lane">
-<rect x="22" y="278" width="211" height="44" rx="6" fill="#ffffff" stroke="#8c959f"/>
-<text class="site" x="32" y="304" font-size="13" fill="#1f2328">__x64_sys_getdents64+0x4</text>
-<rect x="289" y="278" width="338" height="44" rx="6" fill="#fff1e5" stroke="#e16f24"/>
-<text class="page" x="299" y="297" font-size="13" fill="#1f2328">kprobe_ftrace_tramp___x64_sys_getdents64</text>
-<text class="page-label" x="299" y="312" font-size="11" fill="#59636e">memlens_target_ffffffffc0cd2000</text>
-<rect x="683" y="278" width="195" height="44" rx="6" fill="#ddf4ff" stroke="#218bff"/>
-<text class="handler" x="693" y="297" font-size="13" fill="#1f2328">kprobe_ftrace_handler</text>
-<text class="handler-label" x="693" y="312" font-size="11" fill="#59636e">kprobe via ftrace</text>
-<line x1="234" y1="300" x2="281" y2="300" stroke="#59636e" stroke-width="1.5"/>
-<polygon points="288,300 280,296 280,304" fill="#59636e"/>
-<text class="edge" x="261" y="295" font-size="11" text-anchor="middle" fill="#59636e">call</text>
-<line x1="628" y1="300" x2="675" y2="300" stroke="#59636e" stroke-width="1.5"/>
-<polygon points="682,300 674,296 674,304" fill="#59636e"/>
-<text class="edge" x="655" y="295" font-size="11" text-anchor="middle" fill="#59636e">call</text>
-<line x1="317" y1="323" x2="317" y2="340" stroke="#59636e" stroke-width="1.5"/>
-<polygon points="317,347 313,339 321,339" fill="#59636e"/>
-<text class="edge" x="325" y="339" font-size="11" fill="#59636e">kprobe</text>
-<rect x="289" y="348" width="274" height="44" rx="6" fill="#fbefff" stroke="#8250df"/>
-<text class="owner" x="299" y="367" font-size="13" font-weight="bold" fill="#1f2328">memlens_testhook.th_getdents_pre</text>
-<text class="owner" x="299" y="382" font-size="11" fill="#59636e">(kprobe pre_handler)</text>
-</g>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="896" viewBox="0 0 900 896" font-family="monospace">
+<rect width="900" height="896" fill="#ffffff"/>
+<g class="legend">
+<rect x="22" y="10" width="14" height="14" rx="3" fill="#ffffff" stroke="#8c959f"/>
+<text class="legend" x="42" y="21" font-size="12" fill="#1f2328">white = hooked function</text>
+<rect x="235" y="10" width="14" height="14" rx="3" fill="#fff1e5" stroke="#e16f24"/>
+<text class="legend" x="255" y="21" font-size="12" fill="#1f2328">orange = hook page MemLens named</text>
+<rect x="514" y="10" width="14" height="14" rx="3" fill="#ddf4ff" stroke="#218bff"/>
+<text class="legend" x="534" y="21" font-size="12" fill="#1f2328">blue = handler</text>
+<rect x="661" y="10" width="14" height="14" rx="3" fill="#fbefff" stroke="#8250df"/>
+<text class="legend" x="681" y="21" font-size="12" fill="#1f2328">purple = owner</text>
 </g>
 <g class="panel">
-<rect x="10" y="416" width="880" height="394" rx="10" fill="#f6f8fa" stroke="#d1d9e0"/>
+<rect x="10" y="34" width="880" height="420" rx="10" fill="#f6f8fa" stroke="#d1d9e0"/>
+<text class="heading" x="22" y="59" font-size="15" fill="#1f2328">Second sample: test module hooks</text>
 <g class="lane">
-<rect x="22" y="428" width="211" height="44" rx="6" fill="#ffffff" stroke="#8c959f"/>
-<text class="site" x="32" y="454" font-size="13" fill="#1f2328">bpf_lsm_file_open+0x4</text>
-<rect x="289" y="428" width="338" height="44" rx="6" fill="#fff1e5" stroke="#e16f24"/>
-<text class="page" x="299" y="447" font-size="13" fill="#1f2328">bpf_tramp_bpf_lsm_file_open</text>
-<text class="page-label" x="299" y="462" font-size="11" fill="#59636e">memlens_target_ffffffffc0004940</text>
-<rect x="683" y="428" width="195" height="44" rx="6" fill="#ddf4ff" stroke="#218bff"/>
-<text class="handler" x="693" y="447" font-size="13" fill="#1f2328">__bpf_tramp_enter</text>
-<text class="handler-label" x="693" y="462" font-size="11" fill="#59636e">BPF trampoline</text>
-<line x1="234" y1="450" x2="281" y2="450" stroke="#59636e" stroke-width="1.5"/>
-<polygon points="288,450 280,446 280,454" fill="#59636e"/>
-<text class="edge" x="261" y="445" font-size="11" text-anchor="middle" fill="#59636e">call</text>
-<line x1="628" y1="450" x2="675" y2="450" stroke="#59636e" stroke-width="1.5"/>
-<polygon points="682,450 674,446 674,454" fill="#59636e"/>
-<text class="edge" x="655" y="445" font-size="11" text-anchor="middle" fill="#59636e">call</text>
-<line x1="317" y1="473" x2="317" y2="490" stroke="#59636e" stroke-width="1.5"/>
-<polygon points="317,497 313,489 321,489" fill="#59636e"/>
-<text class="edge" x="325" y="489" font-size="11" fill="#59636e">BPF program</text>
-<rect x="289" y="498" width="417" height="44" rx="6" fill="#fbefff" stroke="#8250df"/>
-<text class="owner" x="299" y="517" font-size="13" font-weight="bold" fill="#1f2328">bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems</text>
-<text class="owner" x="299" y="532" font-size="11" fill="#59636e">(BPF program)</text>
+<rect x="22" y="72" width="211" height="44" rx="6" fill="#ffffff" stroke="#8c959f"/>
+<text class="site" x="32" y="98" font-size="13" fill="#1f2328">__x64_sys_kill+0x4</text>
+<rect x="289" y="72" width="338" height="44" rx="6" fill="#fff1e5" stroke="#e16f24"/>
+<text class="page" x="299" y="91" font-size="13" fill="#1f2328">ftrace_tramp___x64_sys_kill</text>
+<text class="page-label" x="299" y="106" font-size="11" fill="#59636e">memlens_target_ffffffffc0cd0000</text>
+<rect x="683" y="72" width="195" height="44" rx="6" fill="#ddf4ff" stroke="#218bff"/>
+<text class="handler" x="693" y="91" font-size="13" fill="#1f2328">ftrace_ops_assist_func</text>
+<text class="handler-label" x="693" y="106" font-size="11" fill="#59636e">ftrace</text>
+<line x1="234" y1="94" x2="281" y2="94" stroke="#59636e" stroke-width="1.5"/>
+<polygon points="288,94 280,90 280,98" fill="#59636e"/>
+<text class="edge" x="261" y="89" font-size="11" text-anchor="middle" fill="#59636e">call</text>
+<line x1="628" y1="94" x2="675" y2="94" stroke="#59636e" stroke-width="1.5"/>
+<polygon points="682,94 674,90 674,98" fill="#59636e"/>
+<text class="edge" x="655" y="89" font-size="11" text-anchor="middle" fill="#59636e">call</text>
+<line x1="317" y1="117" x2="317" y2="134" stroke="#59636e" stroke-width="1.5"/>
+<polygon points="317,141 313,133 321,133" fill="#59636e"/>
+<text class="edge" x="325" y="133" font-size="11" fill="#59636e">ftrace_ops</text>
+<rect x="289" y="142" width="296" height="44" rx="6" fill="#fbefff" stroke="#8250df"/>
+<text class="owner" x="299" y="161" font-size="13" font-weight="bold" fill="#1f2328">memlens_testhook.th_kill_callback</text>
+<text class="owner" x="299" y="176" font-size="11" fill="#59636e">(ftrace_ops memlens_testhook.th_kill_ops)</text>
 </g>
-<line x1="18" y1="549" x2="882" y2="549" stroke="#d1d9e0"/>
+<line x1="18" y1="193" x2="882" y2="193" stroke="#d1d9e0"/>
 <g class="lane">
-<rect x="22" y="556" width="211" height="44" rx="6" fill="#ffffff" stroke="#8c959f"/>
-<text class="site" x="32" y="582" font-size="13" fill="#1f2328">do_sys_openat2</text>
-<rect x="289" y="556" width="338" height="44" rx="6" fill="#fff1e5" stroke="#e16f24"/>
-<text class="page" x="299" y="575" font-size="13" fill="#1f2328">kprobe_ftrace_tramp_do_sys_openat2</text>
-<text class="page-label" x="299" y="590" font-size="11" fill="#59636e">memlens_target_ffffffffc0b2d000</text>
-<rect x="683" y="556" width="195" height="44" rx="6" fill="#ddf4ff" stroke="#218bff"/>
-<text class="handler" x="693" y="575" font-size="13" fill="#1f2328">kprobe_ftrace_handler</text>
-<text class="handler-label" x="693" y="590" font-size="11" fill="#59636e">kprobe via ftrace</text>
-<line x1="234" y1="578" x2="281" y2="578" stroke="#59636e" stroke-width="1.5"/>
-<polygon points="288,578 280,574 280,582" fill="#59636e"/>
-<text class="edge" x="261" y="573" font-size="11" text-anchor="middle" fill="#59636e">call</text>
-<line x1="628" y1="578" x2="675" y2="578" stroke="#59636e" stroke-width="1.5"/>
-<polygon points="682,578 674,574 674,582" fill="#59636e"/>
-<text class="edge" x="655" y="573" font-size="11" text-anchor="middle" fill="#59636e">call</text>
-<line x1="317" y1="601" x2="317" y2="618" stroke="#59636e" stroke-width="1.5"/>
-<polygon points="317,625 313,617 321,617" fill="#59636e"/>
-<text class="edge" x="325" y="617" font-size="11" fill="#59636e">kprobe</text>
-<rect x="289" y="626" width="376" height="44" rx="6" fill="#fbefff" stroke="#8250df"/>
-<text class="owner" x="299" y="645" font-size="13" font-weight="bold" fill="#1f2328">kprobe memlens_kp on do_sys_openat2</text>
-<text class="owner" x="299" y="660" font-size="11" fill="#59636e">(tracefs kprobe event; pre_handler kprobe_dispatcher)</text>
+<rect x="22" y="200" width="211" height="44" rx="6" fill="#ffffff" stroke="#8c959f"/>
+<text class="site" x="32" y="226" font-size="13" fill="#1f2328">bpf_lsm_file_open+0x4</text>
+<rect x="289" y="200" width="338" height="44" rx="6" fill="#fff1e5" stroke="#e16f24"/>
+<text class="page" x="299" y="219" font-size="13" fill="#1f2328">bpf_tramp_bpf_lsm_file_open</text>
+<text class="page-label" x="299" y="234" font-size="11" fill="#59636e">memlens_target_ffffffffc01a0940</text>
+<rect x="683" y="200" width="195" height="44" rx="6" fill="#ddf4ff" stroke="#218bff"/>
+<text class="handler" x="693" y="219" font-size="13" fill="#1f2328">__bpf_tramp_enter</text>
+<text class="handler-label" x="693" y="234" font-size="11" fill="#59636e">BPF trampoline</text>
+<line x1="234" y1="222" x2="281" y2="222" stroke="#59636e" stroke-width="1.5"/>
+<polygon points="288,222 280,218 280,226" fill="#59636e"/>
+<text class="edge" x="261" y="217" font-size="11" text-anchor="middle" fill="#59636e">call</text>
+<line x1="628" y1="222" x2="675" y2="222" stroke="#59636e" stroke-width="1.5"/>
+<polygon points="682,222 674,218 674,226" fill="#59636e"/>
+<text class="edge" x="655" y="217" font-size="11" text-anchor="middle" fill="#59636e">call</text>
+<line x1="317" y1="245" x2="317" y2="262" stroke="#59636e" stroke-width="1.5"/>
+<polygon points="317,269 313,261 321,261" fill="#59636e"/>
+<text class="edge" x="325" y="261" font-size="11" fill="#59636e">BPF program</text>
+<rect x="289" y="270" width="417" height="44" rx="6" fill="#fbefff" stroke="#8250df"/>
+<text class="owner" x="299" y="289" font-size="13" font-weight="bold" fill="#1f2328">bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems</text>
+<text class="owner" x="299" y="304" font-size="11" fill="#59636e">(BPF program)</text>
 </g>
-<line x1="18" y1="677" x2="882" y2="677" stroke="#d1d9e0"/>
+<line x1="18" y1="321" x2="882" y2="321" stroke="#d1d9e0"/>
 <g class="lane">
-<rect x="22" y="684" width="211" height="44" rx="6" fill="#ffffff" stroke="#8c959f"/>
-<text class="site" x="32" y="710" font-size="13" fill="#1f2328">vfs_getattr+0x4</text>
-<rect x="289" y="684" width="338" height="44" rx="6" fill="#fff1e5" stroke="#e16f24"/>
-<text class="page" x="299" y="703" font-size="13" fill="#1f2328">ftrace_tramp_vfs_getattr</text>
-<text class="page-label" x="299" y="718" font-size="11" fill="#59636e">memlens_target_ffffffffc0b2b000</text>
-<rect x="683" y="684" width="195" height="44" rx="6" fill="#ddf4ff" stroke="#218bff"/>
-<text class="handler" x="693" y="703" font-size="13" fill="#1f2328">function_trace_call</text>
-<text class="handler-label" x="693" y="718" font-size="11" fill="#59636e">ftrace</text>
-<line x1="234" y1="706" x2="281" y2="706" stroke="#59636e" stroke-width="1.5"/>
-<polygon points="288,706 280,702 280,710" fill="#59636e"/>
-<text class="edge" x="261" y="701" font-size="11" text-anchor="middle" fill="#59636e">call</text>
-<line x1="628" y1="706" x2="675" y2="706" stroke="#59636e" stroke-width="1.5"/>
-<polygon points="682,706 674,702 674,710" fill="#59636e"/>
-<text class="edge" x="655" y="701" font-size="11" text-anchor="middle" fill="#59636e">call</text>
-<line x1="317" y1="729" x2="317" y2="746" stroke="#59636e" stroke-width="1.5"/>
-<polygon points="317,753 313,745 321,745" fill="#59636e"/>
-<text class="edge" x="325" y="745" font-size="11" fill="#59636e">ftrace_ops</text>
-<rect x="289" y="754" width="175" height="44" rx="6" fill="#fbefff" stroke="#8250df"/>
-<text class="owner" x="299" y="773" font-size="13" font-weight="bold" fill="#1f2328">function_trace_call</text>
-<text class="owner" x="299" y="788" font-size="11" fill="#59636e">(ftrace_ops global_ops)</text>
+<rect x="22" y="328" width="211" height="44" rx="6" fill="#ffffff" stroke="#8c959f"/>
+<text class="site" x="32" y="354" font-size="13" fill="#1f2328">__x64_sys_getdents64+0x4</text>
+<rect x="289" y="328" width="338" height="44" rx="6" fill="#fff1e5" stroke="#e16f24"/>
+<text class="page" x="299" y="347" font-size="13" fill="#1f2328">kprobe_ftrace_tramp___x64_sys_getdents64</text>
+<text class="page-label" x="299" y="362" font-size="11" fill="#59636e">memlens_target_ffffffffc0cd2000</text>
+<rect x="683" y="328" width="195" height="44" rx="6" fill="#ddf4ff" stroke="#218bff"/>
+<text class="handler" x="693" y="347" font-size="13" fill="#1f2328">kprobe_ftrace_handler</text>
+<text class="handler-label" x="693" y="362" font-size="11" fill="#59636e">kprobe via ftrace</text>
+<line x1="234" y1="350" x2="281" y2="350" stroke="#59636e" stroke-width="1.5"/>
+<polygon points="288,350 280,346 280,354" fill="#59636e"/>
+<text class="edge" x="261" y="345" font-size="11" text-anchor="middle" fill="#59636e">call</text>
+<line x1="628" y1="350" x2="675" y2="350" stroke="#59636e" stroke-width="1.5"/>
+<polygon points="682,350 674,346 674,354" fill="#59636e"/>
+<text class="edge" x="655" y="345" font-size="11" text-anchor="middle" fill="#59636e">call</text>
+<line x1="317" y1="373" x2="317" y2="390" stroke="#59636e" stroke-width="1.5"/>
+<polygon points="317,397 313,389 321,389" fill="#59636e"/>
+<text class="edge" x="325" y="389" font-size="11" fill="#59636e">kprobe</text>
+<rect x="289" y="398" width="274" height="44" rx="6" fill="#fbefff" stroke="#8250df"/>
+<text class="owner" x="299" y="417" font-size="13" font-weight="bold" fill="#1f2328">memlens_testhook.th_getdents_pre</text>
+<text class="owner" x="299" y="432" font-size="11" fill="#59636e">(kprobe pre_handler)</text>
+</g>
+</g>
+<g class="panel">
+<rect x="10" y="466" width="880" height="420" rx="10" fill="#f6f8fa" stroke="#d1d9e0"/>
+<text class="heading" x="22" y="491" font-size="15" fill="#1f2328">Demo: Debian 13 6.12 memory image</text>
+<g class="lane">
+<rect x="22" y="504" width="211" height="44" rx="6" fill="#ffffff" stroke="#8c959f"/>
+<text class="site" x="32" y="530" font-size="13" fill="#1f2328">bpf_lsm_file_open+0x4</text>
+<rect x="289" y="504" width="338" height="44" rx="6" fill="#fff1e5" stroke="#e16f24"/>
+<text class="page" x="299" y="523" font-size="13" fill="#1f2328">bpf_tramp_bpf_lsm_file_open</text>
+<text class="page-label" x="299" y="538" font-size="11" fill="#59636e">memlens_target_ffffffffc0004940</text>
+<rect x="683" y="504" width="195" height="44" rx="6" fill="#ddf4ff" stroke="#218bff"/>
+<text class="handler" x="693" y="523" font-size="13" fill="#1f2328">__bpf_tramp_enter</text>
+<text class="handler-label" x="693" y="538" font-size="11" fill="#59636e">BPF trampoline</text>
+<line x1="234" y1="526" x2="281" y2="526" stroke="#59636e" stroke-width="1.5"/>
+<polygon points="288,526 280,522 280,530" fill="#59636e"/>
+<text class="edge" x="261" y="521" font-size="11" text-anchor="middle" fill="#59636e">call</text>
+<line x1="628" y1="526" x2="675" y2="526" stroke="#59636e" stroke-width="1.5"/>
+<polygon points="682,526 674,522 674,530" fill="#59636e"/>
+<text class="edge" x="655" y="521" font-size="11" text-anchor="middle" fill="#59636e">call</text>
+<line x1="317" y1="549" x2="317" y2="566" stroke="#59636e" stroke-width="1.5"/>
+<polygon points="317,573 313,565 321,565" fill="#59636e"/>
+<text class="edge" x="325" y="565" font-size="11" fill="#59636e">BPF program</text>
+<rect x="289" y="574" width="417" height="44" rx="6" fill="#fbefff" stroke="#8250df"/>
+<text class="owner" x="299" y="593" font-size="13" font-weight="bold" fill="#1f2328">bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems</text>
+<text class="owner" x="299" y="608" font-size="11" fill="#59636e">(BPF program)</text>
+</g>
+<line x1="18" y1="625" x2="882" y2="625" stroke="#d1d9e0"/>
+<g class="lane">
+<rect x="22" y="632" width="211" height="44" rx="6" fill="#ffffff" stroke="#8c959f"/>
+<text class="site" x="32" y="658" font-size="13" fill="#1f2328">do_sys_openat2</text>
+<rect x="289" y="632" width="338" height="44" rx="6" fill="#fff1e5" stroke="#e16f24"/>
+<text class="page" x="299" y="651" font-size="13" fill="#1f2328">kprobe_ftrace_tramp_do_sys_openat2</text>
+<text class="page-label" x="299" y="666" font-size="11" fill="#59636e">memlens_target_ffffffffc0b2d000</text>
+<rect x="683" y="632" width="195" height="44" rx="6" fill="#ddf4ff" stroke="#218bff"/>
+<text class="handler" x="693" y="651" font-size="13" fill="#1f2328">kprobe_ftrace_handler</text>
+<text class="handler-label" x="693" y="666" font-size="11" fill="#59636e">kprobe via ftrace</text>
+<line x1="234" y1="654" x2="281" y2="654" stroke="#59636e" stroke-width="1.5"/>
+<polygon points="288,654 280,650 280,658" fill="#59636e"/>
+<text class="edge" x="261" y="649" font-size="11" text-anchor="middle" fill="#59636e">call</text>
+<line x1="628" y1="654" x2="675" y2="654" stroke="#59636e" stroke-width="1.5"/>
+<polygon points="682,654 674,650 674,658" fill="#59636e"/>
+<text class="edge" x="655" y="649" font-size="11" text-anchor="middle" fill="#59636e">call</text>
+<line x1="317" y1="677" x2="317" y2="694" stroke="#59636e" stroke-width="1.5"/>
+<polygon points="317,701 313,693 321,693" fill="#59636e"/>
+<text class="edge" x="325" y="693" font-size="11" fill="#59636e">kprobe</text>
+<rect x="289" y="702" width="376" height="44" rx="6" fill="#fbefff" stroke="#8250df"/>
+<text class="owner" x="299" y="721" font-size="13" font-weight="bold" fill="#1f2328">kprobe memlens_kp on do_sys_openat2</text>
+<text class="owner" x="299" y="736" font-size="11" fill="#59636e">(tracefs kprobe event; pre_handler kprobe_dispatcher)</text>
+</g>
+<line x1="18" y1="753" x2="882" y2="753" stroke="#d1d9e0"/>
+<g class="lane">
+<rect x="22" y="760" width="211" height="44" rx="6" fill="#ffffff" stroke="#8c959f"/>
+<text class="site" x="32" y="786" font-size="13" fill="#1f2328">vfs_getattr+0x4</text>
+<rect x="289" y="760" width="338" height="44" rx="6" fill="#fff1e5" stroke="#e16f24"/>
+<text class="page" x="299" y="779" font-size="13" fill="#1f2328">ftrace_tramp_vfs_getattr</text>
+<text class="page-label" x="299" y="794" font-size="11" fill="#59636e">memlens_target_ffffffffc0b2b000</text>
+<rect x="683" y="760" width="195" height="44" rx="6" fill="#ddf4ff" stroke="#218bff"/>
+<text class="handler" x="693" y="779" font-size="13" fill="#1f2328">function_trace_call</text>
+<text class="handler-label" x="693" y="794" font-size="11" fill="#59636e">ftrace</text>
+<line x1="234" y1="782" x2="281" y2="782" stroke="#59636e" stroke-width="1.5"/>
+<polygon points="288,782 280,778 280,786" fill="#59636e"/>
+<text class="edge" x="261" y="777" font-size="11" text-anchor="middle" fill="#59636e">call</text>
+<line x1="628" y1="782" x2="675" y2="782" stroke="#59636e" stroke-width="1.5"/>
+<polygon points="682,782 674,778 674,786" fill="#59636e"/>
+<text class="edge" x="655" y="777" font-size="11" text-anchor="middle" fill="#59636e">call</text>
+<line x1="317" y1="805" x2="317" y2="822" stroke="#59636e" stroke-width="1.5"/>
+<polygon points="317,829 313,821 321,821" fill="#59636e"/>
+<text class="edge" x="325" y="821" font-size="11" fill="#59636e">ftrace_ops</text>
+<rect x="289" y="830" width="175" height="44" rx="6" fill="#fbefff" stroke="#8250df"/>
+<text class="owner" x="299" y="849" font-size="13" font-weight="bold" fill="#1f2328">function_trace_call</text>
+<text class="owner" x="299" y="864" font-size="11" fill="#59636e">(ftrace_ops global_ops)</text>
 </g>
 </g>
 </svg>

@@ -6,15 +6,16 @@ They are drawn from `patchscan.py --links` output. They are not IDA screenshots:
 
 ## What the picture shows
 
-- **Top panel:** `memlens-demo-testhook.zip`. The test module `memlens_testhook` ([tests/vm/testhook](../../tests/vm/testhook/README.md)) hooks `__x64_sys_kill` with an ftrace callback and `__x64_sys_getdents64` with a kprobe. The `bpf_lsm_file_open` lane is systemd's BPF LSM program.
-- **Bottom panel:** `memlens-demo-debian13.zip`. The lab VM's script set, through the kernel's tracing (tracefs), an ftrace filter on `vfs_getattr` and a kprobe event (`memlens_kp`) on `do_sys_openat2`. The `bpf_lsm_file_open` lane is the same systemd program again.
+- **Legend line, at the top:** white = hooked function, orange = hook page MemLens named, blue = handler, purple = owner, each with a square in that box's colours.
+- **Top panel, "Second sample: test module hooks":** `memlens-demo-testhook.zip`. The test module `memlens_testhook` ([tests/vm/testhook](../../tests/vm/testhook/README.md)) hooks `__x64_sys_kill` with an ftrace callback and `__x64_sys_getdents64` with a kprobe. The `bpf_lsm_file_open` lane is systemd's BPF LSM program.
+- **Bottom panel, "Demo: Debian 13 6.12 memory image":** `memlens-demo-debian13.zip`. The lab VM's script set, through the kernel's tracing (tracefs), an ftrace filter on `vfs_getattr` and a kprobe event (`memlens_kp`) on `do_sys_openat2`. The `bpf_lsm_file_open` lane is the same systemd program again.
 - **One lane per patched function entry**, in the order patchscan lists them (by address):
   - **White box:** the hooking instruction (function+offset).
   - **Orange box:** the hook page it calls, copied from memory. The top line is the name MemLens gives the page in IDA, and the line under it is the exporter's `memlens_target_` label.
   - **Blue box:** the page's first named call and its kind.
   - **Purple box, owner name in bold:** who put the hook there. The colour is neutral on purpose: most of these owners are benign.
 - **Arrow labels:** the xref types (`call`) and how patchscan found the owner (`ftrace_ops`, `kprobe`, `BPF program`).
-- **No hand-written words:** the picture has no headings or legend of its own. Every word in it is a piece of the `--links` output, and this page and the caption explain the rest.
+- **The tool's own words are only the two panel headings and the legend line.** They are fixed strings in `tools/hookgraph.py` (`HEADINGS`, `LEGEND`). A panel gets its heading only when its `kernel.elf` is one of the two demo files, by sha256; any other `kernel.elf` gets none. Every other word in the picture is a piece of the `--links` output, and this page and the caption explain the rest.
 
 ## How they were made
 
@@ -27,11 +28,11 @@ They are drawn from `patchscan.py --links` output. They are not IDA screenshots:
    - **Inputs:** the `kernel.elf` from each zip, by sha256:
      - `memlens-demo-testhook.zip`: `8d95998eacc39055c81417983f3dcdf7bea1d1c811272b13725035971dd149f9`.
      - `memlens-demo-debian13.zip`: `1481bdbfd0d12b907e208b873d5810c6d1e2adacdf8dbc9cebfb0ae8ad80efa5`.
-   - **Code path:** the tool runs the same code as `patchscan.py --links`: `scan`, `hook_links`, `hook_xrefs`, `role_names`, `page_owners` and `at`. It types no labels.
+   - **Code path:** the tool runs the same code as `patchscan.py --links`: `scan`, `hook_links`, `hook_xrefs`, `role_names`, `page_owners` and `at`. It types no labels in the lanes; its only own words are the headings and the legend.
    - **Format:** plain `<text>` in the generic `monospace` font. There are no fonts, scripts, styles or links, because GitHub sanitises SVG. The same inputs give the same bytes.
 2. **PNG:** rasterised offline from the SVG with Playwright's Chromium headless shell (`chromium_headless_shell-1155`).
-   - **Settings:** viewport set to the SVG's size (900 x 820), device scale 1.5, so it stays sharp on HiDPI screens. The system's monospace font is DejaVu Sans Mono here.
-   - **Result:** 1350 x 1230 px, 224 KB, embedded at width 900.
+   - **Settings:** viewport set to the SVG's size (900 x 896), device scale 1.5, so it stays sharp on HiDPI screens. The system's monospace font is DejaVu Sans Mono here.
+   - **Result:** 1350 x 1344 px, 248 KB, embedded at width 900.
    - **Script** (Node, with the `playwright` package):
 
      ```js
@@ -54,6 +55,9 @@ To redraw after a change to patchscan, run step 1, then step 2 (device scale 1.5
 - **Without the demo files:**
   - The SVG parses with `xml.etree` and has no script, style, image, link or event attribute.
   - Every text node in panel *i* is a piece of one field of sample *i*'s expected text, and each bold text is a piece of an `owner` line.
+  - **The only exceptions are the tool's own words**, typed again in the test so that a changed word fails:
+    - Panel *i*'s heading, exactly `Second sample: test module hooks` (top) or `Demo: Debian 13 6.12 memory image` (bottom), at the top of its panel, outside the lanes. A panel drawn from any other `kernel.elf` has no heading.
+    - The legend line above the panels, exactly `white = hooked function`, `orange = hook page MemLens named`, `blue = handler`, `purple = owner`, in that order. Each square is in the fill and border colours of its role's boxes, and every box of that role has those colours.
   - **Lane by lane:**
     - The site, the first arrow's label and the page label are one `xref` line, with that type.
     - The page name is that page's `rename`.
@@ -67,6 +71,8 @@ To redraw after a change to patchscan, run step 1, then step 2 (device scale 1.5
     - An arrow label changed (`call` to `jump` or `data`, the kprobe owner's `kprobe` to `ftrace_ops`).
     - A hand-typed label, a line kind or two fields as a label, a text outside the panels, a site made bold.
     - An owner box removed, an arrowhead reversed, the panels swapped.
+    - A heading reworded, swapped between the panels, dropped, doubled into a lane or replaced by a `--links` word.
+    - The legend reworded, reordered, recoloured, extended or dropped, and a box recoloured.
   - The PNG is the SVG's size times 1.5 and under 300 KB.
   - The snippet below has the caption and image paths that exist, and its table is the top panel's lanes, row by row, from the testhook `--links` text.
 - **With `MEMLENS_DEMO_ELF` and `MEMLENS_TESTHOOK_ELF`** (or both files as arguments, in any order; each is told apart by its sha256):

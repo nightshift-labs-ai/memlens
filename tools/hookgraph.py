@@ -9,10 +9,13 @@ its target (hook_links): the hooking instruction (function+offset) --call or jmp
 call (with its kind: ftrace, kprobe via ftrace, BPF trampoline), and under the page its owner in bold, the arrow
 labelled with how patchscan found the owner (ftrace_ops, kprobe, BPF program, module callback).
 
-Every word in the picture is a piece of what `patchscan.py --links <kernel.elf>` prints for that file (the same
-functions: scan, hook_links, hook_xrefs, role_names, page_owners, at); nothing is typed by hand: the edge words are
-patchscan's xref types (hook_xrefs) and Owner.how. tests/test_hookgraph.py checks each text node against the --links
-output, lane by lane. A long owner is cut at spaces only, so each line is still a piece of it.
+Every word in the lanes is a piece of what `patchscan.py --links <kernel.elf>` prints for that file (the same
+functions: scan, hook_links, hook_xrefs, role_names, page_owners, at); nothing there is typed by hand: the edge words
+are patchscan's xref types (hook_xrefs) and Owner.how. tests/test_hookgraph.py checks each text node against the
+--links output, lane by lane. A long owner is cut at spaces only, so each line is still a piece of it.
+The tool's own words are only these, fixed strings: the colour legend line above the panels (LEGEND: one entry per box
+colour, as STYLE draws it), and a heading on the panel of each of the two public demo kernel.elf files (HEADINGS, by
+the file's sha256; any other kernel.elf gets no heading).
 The same files give the same bytes. The SVG has no fonts, scripts, styles or links (GitHub sanitises SVG): plain
 <text> in the generic monospace font, laid out for that font's usual advance width. Needs Python 3.8+ only.
 
@@ -21,6 +24,7 @@ draw; nothing is written), 2 a usage error, a file that cannot be read or is not
 that cannot be written.
 """
 import collections
+import hashlib
 import math
 import os
 import sys
@@ -53,6 +57,20 @@ STYLE = {  # box fill and stroke per role
 # or None), owner (Owner text or None), how (Owner.how).
 Lane = collections.namedtuple("Lane", "site flow page handler hflow kind owner how")
 
+# The tool's own words, the only text that is not a piece of the --links output (tests/test_hookgraph.py exempts exactly
+# these strings). The panel heading of each public demo kernel.elf (demo-data release), by its sha256:
+HEADINGS = {
+    "1481bdbfd0d12b907e208b873d5810c6d1e2adacdf8dbc9cebfb0ae8ad80efa5": "Demo: Debian 13 6.12 memory image",  # memlens-demo-debian13.zip
+    "8d95998eacc39055c81417983f3dcdf7bea1d1c811272b13725035971dd149f9": "Second sample: test module hooks",  # memlens-demo-testhook.zip
+}
+# The colour legend, one line above the panels: each box role, with its colour as STYLE draws it.
+LEGEND = (("site", "white = hooked function"), ("page", "orange = hook page MemLens named"),
+          ("handler", "blue = handler"), ("owner", "purple = owner"))
+HEAD, LEGEND_SIZE = 15, 12  # font sizes in px: a panel heading, the legend
+HEAD_PITCH = 26  # a panel heading's line, down to its first lane
+SWATCH, SWATCH_GAP, LEGEND_GAP = 14, 6, 24  # a legend colour square, then its words, then the next entry
+LEGEND_PITCH = 24  # the legend's line, down to the first panel
+
 
 class NotChecked(Exception):
     """patchscan checks nothing in this file (patchscan.nothing_to_check: not a kernel export, say); the reason."""
@@ -82,6 +100,15 @@ def lanes(path):
                         flows[(link.handler_site, link.handler)] if handler else None, link.kind,
                         owner.text if owner else None, owner.how if owner else None))
     return out
+
+
+def heading(path):
+    """The panel heading for a kernel.elf: HEADINGS by its sha256, or None (not one of the public demo files)."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return HEADINGS.get(digest.hexdigest())
 
 
 def width_of(text, size):
@@ -166,27 +193,46 @@ class Canvas:
         self.text(x + 8, (y1 + y2) // 2 + 4, label, SMALL, "edge", fill=MUTED)
 
 
-def svg(panels):
-    """The SVG text for panels (one list of Lanes per kernel.elf)."""
+def legend_width():
+    return sum(SWATCH + SWATCH_GAP + width_of(words, LEGEND_SIZE) for _, words in LEGEND) + LEGEND_GAP * (len(LEGEND) - 1)
+
+
+def svg(panels, headings=None):
+    """The SVG text for panels (one list of Lanes per kernel.elf), each under its heading (headings: one string or None
+    per panel; heading(path) gives it), with the colour legend above them."""
+    headings = list(headings or []) + [None] * (len(panels) - len(headings or []))
     rows = [box_lines(lane) for panel in panels for lane in panel]
     columns = [max(box_width(row[index]) for row in rows) for index in range(3)]
     left = MARGIN + PANEL_PAD
     xs = [left, left + columns[0] + GAP_X, left + columns[0] + columns[1] + 2 * GAP_X]
-    right = max(WIDTH, xs[2] + columns[2] + PANEL_PAD + MARGIN)  # the right edge, before long owners
+    right = max(WIDTH, xs[2] + columns[2] + PANEL_PAD + MARGIN, left + legend_width() + PANEL_PAD + MARGIN,
+                max([left + width_of(title, HEAD) + PANEL_PAD + MARGIN for title in headings if title] or [0]))
     room = right - MARGIN - PANEL_PAD - xs[1] - 2 * PAD_X  # for an owner's lines, under the page and handler
     owners = [owner_lines(lane.owner, room) if lane.owner else [] for panel in panels for lane in panel]
     width = max([right] + [xs[1] + box_width(lines) + PANEL_PAD + MARGIN for lines in owners])
 
     canvas, y, index = Canvas(), MARGIN, 0
-    for panel in panels:
+    canvas.add('<g class="legend">')
+    x = left
+    for role, words in LEGEND:
+        fill, stroke = STYLE[role]
+        canvas.rect(x, y, SWATCH, SWATCH, fill, stroke, rx=3)
+        canvas.text(x + SWATCH + SWATCH_GAP, y + SWATCH - 3, words, LEGEND_SIZE, "legend")
+        x += SWATCH + SWATCH_GAP + width_of(words, LEGEND_SIZE) + LEGEND_GAP
+    canvas.add("</g>")
+    y += LEGEND_PITCH
+    for panel, title in zip(panels, headings):
         heights = []
         for offset in range(len(panel)):
             row, lines = rows[index + offset], owners[index + offset]
             heights.append(max(box_height(box) for box in row if box) + (GAP_Y + box_height(lines) if lines else 0))
-        panel_height = 2 * PANEL_PAD + sum(heights) + LANE_GAP * (len(panel) - 1)
+        panel_height = 2 * PANEL_PAD + (HEAD_PITCH if title else 0) + sum(heights) + LANE_GAP * (len(panel) - 1)
         canvas.add('<g class="panel">')
         canvas.rect(MARGIN, y, width - 2 * MARGIN, panel_height, "#f6f8fa", "#d1d9e0", rx=10)
         top = y + PANEL_PAD
+        if title:
+            canvas.text(left, top + HEAD - 2, title, HEAD, "heading")
+            top += HEAD_PITCH
         for offset, lane in enumerate(panel):
             row, lines = rows[index + offset], owners[index + offset]
             if offset:
@@ -229,10 +275,11 @@ def main(argv):
     if out is None or not args or any(arg.startswith("-") for arg in args):
         print(USAGE, file=sys.stderr)
         return 2
-    panels = []
+    panels, headings = [], []
     for path in args:
         try:
             panel = lanes(path)
+            title = heading(path)
         except OSError as error:
             print("hookgraph: cannot read %s: %s" % (path, error.strerror or error), file=sys.stderr)
             return 2
@@ -246,7 +293,8 @@ def main(argv):
             print("hookgraph: %s has no linked hook (patchscan.py --links prints no xref), nothing to draw" % path, file=sys.stderr)
             return 1
         panels.append(panel)
-    text = svg(panels)
+        headings.append(title)
+    text = svg(panels, headings)
     try:
         with open(out, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)

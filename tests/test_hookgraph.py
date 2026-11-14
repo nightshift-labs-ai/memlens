@@ -548,9 +548,9 @@ snippet = snippet[:snippet.index("\n```")]
 front = read(os.path.join(ROOT, "README.md")).splitlines()
 missing = [line for line in snippet.splitlines() if line.strip() and line not in front]
 assert not missing, "README.md does not hold these lines of the docs/img/README.md snippet: %r" % missing
-for link in re.findall(r'(?:src|href)="([^"#]+)"|\]\(([^)#]+)\)', snippet):
-    target = link[0] or link[1]
-    assert "://" in target or os.path.exists(os.path.join(ROOT, target)), target  # what the README link check will ask
+for link in re.findall(r'(?:src|href)="([^"]+)"|\]\(([^)\s]+)\)', snippet):
+    target = (link[0] or link[1]).split("#")[0]  # the file part, as the README link check (docs/img/README.md) asks
+    assert not target or "://" in target or os.path.exists(os.path.join(ROOT, target)), target
 assert 'width="%d"' % width in snippet, "embed the %gx PNG at the SVG's width" % SCALE
 rows = [[re.sub(r"[`*]", "", cell).strip() for cell in line.strip().strip("|").split("|")]
         for line in table.splitlines() if line.startswith("|") and not re.match(r"^\|[-| :]+\|$", line)]

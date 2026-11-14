@@ -103,8 +103,10 @@ The top panel as a table, from the same `--links` text, in the list's order (by 
 
 - **Placement:** in README.md the snippet sits right under the pitch and the line on who built MemLens. That line also says, before the picture, that MemLens has not yet been run in a real IDA, because the picture pushes the Status line under Install below the first screen.
 - **The table:** README.md keeps its narrow Where | Owner | Handler tables (the demo's under Before and after, the second sample's under "A hook set by a module", in the list's order) and adds no third one.
-- **Link check:** every relative link and image path in README.md must resolve. `tests/test_hookgraph.py` checks that the snippet's three paths exist and that README.md holds the snippet; this one-liner checks the whole README:
+- **Link check:** every relative link and image path in README.md must resolve. `tests/test_hookgraph.py` checks that the snippet's three paths exist and that README.md holds the snippet; this one-liner, run in the repository folder, checks the file part of every relative link and image path in the whole README, also of the links with a `#fragment` (`docs/OUTPUT.md#details` must name an existing `docs/OUTPUT.md`):
 
   ```
-  python3 -I -c "import os,re,sys; t=open('README.md').read(); bad=[p for a,b in re.findall(r'(?:src|href)=\"([^\"#]+)\"|\]\(([^)#]+)\)',t) for p in [a or b] if '://' not in p and not p.startswith('mailto:') and not os.path.exists(p)]; print(bad or 'all links resolve'); sys.exit(1 if bad else 0)"
+  python3 -I -c "import os,re,sys; t=open('README.md').read(); ps=[p for a,b in re.findall(r'(?:src|href)=\"([^\"]+)\"|\]\(([^)\s]+)\)',t) for p in [(a or b).split('#')[0]] if p and '://' not in p and not p.startswith('mailto:')]; bad=[p for p in ps if not os.path.exists(p)]; print(len(ps),'file links;', bad or 'all resolve'); sys.exit(1 if bad else 0)"
   ```
+
+  It checks files only: the anchors (`#install`, `#details`, ...) need a manual check against the headings.

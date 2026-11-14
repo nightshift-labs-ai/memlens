@@ -4,19 +4,21 @@
     python3 tools/hookgraph.py <kernel.elf> [<kernel.elf> ...] -o hookchain.svg
 
 One panel per kernel.elf, stacked in the order given, and one lane per patched function entry that patchscan links to
-its target (hook_links): the hooking instruction (function+offset) --call--> the hook page copied from memory (the name
-MemLens gives it in IDA, with the exporter's memlens_target_ label under it) --call--> the page's first named call (with
-its kind: ftrace, kprobe via ftrace, BPF trampoline), and under the page its owner in bold, the arrow labelled with how
-patchscan found the owner (ftrace_ops, kprobe, BPF program, module callback).
+its target (hook_links): the hooking instruction (function+offset) --call or jmp--> the hook page copied from memory
+(the name MemLens gives it in IDA, with the exporter's memlens_target_ label under it) --call--> the page's first named
+call (with its kind: ftrace, kprobe via ftrace, BPF trampoline), and under the page its owner in bold, the arrow
+labelled with how patchscan found the owner (ftrace_ops, kprobe, BPF program, module callback).
 
 Every word in the picture is a piece of what `patchscan.py --links <kernel.elf>` prints for that file (the same
-functions: scan, hook_links, role_names, page_owners, at); nothing is typed by hand, and tests/test_hookgraph.py checks
-each text node against the --links output. A long owner is cut at spaces only, so each line is still a piece of it.
+functions: scan, hook_links, hook_xrefs, role_names, page_owners, at); nothing is typed by hand: the edge words are
+patchscan's xref types (hook_xrefs) and Owner.how. tests/test_hookgraph.py checks each text node against the --links
+output, lane by lane. A long owner is cut at spaces only, so each line is still a piece of it.
 The same files give the same bytes. The SVG has no fonts, scripts, styles or links (GitHub sanitises SVG): plain
 <text> in the generic monospace font, laid out for that font's usual advance width. Needs Python 3.8+ only.
 
 Exit status: 0 the SVG was written, 1 a kernel.elf has no linked hook or is not one patchscan checks (nothing to
-draw; nothing is written), 2 a usage error or a file that cannot be read or is not a usable 64-bit ELF.
+draw; nothing is written), 2 a usage error, a file that cannot be read or is not a usable 64-bit ELF, or an SVG
+that cannot be written.
 """
 import collections
 import math
@@ -43,12 +45,13 @@ STYLE = {  # box fill and stroke per role
     "site": ("#ffffff", "#8c959f"),
     "page": ("#fff1e5", "#e16f24"),
     "handler": ("#ddf4ff", "#218bff"),
-    "owner": ("#ffebe9", "#cf222e"),
+    "owner": ("#fbefff", "#8250df"),  # neutral: most owners are benign (the function tracer, systemd's BPF program)
 }
 
 # One lane: site (function+offset of the hooking instruction), flow (call or jmp), page ([new name,] address label),
-# handler (the page's first named call, or None), kind (its kind, or None), owner (Owner text or None), how (Owner.how).
-Lane = collections.namedtuple("Lane", "site flow page handler kind owner how")
+# handler (the page's first named call, or None), hflow (the xref type from the page to it, hook_xrefs), kind (its kind,
+# or None), owner (Owner text or None), how (Owner.how).
+Lane = collections.namedtuple("Lane", "site flow page handler hflow kind owner how")
 
 
 class NotChecked(Exception):
@@ -57,8 +60,8 @@ class NotChecked(Exception):
 
 def lanes(path):
     """The lanes of one kernel.elf, in the order patchscan lists the entries, from the code path of patchscan.py --links
-    (main and print_links: Image, nothing_to_check, scan, hook_links, role_names, page_owners, at). Raises OSError, one
-    of patchscan.BAD_ELF, or NotChecked."""
+    (main and print_links: Image, nothing_to_check, scan, hook_links, hook_xrefs, role_names, page_owners, at). Raises
+    OSError, one of patchscan.BAD_ELF, or NotChecked."""
     with open(path, "rb") as handle:
         blob = handle.read()
     image = ps.Image(blob)
@@ -67,13 +70,16 @@ def lanes(path):
         raise NotChecked(reason)
     links = ps.hook_links(image, ps.scan(blob, image))
     names, owners = ps.role_names(image, links), ps.page_owners(links)
+    flows = {(source, target): flow for source, target, flow in ps.hook_xrefs(links)}  # the xref lines' types
     out = []
     for link in links:
         page = [names[link.target]] if link.target in names else []
         page.append(ps.at(image, link.target))  # the xref line's target, as print_links writes it
         owner = owners.get(link.target) if link.page else None
-        out.append(Lane(ps.at(image, link.site), link.flow, page,
-                        ps.at(image, link.handler) if link.handler is not None else None, link.kind,
+        handler = link.handler is not None
+        out.append(Lane(ps.at(image, link.site), flows[(link.site, link.target)], page,
+                        ps.at(image, link.handler) if handler else None,
+                        flows[(link.handler_site, link.handler)] if handler else None, link.kind,
                         owner.text if owner else None, owner.how if owner else None))
     return out
 
@@ -195,7 +201,7 @@ def svg(panels):
             middle = top + row_height // 2
             canvas.arrow_right(xs[0] + columns[0], xs[1], middle, lane.flow)
             if row[2]:
-                canvas.arrow_right(xs[1] + columns[1], xs[2], middle, "call")  # hook_xrefs: the page's first named call
+                canvas.arrow_right(xs[1] + columns[1], xs[2], middle, lane.hflow)
             if lines:
                 owner_top = top + row_height + GAP_Y
                 canvas.arrow_down(xs[1] + 28, top + row_height, owner_top, lane.how)
@@ -241,8 +247,12 @@ def main(argv):
             return 1
         panels.append(panel)
     text = svg(panels)
-    with open(out, "w", encoding="utf-8", newline="\n") as handle:
-        handle.write(text)
+    try:
+        with open(out, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+    except OSError as error:
+        print("hookgraph: cannot write %s: %s" % (out, error.strerror or error), file=sys.stderr)
+        return 2
     print("hookgraph: wrote %s (%d panel%s, %d lanes)" % (out, len(panels), "s" if len(panels) > 1 else "",
                                                           sum(len(panel) for panel in panels)), file=sys.stderr)
     return 0

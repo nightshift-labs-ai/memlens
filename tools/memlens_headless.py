@@ -4,9 +4,9 @@
     python3 tools/memlens_headless.py kernel.elf <isf.json.xz> [--no-analysis] [--any-kernel]
 
 Opens kernel.elf as an IDA database, imports the ISF's types and types the globals (per-CPU copies too), links
-hooked entries to their hook pages, handlers and owners (code and data xrefs, role names), then adds a comment at every
-patched entry (a hooked one names its owner and chain), prints the same report and patch list as the plugin, and saves
-the database.
+hooked entries to their hook pages, handlers and owners (code and data xrefs, role names, a function at each chain
+address where IDA has none), then adds a comment at every patched entry (a hooked one names its owner and chain), prints
+the same report and patch list as the plugin, and saves the database.
 It calls the plugin's own functions (memlens_entry.apply_types, report, link_hooks, comment_entries and patchscan.scan),
 so the result should match the menu actions. Not yet run with a real idalib: we have no IDA licence.
 

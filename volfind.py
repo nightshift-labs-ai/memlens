@@ -13,8 +13,8 @@ import os
 
 VOLATILITY = "2.28.2"
 MAX_SIZE = 16 << 20  # bytes; these plugins write a few KB, so a bigger .json file (an ISF, say) is not read
-# (plugin, the fields 2.28.2 writes, fields it writes only with an option): IDT before keyboard notifiers, whose three
-# fields check_idt also writes.
+# (plugin, the fields 2.28.2 writes, fields it writes only with an option); the first match counts (keyboard notifiers'
+# three fields are also check_idt's, see EXACT).
 PLUGINS = (
     ("linux.tracing.ftrace", ("ftrace_ops address", "Callback", "Callback address", "Hooked symbols", "Module",
                               "Module address"), ("Flags",)),  # Flags: --show-ftrace-flags

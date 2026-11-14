@@ -317,6 +317,9 @@ def check_sample(sample, image, plain):
         errors.append("MemLens rows with Volatility's ftrace_ops merged in: %s, measured %s" % (merged, expect["merged"]))
     if sorted(own) != sorted(o for o in printed if o not in ops):
         errors.append("ftrace rows of their own %s; Volatility printed %s" % ([hex(o) for o in own], [hex(o) for o in printed]))
+    callbacks = {sign(record["ftrace_ops address"]): record["Callback"] for record in data["ftrace-flags"]}
+    if any(row[3] != callbacks.get(int(row[1].split()[1], 16)) for row in by_plugin.get("linux.tracing.ftrace", [])):
+        errors.append("an ftrace row's callback is not at the kernel.elf symbol Volatility names")
     if {(row[0], row[1]) for row in theirs} & {(row[0], row[1]) for row in mine}:
         errors.append("a Volatility row has the Address and Where of a MemLens row")
     for n, row in enumerate(rows):

@@ -2,7 +2,7 @@
 
 Taken from the GitHub release notes. Newest first.
 
-## Unreleased
+## v0.3.30 (2026-11-18)
 
 - Demo zip refreshed: `memlens-demo-debian13.zip` now holds a `kernel.elf` exported with this version (same public `trace.elf`, deterministic: SHA-256 1481bdbf…), so the Owner column shows `bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems (BPF program)` and `kprobe memlens_kp on do_sys_openat2 (...)` instead of `BPF program at 0xffffffffc0004664` and `kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)`; the zip adds `expected-hook-chain.txt`, and its files now sit in a folder `memlens-demo-debian13/`. README (Try it with its symbol count, Export it yourself, the before/after table and count, the kprobe-owner version in What it does) and docs/OUTPUT.md (table, full `--links` block, function-symbol count, version notes: kprobe list since v0.3.30, BPF names since v0.3.28) show the new output (judge s178 item 1).
 - Supported IDA versions: 9.1 or later (`ida-plugin.json` `idaVersions` `>=9.1`; docs/USAGE.md and the headless runner's messages say the same). The IDA names are checked against the IDA 9.1 to 9.4 stubs and the 9.5 SDK's API list, so 9.0 was never checked; same rule as the sister plugins btf2ida, kflow and CFIScope. hcli no longer offers this version to IDA 9.0.

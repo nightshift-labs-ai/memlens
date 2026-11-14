@@ -155,6 +155,8 @@ The export dialog points here. The ISF must come from exactly the kernel that wa
 - Function pointers become `void *`.
 - No function prototypes: an ISF gives functions no parameter types. Most kernels also carry BTF, which has them; our companion plugin [btf2ida](https://github.com/nightshift-labs-ai/btf2ida) applies them by name (91.8% of kernel functions on the demo; not tried together with MemLens in IDA).
 - Kernel symbols that are not mapped in the image, such as freed init code, are left out.
+- Finds rewritten function entries and syscall-table slots. It does not walk tracepoints, notifier chains, the IDT, netfilter hooks or file, seq or tty ops (Volatility 2.28.2 has plugins for these; for notifiers, the keyboard chain).
+- Modules hidden from the module list are not exported: their hooks are still listed, but the owner shows as an address with no name (`ftrace_ops at 0x... (no symbol: module memory MemLens did not export)`). Measured on a copy of the second sample's image with the module unlinked.
 
 All limits, with measurements: [docs/LIMITS.md](docs/LIMITS.md).
 

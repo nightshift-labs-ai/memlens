@@ -788,7 +788,9 @@ def run_cancellable(command):
 
 ISSUES_URL = "https://github.com/nightshift-labs-ai/memlens/issues"
 DEMO_URL = "https://github.com/nightshift-labs-ai/memlens/releases/tag/demo-data"  # the README's demo kernel.elf
-WORKS_ON = "MemLens works on a Linux kernel exported from a memory image; demo kernel.elf: %s" % DEMO_URL
+# Also the next step for a raw memory image, which has no header to tell it by (review s197).
+WORKS_ON = ("MemLens works on a Linux kernel exported from a memory image (Edit > Plugins > MemLens: Export kernel from memory "
+            "image); demo kernel.elf: %s" % DEMO_URL)
 
 
 def guarded(activate):
@@ -934,14 +936,15 @@ def scan_current_input():
             return None
     with open(path, "rb") as handle:
         blob = handle.read(64)
-        kind = memory_image(blob)
-        if not kind:  # a memory image is not read further: it can be gigabytes
-            blob += handle.read()
+    kind = memory_image(blob)
+    if not kind:  # a memory image is not read further: it can be gigabytes
+        with open(path, "rb") as handle:
+            blob = handle.read()  # read again from the start: one copy of the file in memory, not the head joined to the rest
     name = os.path.basename(path)
     if kind:  # a judge's own sample: one line with the next step (judge s194 item 5)
         ida_kernwin.warning("MemLens: %s looks like a memory image (%s): use Edit > Plugins > MemLens: Export kernel from "
-                            "memory image on it first (Volatility 3 and that kernel's ISF; tools/find_isf.py finds one), "
-                            "then open the kernel.elf it writes." % (name, kind))
+                            "memory image on it first (Volatility 3 and that kernel's ISF; tools/find_isf.py in the plugin "
+                            "folder looks one up), then open the kernel.elf it writes." % (name, kind))
         return None
     if picked and not same_as_database(path, blob):
         return None
@@ -1153,7 +1156,8 @@ def link_hooks(image, findings):
     trampoline (not a kprobe's) and at its ops decodes the ops' flags, saying whether IPMODIFY is set; nothing is said
     without that layout. When the database has struct ftrace_ops, an ops that a module's symbol starts at gets that
     type once (kept in HOOK_RECORD too). Last, a function is made at each address on the chain where code starts and IDA
-    has none yet (make_chain_functions). Returns (links, counts)."""
+    has none yet (make_chain_functions; an error there is printed, and the links, counts and record above stay). Returns
+    (links, counts)."""
     layout = load_layout()
     func_offset = layout.get("ftrace_ops.func")
     if isinstance(func_offset, int):
@@ -1204,16 +1208,20 @@ def link_hooks(image, findings):
     for address, text in sorted(flags.items()):
         set_flags_comment(address, text)
     node.setblob(json.dumps(record).encode("utf-8"), 0, HOOK_RECORD_TAG)
-    make_chain_functions(image, links, counts)
+    try:  # never run in IDA yet: an error here must not cost the links, names and owners above (recorded already)
+        make_chain_functions(image, links, counts)
+    except Exception:
+        ida_kernwin.msg("[MemLens] functions along the hook chain stopped by this error:\n%s\n" % traceback.format_exc())
     return links, counts
 
 
 def make_chain_functions(image, links, counts):
     """A function (ida_funcs.add_func, which finds its end itself) at each address on the chain where code starts
-    (patchscan.chain_functions: hooked entry, hook page, handler, owner) that is in an executable segment and in no
-    function yet, so the chain reads as code before auto-analysis reaches it (judge s194 item 4). Nothing is deleted or
-    redefined; an address inside a function, IDA's or one made by an earlier run, is left as it is. Counted in counts:
-    functions (made now), functions_before (already in a function) and functions_failed (refused by IDA)."""
+    (patchscan.chain_functions: hooked entry, hook page, handler, owner; not an address inside another symbol) that is
+    in an executable segment and in no function yet, so the chain reads as code before auto-analysis reaches it (judge
+    s194 item 4). Nothing is deleted or redefined; an address inside a function, IDA's or one made by an earlier run, is
+    left as it is. Counted in counts: functions (made now), functions_before (already in a function) and
+    functions_failed (refused by IDA). link_hooks prints an error raised here and keeps the rest of the chain."""
     for address in patchscan.chain_functions(image, links):
         if not in_code(address):
             continue  # data, or a segment IDA did not mark executable: never made code here

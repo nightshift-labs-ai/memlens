@@ -849,11 +849,17 @@ def chain_functions(image, links):
     """The addresses on the links' hook chains where code starts, sorted and without repeats: each hooked entry, the
     target of every call or jmp that hook_xrefs gives (the hook page, its first named call, the BPF programs a trampoline
     runs) and each owner's address (ftrace_ops->func, the kprobe's handler, the module callback). The ftrace_ops and its
-    slot are data and are not among them. Only addresses inside the ELF's loaded segments (IDA has nothing elsewhere)."""
+    slot are data and are not among them. Only addresses inside the ELF's loaded segments (IDA has nothing elsewhere), and
+    only where a symbol (or the exporter's label) starts exactly or no symbol covers the address: a hook whose target
+    lands inside another function (movabs+jmp reg to other_fn+0x20) must not start a function in the middle of it."""
     addresses = {link.entry for link in links}
     addresses.update(target for _, target, flow in hook_xrefs(links) if flow != "data")
     addresses.update(link.owner.address for link in links if link.owner is not None and link.owner.address is not None)
-    return sorted(address for address in addresses if image.segment(address))
+
+    def starts_here(address):
+        index = bisect.bisect_left(image.addresses, address)
+        return (index < len(image.addresses) and image.addresses[index] == address) or image.symbol_at(address) is None
+    return sorted(address for address in addresses if image.segment(address) and starts_here(address))
 
 
 def merged_owner(owners):

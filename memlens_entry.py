@@ -1,11 +1,12 @@
 """MemLens: reverse engineer a Linux kernel from a memory image in IDA.
 
-Three actions under Edit > Plugins:
+Four actions under Edit > Plugins:
   * Export kernel from memory image: runs Volatility 3 and writes a symbolled ELF to open in IDA.
   * Apply kernel types from ISF: imports every struct, union and enum of that kernel.
   * Show patched kernel functions: lists hooked entries and odd syscall slots, Enter jumps there; links each hooked
     entry to its hook page and the page to its handler (code xrefs) and to its owner (the BPF program, or the
     ftrace_ops and its callback), and names the hook pages by role.
+  * Add Volatility hook findings (JSON): the same list plus the rows of Volatility's own hook plugins (volfind.py).
 """
 import base64
 import hashlib
@@ -38,6 +39,7 @@ if HERE not in sys.path:
 
 import isf2c  # noqa: E402  (needs the plugin folder on sys.path)
 import patchscan  # noqa: E402
+import volfind  # noqa: E402
 
 
 def parse_batch(text):
@@ -850,20 +852,24 @@ class PatchList(ida_kernwin.Choose):
     first call of a page with no known role, a core-kernel helper); Ins (the Insert command, captioned "Jump to owner")
     jumps to the page's owner when it is in the database."""
 
-    def __init__(self, rows):
+    def __init__(self, rows, sources=None):
+        """sources: a Source column (MemLens or the Volatility plugin of each row), with Volatility's findings added."""
         columns = [["Address", 18 | ida_kernwin.Choose.CHCOL_HEX], ["Where", 34], ["What", 34], ["Target", 40], ["Handler", 36],
-                   ["Owner", 48]]
-        ida_kernwin.Choose.__init__(self, "MemLens: patched kernel functions", columns,
+                   ["Owner", 48]] + ([["Source", 40]] if sources is not None else [])
+        title = "MemLens: patched kernel functions" + (" and Volatility findings" if sources is not None else "")
+        ida_kernwin.Choose.__init__(self, title, columns,
                                     ida_kernwin.Choose.CH_CAN_EDIT | ida_kernwin.Choose.CH_CAN_INS,
                                     popup_names=["Jump to owner", "Delete", "Jump to handler", "Refresh"])
         self.rows = rows
+        self.sources = sources
 
     def OnGetSize(self):
         return len(self.rows)
 
     def OnGetLine(self, n):
         address, name, what, target, handler, _, owner, _ = self.rows[n]
-        return ["%X" % address, name, what, target, handler, owner]
+        line = ["%X" % address, name, what, target, handler, owner]
+        return line + [self.sources[n]] if self.sources is not None else line
 
     def OnSelectLine(self, n):
         ida_kernwin.jumpto(self.rows[n][0])
@@ -1116,28 +1122,70 @@ def link_report(links, counts):
     return line + "\n"
 
 
+def row_ops(image, findings):
+    """For each row of patchscan.list_rows (one per finding): the ftrace_ops its hook page loads, or None."""
+    ops = []
+    for _, _, _, _, target in findings:
+        found = patchscan.ftrace_ops_slot(image, target) if target and patchscan.copied_page(image, target) else None
+        ops.append(found[1] if found else None)
+    return ops
+
+
+def show_patches(volatility=None):
+    """Show patched kernel functions; with volatility (volfind.Loaded), its findings are added as rows, with a Source
+    column, merging an ftrace row into the MemLens rows whose hook page loads the same ftrace_ops."""
+    scanned = scan_current_input()
+    if scanned is None:
+        return 0
+    image, findings = scanned
+    for address, _, what, target, _ in findings:
+        add_comment(address, "MemLens: %s %s" % (what, target))
+    ida_kernwin.msg("[MemLens] %d patched entries or odd syscall slots\n" % len(findings))
+    try:
+        links, counts = link_hooks(image, findings)
+        ida_kernwin.msg(link_report(links, counts))
+    except Exception:  # the list is still worth showing, with the names the database has
+        links = []
+        ida_kernwin.msg("[MemLens] hook chain stopped by this error (xrefs or names added before it are not "
+                        "recorded in the database):\n%s\n" % traceback.format_exc())
+    names = {page: ida_name.get_name(page) for page in patchscan.copied_targets(image, findings)}
+    rows, sources = patchscan.list_rows(image, findings, links, names), None
+    if volatility is not None:
+        rows, sources, merged = volfind.merge(rows, row_ops(image, findings), volatility.findings,
+                                              lambda address: patchscan.at(image, address) if image.segment(address) else None)
+        ida_kernwin.msg("[MemLens] list: %d MemLens rows, %d Volatility rows; %d Volatility ftrace_ops rows merged into the "
+                        "MemLens rows whose hook page loads that ops\n" % (len(findings), len(rows) - len(findings), merged))
+    global _open_list  # a non-modal chooser must outlive this call
+    _open_list = PatchList(rows, sources)
+    _open_list.Show()
+    return 1
+
+
 class FindPatches(ida_kernwin.action_handler_t):
     @guarded
     def activate(self, ctx):
-        scanned = scan_current_input()
-        if scanned is None:
+        return show_patches()
+
+    def update(self, ctx):
+        return ida_kernwin.AST_ENABLE_ALWAYS
+
+
+class AddVolatilityFindings(ida_kernwin.action_handler_t):
+    """Show patched kernel functions plus the hook findings in Volatility's JSON: every .json file in the folder of the
+    file picked (volfind.py says which plugins and fields it reads)."""
+    @guarded
+    def activate(self, ctx):
+        path = ida_kernwin.ask_file(False, "*.json", "A file from vol -r json (MemLens reads every .json file in its folder)")
+        if not path:
             return 0
-        image, findings = scanned
-        for address, _, what, target, _ in findings:
-            add_comment(address, "MemLens: %s %s" % (what, target))
-        ida_kernwin.msg("[MemLens] %d patched entries or odd syscall slots\n" % len(findings))
-        try:
-            links, counts = link_hooks(image, findings)
-            ida_kernwin.msg(link_report(links, counts))
-        except Exception:  # the list is still worth showing, with the names the database has
-            links = []
-            ida_kernwin.msg("[MemLens] hook chain stopped by this error (xrefs or names added before it are not "
-                            "recorded in the database):\n%s\n" % traceback.format_exc())
-        names = {page: ida_name.get_name(page) for page in patchscan.copied_targets(image, findings)}
-        global _open_list  # a non-modal chooser must outlive this call
-        _open_list = PatchList(patchscan.list_rows(image, findings, links, names))
-        _open_list.Show()
-        return 1
+        folder = os.path.dirname(os.path.abspath(path))
+        loaded = volfind.load_folder(path)
+        ida_kernwin.msg(volfind.report(loaded, folder))
+        if not loaded.read:
+            ida_kernwin.warning("MemLens read no Volatility findings in %s; the Output window says why for each .json file."
+                                % folder)
+            return 0
+        return show_patches(loaded)
 
     def update(self, ctx):
         return ida_kernwin.AST_ENABLE_ALWAYS
@@ -1149,6 +1197,7 @@ ACTIONS = [
     ("memlens:export", "MemLens: Export kernel from memory image", ExportKernel),
     ("memlens:types", "MemLens: Apply kernel types from ISF", ApplyTypes),
     ("memlens:patches", "MemLens: Show patched kernel functions", FindPatches),
+    ("memlens:volatility", "MemLens: Add Volatility hook findings (JSON)", AddVolatilityFindings),
 ]
 
 

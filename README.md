@@ -55,7 +55,7 @@ py <memlens>\patchscan.py out\kernel.elf
 
 Volatility 2.28.2 is the version we tested; the exporter uses Volatility's Linux module API, which newer releases may change.
 
-The export takes about 25-50 s on our machine. With MemLens v0.3.27, `out/kernel.elf` is byte-identical to the demo's (its SHA-256 is in `SHA256SUMS.txt`). This version also writes the kernel's BPF names and the pages that hold the BPF programs, so its `out/kernel.elf` differs from the demo's (234,095 symbols instead of 234,081; 27.7 s here); the Volatility output lists the same three `patched` rows. In IDA, **MemLens: Export kernel from memory image** does the same: choose `trace.elf`, then the ISF from the demo folder. It runs Volatility's `vol` command from your PATH, or asks where it is (`v/bin/vol` above). The ELF is written next to the image (`kernel-1.elf` if a `kernel.elf` is already there).
+The export takes about 25-50 s on our machine. With this version, `out/kernel.elf` is byte-identical to the demo's (its SHA-256 is in `SHA256SUMS.txt`). v0.3.27 or older writes no BPF names or BPF program pages (234,081 symbols instead of 234,095), and v0.3.28 and v0.3.29 write no kprobe list; all of them list the same three `patched` rows. In IDA, **MemLens: Export kernel from memory image** does the same: choose `trace.elf`, then the ISF from the demo folder. It runs Volatility's `vol` command from your PATH, or asks where it is (`v/bin/vol` above). The ELF is written next to the image (`kernel-1.elf` if a `kernel.elf` is already there).
 
 ## Before and after (real output from the demo, not IDA screenshots)
 

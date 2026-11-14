@@ -137,7 +137,7 @@ Recorded outputs and commands: [tests/fixtures/vol-2.28.2/compare](tests/fixture
 
 ### Volatility's other hook findings in the IDA list
 
-For the hook kinds MemLens does not scan, run Volatility's own plugins with its JSON renderer into one folder (same image and ISF as the export):
+For the hook kinds MemLens does not scan, run Volatility's own hook plugins with its JSON renderer into one folder (same image and ISF as the export):
 
 ```
 mkdir findings
@@ -149,13 +149,13 @@ vol -q -s <symbols> -f <image> -r json linux.malware.netfilter.Netfilter > findi
 vol -q -s <symbols> -f <image> -r json linux.tracing.ftrace.CheckFtrace --show-ftrace-flags > findings/ftrace-flags.json
 ```
 
-Then **Edit > Plugins > MemLens: Add Volatility hook findings (JSON)** and pick any file in that folder. MemLens reads every `.json` file there and should show the patched-functions list with a Source column and one more row per finding (not checked in IDA):
+Then **Edit > Plugins > MemLens: Add Volatility hook findings (JSON)** and pick any file in that folder. MemLens reads every `.json` file there and should show the patched-functions list with a Source column and one more row per finding, such as `tracepoint sched_switch` with `probe probe_sched_switch` (not checked in IDA):
 
-- **Address** is the callback Volatility found, sign-extended from the 48 bits Volatility prints; Enter should jump to it in `kernel.elf`. **Where** and **What** are Volatility's words (`tracepoint sched_switch`, `probe probe_sched_switch, priority 10`), **Target** is `kernel.elf`'s name for the callback.
-- **No repeats:** an ftrace row whose `ftrace_ops` a MemLens row's hook page loads adds Volatility to that row's Source instead of a row of its own.
-- **Field names** are Volatility 2.28.2's. A file of another plugin, or a field 2.28.2 does not write, gets one warning line in the Output window and the other files still load.
+- **Address** is the callback, sign-extended from the 48 bits Volatility prints; Enter should jump to it in `kernel.elf`.
+- **No repeats:** an ftrace row whose `ftrace_ops` a MemLens row's hook page loads is merged into that row's Source.
+- **Field names** are pinned to Volatility 2.28.2: another plugin's file, or a field 2.28.2 does not write, gets one warning line and the other files still load.
 
-On the demo's recorded JSON: 3 MemLens rows and 27 Volatility rows (3 tracepoint probes, 21 IDT vectors, 2 netfilter hooks that Volatility marks `Is Hooked: False`, 1 `ftrace_ops` that no MemLens hook page loads: the direct-call ops with callback `call_direct_funcs`). Volatility's other 2 `ftrace_ops` merge into the `do_sys_openat2` and `vfs_getattr` rows, keyboard notifiers and afinfo are empty, and each address is at the `kernel.elf` symbol Volatility names. Checked with fake IDA modules by `tests/test_volfind_stub.py` against [the recorded JSON](tests/fixtures/vol-2.28.2/findings/README.txt).
+On the demo's recorded JSON: 3 MemLens rows and 27 Volatility rows (3 tracepoint probes, 21 IDT vectors, 2 netfilter hooks that Volatility marks `Is Hooked: False`, and the direct-call `ftrace_ops` with callback `call_direct_funcs`, which no MemLens hook page loads); Volatility's other 2 `ftrace_ops` merge into the `do_sys_openat2` and `vfs_getattr` rows, and keyboard notifiers and afinfo are empty. Each address is at the `kernel.elf` symbol Volatility names. Checked with fake IDA modules by `tests/test_volfind_stub.py` against [the recorded JSON](tests/fixtures/vol-2.28.2/findings/README.txt); every row: [docs/OUTPUT.md](docs/OUTPUT.md#with-volatilitys-hook-findings).
 
 ## What it does
 

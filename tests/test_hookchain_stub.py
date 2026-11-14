@@ -1078,9 +1078,10 @@ for path in sys.argv[1:]:
         line = next(line for line in out.splitlines() if "hook chain:" in line)
         second = run()
         assert add_funcs() == [] and "; 0 functions created now (%d already in a function)\n" % len(expected) in second[2], second[2]
+        assert second[:2] == ([], []) and not [c for c in calls if c[0] in ("dref", "cmt", "funccmt", "settype")], calls
         print("%s: chain functions (judge s194 item 4): %d add_func calls, exactly the %d chain addresses of the --links lines "
               "(%d in the kernel image, %d in module, BPF and trampoline memory); %d function comments at the hooked entries; "
-              "second run 0 add_func calls" % (path, len(made), len(expected), len(kernel), len(expected) - len(kernel), len(hooked)))
+              "second run 0 add_func, add_cref, add_dref, set_name, comment or function comment calls" % (path, len(made), len(expected), len(kernel), len(expected) - len(kernel), len(hooked)))
         print("  " + line)
         for ea in made:
             print("  add_func %#x %s" % (ea, ps.at(image, ea)))

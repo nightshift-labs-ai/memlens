@@ -2,7 +2,8 @@
 """Per-CPU copies on the real demo export: the one-pass index must give what the one-by-one lookup gives.
 
 usage: python3 tests/test_demo_percpu_index.py [path/to/demo/kernel.elf [path/to/isf.json.xz]]
-The demo is in memlens-demo-debian13.zip (demo-data release). Without it the test is skipped.
+The demo is in memlens-demo-debian13.zip (demo-data release). Without it the test is skipped. The ISF defaults to
+MEMLENS_ISF, else the *.json* file next to kernel.elf; without one the test is skipped too.
 IDA is faked: names come from the ELF's .symtab and segments from its allocated sections, so this checks
 our logic on a real kernel2elf export, not IDA itself. Run twice: with the exporter's cpu<N>.<name> names,
 and with '.' stored as '_' (cpu<N>_<name>, sections _percpu_cpu<N>), in case IDA's loader does that.
@@ -14,7 +15,11 @@ elf_path = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("MEMLENS_DEMO_EL
 if not elf_path or not os.path.isfile(elf_path):
     print("demo per-CPU index test SKIPPED (no demo kernel.elf given)")
     sys.exit(0)
-isf_path = sys.argv[2] if len(sys.argv) > 2 else (glob.glob(os.path.join(os.path.dirname(elf_path), "*.json*")) or [""])[0]
+isf_path = sys.argv[2] if len(sys.argv) > 2 else (os.environ.get("MEMLENS_ISF")
+                                                 or (sorted(glob.glob(os.path.join(os.path.dirname(elf_path), "*.json*"))) or [""])[0])
+if not isf_path or not os.path.isfile(isf_path):
+    print("demo per-CPU index test SKIPPED (%s)" % ("no ISF at " + isf_path if isf_path else "no ISF next to kernel.elf; set MEMLENS_ISF"))
+    sys.exit(0)
 data = open(elf_path, "rb").read()
 
 

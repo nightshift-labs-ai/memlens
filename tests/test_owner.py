@@ -492,7 +492,7 @@ EXPECTED = {
                        "memlens_testhook.th_kill_callback", 0x162, "memlens_testhook.th_kill_ops"),
     "__x64_sys_getdents64": ("kprobe_ftrace_handler (ftrace_ops kprobe_ftrace_ops)", "kprobe_ftrace_handler", 0x162, "kprobe_ftrace_ops"),
 }
-# An export with the kernel's kprobe list (.memlens.kprobes, in exports newer than v0.3.28) names the probe instead:
+# An export with the kernel's kprobe list (.memlens.kprobes, in exports from v0.3.30 on) names the probe instead:
 # tests/vm/scenario_ftrace_d13.sh made it with 'p:memlens_kp do_sys_openat2'. The ftrace_ops references stay.
 EXPECTED_KPROBE = {"do_sys_openat2": ("kprobe memlens_kp on do_sys_openat2 (tracefs kprobe event; pre_handler kprobe_dispatcher)",
                                       "kprobe_dispatcher"),
@@ -500,7 +500,7 @@ EXPECTED_KPROBE = {"do_sys_openat2": ("kprobe memlens_kp on do_sys_openat2 (trac
                   "__x64_sys_getdents64": ("memlens_testhook.th_getdents_pre (kprobe pre_handler)", "memlens_testhook.th_getdents_pre")}
 # BPF trampolines: the program call's offset in the page, the kernel's name for the program (an export with BPF names
 # has it as bpf.<name>), and the program's address in the exports without BPF names that we know (page -> program):
-# the demo kernel.elf and the Ubuntu 24.04 export.
+# the old demo kernel.elf (the v0.3.23 export in the demo zip before 0.3.30) and the Ubuntu 24.04 export.
 EXPECTED_BPF = {"bpf_lsm_file_open": (0x53, "bpf_prog_e8932b6bae2b9745_restrict_filesystems", {0xffffffffc0004940: 0xffffffffc0004664}),
                 "__hid_bpf_tail_call": (0x53, "bpf_prog_7cc47bbf07148bfe_hid_tail_call", {0xffffffffc0043a00: 0xffffffffc0043958})}
 for path in sys.argv[1:]:

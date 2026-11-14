@@ -794,6 +794,7 @@ class ApplyTypes(ida_kernwin.action_handler_t):
         if result is None:
             return 0
         ida_kernwin.msg(report(result))
+        refresh_hook_chain()
         return 1
 
     def update(self, ctx):
@@ -1089,6 +1090,30 @@ def link_hooks(image, findings):
         set_flags_comment(address, text)
     node.setblob(json.dumps(record).encode("utf-8"), 0, HOOK_RECORD_TAG)
     return links, counts
+
+
+def refresh_hook_chain():
+    """After Apply kernel types: when Show patched kernel functions already ran on this database (its hook record is
+    there), scan kernel.elf and apply the hook chain again, so that the module ops' struct ftrace_ops type and the
+    ftrace_ops flags comments, which need the types and the layout just imported, appear without opening the list a
+    second time (README Try it opens the list first). On a database where the list never ran it does nothing and reads no
+    file. An error here is printed to the Output window and never hides the types report printed before it. Returns
+    True when the hook chain was applied again."""
+    if not ida_netnode.netnode(HOOK_RECORD, 0, True).getblob(0, HOOK_RECORD_TAG):
+        return False
+    try:
+        scanned = scan_current_input()
+        if scanned is None:
+            return False
+        links, counts = link_hooks(*scanned)
+        ida_kernwin.msg(link_report(links, counts))
+        ida_kernwin.msg("[MemLens] hook chain refreshed with this ISF's ftrace_ops layout (Show patched kernel functions "
+                        "ran before Apply kernel types)\n")
+        return True
+    except Exception:
+        ida_kernwin.msg("[MemLens] hook chain refresh stopped by this error (the types above are imported):\n%s\n"
+                        % traceback.format_exc())
+        return False
 
 
 def link_report(links, counts):

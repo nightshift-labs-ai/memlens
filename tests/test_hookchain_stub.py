@@ -423,6 +423,55 @@ with tempfile.TemporaryDirectory() as work:
                    {"ftrace_ops.flags": 16, "FTRACE_OPS_FL": {"FTRACE_OPS_FL_IPMODIFY": "0x1000"}}):
         flags_run(0x101007, broken)
         assert flag_lines() == {}, (broken, comments)
+    # Apply kernel types after Show patched kernel functions (README Try it opens the list first; judge s194 first-run F1):
+    # Apply kernel types applies the hook chain again, so the flags comments and the module ops' type appear without a
+    # second Show patched, printed after the types report; a second Apply kernel types changes nothing; on a database where
+    # the list never ran it reads no file and adds no comment; an error in the refresh still leaves the types report and 1.
+    isf_file = os.path.join(work, "flags_isf.json")
+    with open(isf_file, "w") as handle:
+        json.dump(FLAGS_ISF, handle)
+    kw = m.ida_kernwin
+    real_apply_types, real_input, real_ask, real_link = m.apply_types, nalt.get_input_file_path, getattr(kw, "ask_file", None), m.link_hooks
+    def apply_types_struct(isf_path, confirm=None):  # the fake tinfo_t knows struct ftrace_ops once the import ran
+        result = real_apply_types(isf_path, confirm)
+        if result is not None:
+            known_types.add("ftrace_ops")
+        return result
+    m.apply_types, kw.ask_file = apply_types_struct, (lambda *a: isf_file)
+    def apply_kernel_types():
+        """One activation of Apply kernel types; returns (struct ftrace_ops SetType calls, Output window text)."""
+        del calls[:]
+        assert m.ApplyTypes().activate(None) == 1, calls
+        return ([c[1:] for c in calls if c[0] == "settype" and c[2] == "struct ftrace_ops;"],
+                "".join(c[1] for c in calls if c[0] == "msg"))
+    text = "MemLens: ftrace_ops flags 0x857 = ENABLED|DYNAMIC|SAVE_REGS|RECURSION|INITIALIZED|ALLOC_TRAMP; " + NO_IPMODIFY
+    settype, out = flags_run(0x857, None, types=())  # the list first: no layout recorded, no struct in the database
+    assert flag_lines() == {} and settype == [] and m.load_layout() == {}, (flag_lines(), settype, m.load_layout())
+    settype, out = apply_kernel_types()
+    assert flag_lines() == {PAGE: [text], OPS: [text]} and settype == [(OPS, "struct ftrace_ops;")], (flag_lines(), settype, out)
+    assert "0 structs" not in out and " structs" in out and out.index(" structs") < out.index("hook chain refreshed"), out
+    assert "1 module ftrace_ops typed as struct ftrace_ops" in out, out
+    before = dict(comments)
+    settype, out = apply_kernel_types()  # again: the same types, nothing added to the hook chain
+    assert settype == [] and comments == before and not [c for c in calls if c[0] in ("cref", "setname", "cmt", "dref")], calls
+    read = []
+    database(flags_blob(0x857)); known_types.clear()
+    nalt.get_input_file_path = lambda: read.append(1) or path
+    settype, out = apply_kernel_types()  # the list never ran on this database
+    assert read == [] and settype == [] and "hook chain" not in out, (read, settype, out)
+    assert not [c for c in calls if c[0] in ("cref", "setname", "cmt", "dref")], calls
+    nalt.get_input_file_path = real_input
+    flags_run(0x857, None, types=())
+    def broken_link(image, findings): raise RuntimeError("link_hooks broke")
+    m.link_hooks = broken_link
+    try:
+        settype, out = apply_kernel_types()  # a refresh that raises
+    finally:
+        m.link_hooks = real_link
+    assert " structs" in out and "hook chain refresh stopped by this error" in out and "link_hooks broke" in out, out
+    assert out.index(" structs") < out.index("hook chain refresh stopped"), out
+    m.apply_types, kw.ask_file = real_apply_types, real_ask
+    known_types.clear()
     # A kprobe trampoline as kernels before 5.11 build it (review s193 MAJOR): kprobe_ftrace_ops and kprobe_ipmodify_ops
     # have no RECURSION_SAFE there, so the page calls ftrace_ops_assist_func, not kprobe_ftrace_handler. Its kind is then
     # "ftrace" and its Owner comes from the ops, whose func is kprobe_ftrace_handler: still no flags comment and no type,
@@ -647,4 +696,29 @@ for path in sys.argv[1:]:
     run()
     assert flag_comments() == {} and [c[1:] for c in calls if c[0] == "settype"] == settype, (comments, calls)
     print("    with that ISF's FTRACE_OPS_FL_ enum removed: no flags comment, the same %d SetType" % len(settype))
+    # README Try it order (judge s194 first-run F1): Show patched kernel functions on a fresh database, then Apply kernel
+    # types with this ISF and NO second Show patched: the same flags comments and SetType as above, from the refresh. The
+    # stand-in for apply_types records what the real one does for the hook chain (this ISF's layout, struct ftrace_ops in
+    # the database) without importing the whole ISF again; the hand-made case above runs the real apply_types.
+    database(blob)
+    known_types.clear()
+    run()
+    assert flag_comments() == {} and not [c for c in calls if c[0] == "settype"], calls
+    real_apply_types, real_report, kw = m.apply_types, m.report, m.ida_kernwin
+    real_ask = getattr(kw, "ask_file", None)
+    def apply_types_standin(isf_path_, confirm=None):
+        known_types.add("ftrace_ops")
+        m.save_layout(layout)
+        return {"stand-in": isf_path_}
+    m.apply_types, m.report, kw.ask_file = apply_types_standin, (lambda result: "[MemLens] types (stand-in)\n"), (lambda *a: isf_path)
+    try:
+        del calls[:]
+        assert m.ApplyTypes().activate(None) == 1, calls
+    finally:
+        m.apply_types, m.report, kw.ask_file = real_apply_types, real_report, real_ask
+    refreshed = [c[1:] for c in calls if c[0] == "settype"]
+    apply_out = "".join(c[1] for c in calls if c[0] == "msg")
+    assert (flag_comments(), refreshed) == (flagged, settype) and "hook chain refreshed" in apply_out, (flag_comments(), refreshed, apply_out)
+    print("    list first, then Apply kernel types (no second list): the same %d flags comments and %d SetType" % (
+        len(flagged), len(refreshed)))
     known_types.clear()

@@ -23,6 +23,9 @@ exactly what Show patched kernel functions writes (the same comments, function c
 types, in the same order; USAGE item 5 says it does what that action does), with no error in the Output window; two
 mutants of memlens_entry.show_patches must fail this (the entry comments skipped on the Volatility path, and the scan's
 line written there instead, as before the merge of review s200).
+Findings of another memory image (review s200): when more than half of the Volatility rows point outside kernel.elf, one
+Output window warning says so and the list is still shown (hand-made: 2 of 2 warn, 1 of 2 and 1 of 4 do not; with both
+samples, each sample's JSON on the other sample's kernel.elf).
 """
 import contextlib, hashlib, inspect, io, json, os, runpy, shutil, struct, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -102,6 +105,12 @@ def write(folder, name, data):
 
 def warnings(out):
     return [line for line in out.splitlines() if line.startswith("[MemLens] warning: ")]
+
+
+def elsewhere(outside, total):
+    """The Output window line when outside of the total Volatility rows point outside kernel.elf (review s200)."""
+    return ("[MemLens] warning: %d of the %d Volatility rows point outside this kernel.elf: these findings may come from "
+            "another memory image than the one this kernel.elf was exported from" % (outside, total))
 
 
 @contextlib.contextmanager
@@ -368,6 +377,16 @@ with tempfile.TemporaryDirectory() as work:
             database(blob, path)
             assert check_handmade(findings), "mutant %r passed the hand-made checks" % name
     same_writes(blob, path, ps.Image(blob), os.path.join(findings, "tracepoints.json"), "hand-made")
+    # Findings of another memory image: more than half of the Volatility rows outside kernel.elf give one warning line,
+    # and the list is still shown; half or fewer give none (check_handmade above: 1 of 4, no such line).
+    for name, rows, warned in (("elsewhere", [HIDDEN, HIDDEN + 0x100], True), ("half", [HIDDEN, NOTIFIER], False)):
+        other = os.path.join(work, name)
+        os.mkdir(other)
+        write(other, "keyboard_notifiers.json", [{"Address": a & MASK48, "Module": "m", "Symbol": None, "__children": []} for a in rows])
+        database(blob, path)
+        result, table, out = add_findings(os.path.join(other, "keyboard_notifiers.json"))
+        assert result == 1 and table is not None and table.OnGetSize() == 1 + len(rows), (result, out)
+        assert warnings(out) == ([elsewhere(2, 2)] if warned else []), out
     # Nothing read at all (every file skipped): a warning, no list.
     empty = os.path.join(work, "nothing")
     os.mkdir(empty)
@@ -378,8 +397,8 @@ with tempfile.TemporaryDirectory() as work:
     result, table, out = add_findings("")
     assert result == 0 and table is None and calls == [], calls
     print("hand-made: 5 rows with a Source column (1 MemLens row with Volatility's ftrace_ops merged into it, 4 Volatility "
-          "rows, one outside kernel.elf), one warning line each for the unknown file and tty_check's; %d mutants fail"
-          % len(HANDMADE_MUTANTS))
+          "rows, one outside kernel.elf), one warning line each for the unknown file and tty_check's; %d mutants fail; "
+          "2 of 2 Volatility rows outside kernel.elf: one warning line, 1 of 2: none" % len(HANDMADE_MUTANTS))
 
 
 # --- the two public samples ------------------------------------------------------------------------------------------
@@ -465,10 +484,13 @@ def check_sample(sample, image, plain):
     return errors
 
 
+given = {}  # sample: its kernel.elf path
 for path in sys.argv[1:]:
     with open(path, "rb") as handle:
         blob = handle.read()
     sample = SAMPLES.get(hashlib.sha256(blob).hexdigest())
+    if sample is not None:
+        given[sample] = path
     if sample is None:
         print("SKIP: %s is neither public sample's kernel.elf (by SHA-256): no recorded Volatility JSON for it" % path)
         continue
@@ -496,4 +518,20 @@ for path in sys.argv[1:]:
             assert check_sample(sample, image, plain), "mutant %r passed the %s checks" % (name, sample)
     print("  %d mutants fail the %s checks" % (len(SAMPLE_MUTANTS), sample))
     same_writes(blob, path, image, os.path.join(FIXTURES, sample, "tracepoints.json"), "  " + sample)
+# Each sample's recorded JSON on the other sample's kernel.elf (Try it step 4 run in the wrong database): every Volatility
+# row points outside it (another boot, another KASLR offset), nothing merges, and the Output window says so once.
+if len(given) == 2:
+    for sample, other in (("testhook", "demo"), ("demo", "testhook")):
+        with open(given[sample], "rb") as handle:
+            blob = handle.read()
+        database(blob, given[sample])
+        result, table, out = add_findings(os.path.join(FIXTURES, other, "tracepoints.json"))
+        rows = lines_of(table)
+        theirs = [row for row in rows if row[6].startswith("Volatility ")]
+        outside = [row for row in theirs if row[3].endswith(" (not in this kernel.elf)")]
+        assert result == 1 and theirs and len(outside) == len(theirs), (result, len(theirs), len(outside))
+        assert not [row for row in rows if row[6].startswith("MemLens; ")], rows[:3]
+        assert warnings(out) == [elsewhere(len(theirs), len(theirs))], out
+        print("%s kernel.elf with the %s JSON: %d of %d Volatility rows outside it, none merged; Output: %s"
+              % (sample, other, len(outside), len(theirs), warnings(out)[0]))
 print("volfind stub tests OK")

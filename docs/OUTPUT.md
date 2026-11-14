@@ -101,6 +101,62 @@ struct kstat {
 
 Typed globals come from the same ISF, for example `struct task_struct init_task`, `struct net init_net` and `struct static_key nf_hooks_needed[11][5]`. The ISF declares 79,316 typed globals for this kernel, but only those with a symbol in the ELF can be typed: 33,500 in the demo `kernel.elf`, plus 388 per-CPU variables, typed in each CPU's copy (`cpu0.runqueues`, `cpu1.runqueues`). Another 78 names that the ISF declares as variables are kernel functions here (`schedule`, `strlen`, ...): they are left alone, because typing code as data would break it. The other 45,350 have address 0 in the ISF (45,344) or an address outside exported memory (6, among them small assembler constants such as `vector`). The Output window says how many were typed and how many have no symbol in your database.
 
+## The second sample in full (a hook set by a module)
+
+Real output for the `kernel.elf` in `memlens-demo-testhook.zip` (the test module [tests/vm/testhook](../tests/vm/testhook/README.md) loaded in the same Debian 13 kernel as the demo; binutils `objdump` and `patchscan.py`, not IDA).
+
+The hooked entry: ftrace turned the `__fentry__` NOP of `__x64_sys_kill` into a call to a trampoline page that MemLens copied from memory:
+
+```
+ffffffffb08dcac0 <__x64_sys_kill>:
+ffffffffb08dcac0:	endbr64
+ffffffffb08dcac4:	call   ffffffffc0cd0000 <memlens_target_ffffffffc0cd0000>
+```
+
+The trampoline loads its `ftrace_ops` from the slot after its `ret` and calls `ftrace_ops_assist_func` (the module's ops is flagged RECURSION), so the callback is not a direct call:
+
+```
+ffffffffc0cd0065:	mov    0xf6(%rip),%rdx        # ffffffffc0cd0162 <memlens_target_ffffffffc0cd0000+0x162>
+ffffffffc0cd00d9:	call   ffffffffb0a0c740 <ftrace_ops_assist_func>
+ffffffffc0cd015d:	ret
+```
+
+The slot holds `0xffffffffc0cc80a0`, which is `memlens_testhook.th_kill_ops`, and that ops' `func` (offset 0) holds `0xffffffffc0cc6010`, the module's callback at its live address:
+
+```
+ffffffffc0cc6010 <memlens_testhook.th_kill_callback>:
+ffffffffc0cc6010:	endbr64
+ffffffffc0cc6014:	lock incq 0x26ac(%rip)        # ffffffffc0cc86c8 <memlens_testhook.th_kill_calls>
+ffffffffc0cc601c:	ret
+```
+
+`patchscan.py --links kernel.elf` (the hook chain the IDA list applies; `xref` lines become cross-references, `rename` lines names, `owner` lines the Owner column):
+
+```
+0xffffffffb08dcac0	__x64_sys_kill	call to memory with no symbol	memlens_target_ffffffffc0cd0000 (calls ftrace_ops_assist_func, ftrace)
+0xffffffffb0af9250	bpf_lsm_file_open	call to memory with no symbol	memlens_target_ffffffffc01a0940 (calls __bpf_tramp_enter, BPF trampoline)
+0xffffffffb0c65950	__x64_sys_getdents64	call to memory with no symbol	memlens_target_ffffffffc0cd2000 (calls kprobe_ftrace_handler, kprobe via ftrace)
+xref	0xffffffffb08dcac4	0xffffffffc0cd0000	call	__x64_sys_kill+0x4 -> memlens_target_ffffffffc0cd0000
+xref	0xffffffffb0af9254	0xffffffffc01a0940	call	bpf_lsm_file_open+0x4 -> memlens_target_ffffffffc01a0940
+xref	0xffffffffb0c65954	0xffffffffc0cd2000	call	__x64_sys_getdents64+0x4 -> memlens_target_ffffffffc0cd2000
+xref	0xffffffffb26670e0	0xffffffffb0894ed0	data	kprobe_ftrace_ops -> kprobe_ftrace_handler
+xref	0xffffffffc01a0963	0xffffffffb0acea70	call	memlens_target_ffffffffc01a0940+0x23 -> __bpf_tramp_enter
+xref	0xffffffffc01a0993	0xffffffffc01a0668	call	memlens_target_ffffffffc01a0940+0x53 -> bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems
+xref	0xffffffffc0cc80a0	0xffffffffc0cc6010	data	memlens_testhook.th_kill_ops -> memlens_testhook.th_kill_callback
+xref	0xffffffffc0cd00d9	0xffffffffb0a0c740	call	memlens_target_ffffffffc0cd0000+0xd9 -> ftrace_ops_assist_func
+xref	0xffffffffc0cd0162	0xffffffffc0cc80a0	data	memlens_target_ffffffffc0cd0000+0x162 -> memlens_testhook.th_kill_ops
+xref	0xffffffffc0cd20d9	0xffffffffb0894ed0	call	memlens_target_ffffffffc0cd2000+0xd9 -> kprobe_ftrace_handler
+xref	0xffffffffc0cd2162	0xffffffffb26670e0	data	memlens_target_ffffffffc0cd2000+0x162 -> kprobe_ftrace_ops
+rename	0xffffffffc01a0940	memlens_target_ffffffffc01a0940	bpf_tramp_bpf_lsm_file_open
+rename	0xffffffffc0cd0000	memlens_target_ffffffffc0cd0000	ftrace_tramp___x64_sys_kill
+rename	0xffffffffc0cd2000	memlens_target_ffffffffc0cd2000	kprobe_ftrace_tramp___x64_sys_getdents64
+owner	0xffffffffc01a0940	0xffffffffc01a0668	bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems (BPF program)
+owner	0xffffffffc0cd0000	0xffffffffc0cc6010	memlens_testhook.th_kill_callback (ftrace_ops memlens_testhook.th_kill_ops)
+owner	0xffffffffc0cd2000	0xffffffffc0cc6040	memlens_testhook.th_getdents_pre (kprobe pre_handler)
+```
+
+The kprobe on `__x64_sys_getdents64` runs through ftrace too, so its page's `ftrace_ops` is the shared `kprobe_ftrace_ops`; the Owner comes from the kernel's kprobe list in the export (`.memlens.kprobes`), whose probe at `__x64_sys_getdents64+0x4` has the module's `pre_handler`. The guest's own view right before the dump (tracefs `enabled_functions`, the kprobes list and `/proc/kallsyms`) is in [tests/vm/testhook/hook-truth-guest.txt](../tests/vm/testhook/hook-truth-guest.txt).
+
 ## Details
 
 A memory image holds the live kernel: its modules and its patched code. In full:

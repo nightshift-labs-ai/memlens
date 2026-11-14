@@ -449,7 +449,7 @@ with tempfile.TemporaryDirectory() as work:
     assert flag_lines() == {} and settype == [] and m.load_layout() == {}, (flag_lines(), settype, m.load_layout())
     settype, out = apply_kernel_types()
     assert flag_lines() == {PAGE: [text], OPS: [text]} and settype == [(OPS, "struct ftrace_ops;")], (flag_lines(), settype, out)
-    assert "0 structs" not in out and " structs" in out and out.index(" structs") < out.index("hook chain refreshed"), out
+    assert "0 structs" not in out and " structs" in out and out.index(" structs") < out.index("hook chain applied again with"), out
     assert "1 module ftrace_ops typed as struct ftrace_ops" in out, out
     before = dict(comments)
     settype, out = apply_kernel_types()  # again: the same types, nothing added to the hook chain
@@ -470,6 +470,35 @@ with tempfile.TemporaryDirectory() as work:
         m.link_hooks = real_link
     assert " structs" in out and "hook chain refresh stopped by this error" in out and "link_hooks broke" in out, out
     assert out.index(" structs") < out.index("hook chain refresh stopped"), out
+    # The same when reading kernel.elf fails (review s195 MINOR 2), and when the hook record cannot be read (NIT 4).
+    real_scan = m.scan_current_input
+    for broken in ("scan", "record"):
+        flags_run(0x857, None, types=())
+        def raising(*a):
+            raise OSError("%s broke" % broken)
+        if broken == "scan":
+            m.scan_current_input = raising
+        else:
+            real_getblob = netnode.getblob
+            netnode.getblob = lambda self, start, tag: raising() if tag == m.HOOK_RECORD_TAG else real_getblob(self, start, tag)
+        try:
+            settype, out = apply_kernel_types()
+        finally:
+            m.scan_current_input = real_scan
+            if broken == "record":
+                netnode.getblob = real_getblob
+        assert out.index(" structs") < out.index("hook chain refresh stopped") and "%s broke" % broken in out, (broken, out)
+    # kernel.elf moved and its file prompt cancelled (review s195 MINOR 3): the Output window says the chain was not applied.
+    flags_run(0x857, None, types=())
+    nalt.get_input_file_path, kw.ask_file = (lambda: os.path.join(work, "moved.elf")), (lambda *a: isf_file if "ISF" in a[-1] else None)
+    settype, out = apply_kernel_types()
+    nalt.get_input_file_path, kw.ask_file = real_input, (lambda *a: isf_file)
+    assert settype == [] and flag_lines() == {} and "hook chain not applied again" in out, out
+    # A cancelled import (review s195 MINOR 1): no refresh after it.
+    flags_run(0x857, None, types=())
+    m.apply_types = lambda isf_path, confirm=None: dict(apply_types_struct(isf_path, confirm), cancelled="by the user")
+    settype, out = apply_kernel_types()
+    assert "CANCELLED" in out and "hook chain" not in out and settype == [] and flag_lines() == {}, out
     m.apply_types, kw.ask_file = real_apply_types, real_ask
     known_types.clear()
     # A kprobe trampoline as kernels before 5.11 build it (review s193 MAJOR): kprobe_ftrace_ops and kprobe_ipmodify_ops
@@ -718,7 +747,7 @@ for path in sys.argv[1:]:
         m.apply_types, m.report, kw.ask_file = real_apply_types, real_report, real_ask
     refreshed = [c[1:] for c in calls if c[0] == "settype"]
     apply_out = "".join(c[1] for c in calls if c[0] == "msg")
-    assert (flag_comments(), refreshed) == (flagged, settype) and "hook chain refreshed" in apply_out, (flag_comments(), refreshed, apply_out)
+    assert (flag_comments(), refreshed) == (flagged, settype) and "hook chain applied again with" in apply_out, (flag_comments(), refreshed, apply_out)
     print("    list first, then Apply kernel types (no second list): the same %d flags comments and %d SetType" % (
         len(flagged), len(refreshed)))
     known_types.clear()

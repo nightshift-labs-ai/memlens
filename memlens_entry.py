@@ -794,7 +794,8 @@ class ApplyTypes(ida_kernwin.action_handler_t):
         if result is None:
             return 0
         ida_kernwin.msg(report(result))
-        refresh_hook_chain()
+        if not result.get("cancelled"):  # a cancelled import is partial: leave the hook chain as it is
+            refresh_hook_chain()
         return 1
 
     def update(self, ctx):
@@ -1099,16 +1100,18 @@ def refresh_hook_chain():
     second time (README Try it opens the list first). On a database where the list never ran it does nothing and reads no
     file. An error here is printed to the Output window and never hides the types report printed before it. Returns
     True when the hook chain was applied again."""
-    if not ida_netnode.netnode(HOOK_RECORD, 0, True).getblob(0, HOOK_RECORD_TAG):
-        return False
     try:
+        if not ida_netnode.netnode(HOOK_RECORD, 0, True).getblob(0, HOOK_RECORD_TAG):
+            return False
         scanned = scan_current_input()
         if scanned is None:
+            ida_kernwin.msg("[MemLens] hook chain not applied again (no kernel.elf); run Show patched kernel functions "
+                            "to apply it\n")
             return False
         links, counts = link_hooks(*scanned)
         ida_kernwin.msg(link_report(links, counts))
-        ida_kernwin.msg("[MemLens] hook chain refreshed with this ISF's ftrace_ops layout (Show patched kernel functions "
-                        "ran before Apply kernel types)\n")
+        ida_kernwin.msg("[MemLens] hook chain applied again with the ftrace_ops layout recorded in this database (Show "
+                        "patched kernel functions ran before Apply kernel types)\n")
         return True
     except Exception:
         ida_kernwin.msg("[MemLens] hook chain refresh stopped by this error (the types above are imported):\n%s\n"

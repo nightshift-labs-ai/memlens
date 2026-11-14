@@ -44,11 +44,13 @@ Every sample is a QEMU guest captured by us; addresses differ per boot because o
 | Ubuntu 24.04, 6.8.0-147 | 61 | 268,367 | 27,131 | `__hid_bpf_tail_call` |
 | Ubuntu 26.04, 7.0.0-38 | 72 | 317,512 | 37,167 | none |
 
+The symbols were counted before the exporter wrote BPF names, which it does from v0.3.28 on: on the "hooks set" sample they add 14 symbols (234,095).
+
 Checks with tools independent of this code (`tests/check_elf.sh`, binutils and a short Python step): no LOAD segment overlaps, all addresses are canonical, `linux_banner` reads back the true kernel version, and `__x64_sys_read`, `nf_hook_slow` and `nft_do_chain` disassemble to real function prologues where those symbols are present.
 
 On Debian 12, Debian 13 and Ubuntu 26.04, the ELF was also imported into Ghidra 12.2 headless. It loaded, and the same functions disassembled correctly.
 
-Hook test: on the "hooks set" sample our script placed an ftrace filter on `vfs_getattr` and a kprobe on `do_sys_openat2` (`tests/vm/scenario_ftrace_d13.sh`, standard tracing only, no custom module). Both are reported. `bpf_lsm_file_open` and `__hid_bpf_tail_call` were not set by us; they have the pattern of BPF attachments, which we did not confirm separately.
+Hook test: on the "hooks set" sample our script placed an ftrace filter on `vfs_getattr` and a kprobe on `do_sys_openat2` (`tests/vm/scenario_ftrace_d13.sh`, standard tracing only, no custom module). Both are reported. `bpf_lsm_file_open` and `__hid_bpf_tail_call` were not set by us; they have the pattern of BPF attachments, and exports from v0.3.28 on name the programs: `bpf.bpf_prog_e8932b6bae2b9745_restrict_filesystems` (systemd's BPF LSM program) and `bpf.bpf_prog_7cc47bbf07148bfe_hid_tail_call`.
 
 False positives found and removed during testing, each with a unit test in `tests/test_patchscan.py`: ftrace's own trampolines, `call __fentry__` sites that were never converted, reads past the end of a shorter `sys_call_table`, and compiler suffixes such as `.constprop.0` mistaken for module symbols.
 

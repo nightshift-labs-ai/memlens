@@ -5,7 +5,7 @@ It attaches to two syscall entry points with public kernel APIs and only counts 
 
 | Hook | API | Callback (what the Owner column should name) |
 |---|---|---|
-| `__x64_sys_kill` | `register_ftrace_function` (flags `SAVE_REGS` + `RECURSION`, so ftrace calls it through `ftrace_ops_assist_func`) | `memlens_testhook.th_kill_callback` |
+| `__x64_sys_kill` | `register_ftrace_function` (flags `SAVE_REGS` + `RECURSION`; `RECURSION` makes ftrace call it through `ftrace_ops_assist_func`) | `memlens_testhook.th_kill_callback` |
 | `__x64_sys_getdents64` | `register_kprobe` with a `pre_handler` (on an ftrace site, so the kprobe runs via ftrace) | `memlens_testhook.th_getdents_pre` |
 
 These are the same APIs that tracers use, and that ftrace-based rootkits use. This module does not change arguments,

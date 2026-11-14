@@ -86,7 +86,7 @@ The rest of the demo output (the patch scan, the hook chain's cross-references, 
 
 ### A hook set by a module (second sample)
 
-The demo's hooks come from the kernel's own tracing. For the rootkit-style case, a second capture of the same kernel loads a small test module, [tests/vm/testhook](tests/vm/testhook/README.md). It hooks `__x64_sys_kill` with an ftrace callback and `__x64_sys_getdents64` with a kprobe. These are the APIs that ftrace-based rootkits use; this module only counts calls. Here is the same list for its `kernel.elf`, built the same way (fake IDA modules, `tests/test_hookchain_stub.py`):
+The demo's hooks come from the kernel's own tracing (plus systemd's BPF LSM program on `bpf_lsm_file_open`, in both captures). For the rootkit-style case, a second capture of the same kernel loads a small test module, [tests/vm/testhook](tests/vm/testhook/README.md). It hooks `__x64_sys_kill` with an ftrace callback and `__x64_sys_getdents64` with a kprobe. These are the APIs that ftrace-based rootkits use; this module only counts calls. Here is the same list for its `kernel.elf`, built the same way (fake IDA modules, `tests/test_hookchain_stub.py`):
 
 ```
 Address          | Where                | Target                                   | Handler                                   | Owner

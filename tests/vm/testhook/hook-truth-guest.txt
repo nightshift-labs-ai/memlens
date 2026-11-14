@@ -1,7 +1,7 @@
 # Captured in the guest right before the memory dump (tests/vm/scenario_testhook_d13.sh).
 # uname -r:
 6.12.115+deb13.1-amd64
-# dmesg:
+# kernel log (serial console, at insmod):
 [   28.198132] memlens_testhook: loading out-of-tree module taints kernel.
 [   28.198469] memlens_testhook: module verification failed: signature and/or required key missing - tainting kernel
 [   28.489335] memlens_testhook: ftrace callback on __x64_sys_kill, kprobe on __x64_sys_getdents64 (counting only)

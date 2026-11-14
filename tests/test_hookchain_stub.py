@@ -29,10 +29,10 @@ RENAME = 256 | 64  # SN_NOWARN | SN_NON_AUTO: a user name, so IDA does not repla
 
 # ftrace_ops flags (judge s192 item 5): the comment texts, the small ISFs the hand-made cases take their layout from, and
 # the database's types (the fake tinfo_t knows struct ftrace_ops only while known_types has it, as after Apply kernel types).
-NO_IPMODIFY = ("no IPMODIFY: the callback did not declare that it may change where the hooked function continues (a "
+NO_IPMODIFY = ("no IPMODIFY: the ops does not declare that its callback may change where the hooked function continues (a "
                "declaration, not a guarantee: read the callback to be sure)")
-IPMODIFY_TEXT = ("IPMODIFY: the callback declared that it may change where the hooked function continues (as livepatch and "
-                 "ftrace hooks that replace a function do)")
+IPMODIFY_TEXT = ("IPMODIFY: the ops declares that its callback may change where the hooked function continues (as livepatch "
+                 "and ftrace hooks that replace a function do)")
 FL_6_12 = ["ENABLED", "DYNAMIC", "SAVE_REGS", "SAVE_REGS_IF_SUPPORTED", "RECURSION", "STUB", "INITIALIZED", "DELETED", "ADDING",
            "REMOVING", "MODIFYING", "ALLOC_TRAMP", "IPMODIFY", "PID", "RCU", "TRACE_ARRAY", "PERMANENT", "DIRECT", "SUBOP"]
 def flags_isf(names, flags_field=True):

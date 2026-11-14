@@ -499,8 +499,9 @@ def ftrace_ops_func_offset(isf):
 
 # ftrace_ops.flags (include/linux/ftrace.h). The FTRACE_OPS_FL_* values are an anonymous enum whose numbering changed
 # across kernel versions, so they are only ever read by name from that kernel's ISF, never assumed. IPMODIFY is the flag
-# a callback sets when it may change where the hooked function continues (livepatch, ftrace hooks that replace a
-# function). It is a declaration: the x86 trampolines of both samples copy regs->ip back after every callback.
+# whoever registers an ops sets when its callback may change where the hooked function continues (livepatch, ftrace
+# hooks that replace a function). It is a declaration: the x86 trampolines of both samples copy regs->ip back after every
+# callback.
 FTRACE_OPS_FL = "FTRACE_OPS_FL_"
 IPMODIFY = FTRACE_OPS_FL + "IPMODIFY"
 ENABLED = FTRACE_OPS_FL + "ENABLED"  # set while the ops is registered
@@ -539,11 +540,11 @@ def ops_flags_text(flags, values):
     if rest:
         names.append("%#x" % rest)
     if flags & ipmodify == ipmodify:
-        meaning = ("IPMODIFY: the callback declared that it may change where the hooked function continues (as livepatch "
-                   "and ftrace hooks that replace a function do)")
+        meaning = ("IPMODIFY: the ops declares that its callback may change where the hooked function continues (as "
+                   "livepatch and ftrace hooks that replace a function do)")
     else:
-        meaning = ("no IPMODIFY: the callback did not declare that it may change where the hooked function continues (a "
-                   "declaration, not a guarantee: read the callback to be sure)")
+        meaning = ("no IPMODIFY: the ops does not declare that its callback may change where the hooked function continues "
+                   "(a declaration, not a guarantee: read the callback to be sure)")
     return OPS_FLAGS_PREFIX + "%#x = %s; %s" % (flags, "|".join(names) or "none", meaning)
 
 

@@ -117,7 +117,7 @@ flowchart LR
 - **Every kernel type**: all structs, unions and enums from a Volatility 3 ISF, as one C header with exact layouts.
 - **Typed globals**: kernel data symbols get their real type, so `init_task` becomes a `struct task_struct`.
 - **Per-CPU variables, one copy per CPU**: each CPU's live copy (`cpu0.runqueues`, `cpu1.pcpu_hot`, ...), typed like the globals.
-- **Patched kernel functions**: entries rewritten by ftrace, kprobes, BPF trampolines or hook code, and syscall slots that leave the handlers, with the hook's owner when the memory shows it (the BPF program, the `ftrace_ops` and its callback, or a module's callback; for an ftrace-based kprobe, in an export newer than v0.3.28, the probe itself: its tracefs event name or the module function its `pre_handler` is, for a kretprobe its `handler`).
+- **Patched kernel functions**: entries rewritten by ftrace, kprobes, BPF trampolines or hook code, and syscall slots that leave the handlers, with the hook's owner when the memory shows it (the BPF program, the `ftrace_ops` and its callback, or a module's callback; for an ftrace-based kprobe, in an export from v0.3.30 on, the probe itself: its tracefs event name or the module function its `pre_handler` is, for a kretprobe its `handler`).
 
 The full description of each is under [Details](docs/OUTPUT.md#details).
 

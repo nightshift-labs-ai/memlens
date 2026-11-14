@@ -192,6 +192,10 @@ def check(readme, limits, output_md, links):
     if "`restrict_filesy`, `BPF_PROG_TYPE_LSM`" not in text:
         errors.append("the section does not quote linux.ebpf's row as printed")
 
+    shared = re.search(r"[^.]*the Named row does not count them as a hook's owner", text)
+    if not shared or any("`%s`" % name not in shared.group(0) for name in SHARED - {"-"}):
+        errors.append("the section does not say which shared callbacks the Named row does not count: %s"
+                      % ", ".join(sorted(SHARED - {"-"})))
     named = (sum(r["hooked"] != "-" for r in rows), sum(r["callback"] not in SHARED for r in rows),
              sum(r["callback"] == "-" and r["module"] != "__kernel__" for r in rows))
     mine = (sum(r["where"] not in ("", "-") for r in rows),

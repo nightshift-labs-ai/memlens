@@ -18,8 +18,13 @@ names, netfilter's "Is Hooked" verbatim, the MemLens rows unchanged, and no Vola
 (an ftrace row whose ftrace_ops a MemLens row's hook page loads is merged into that row), and the IDT rows after the
 other Volatility rows. Then mutants must fail the same checks: no sign extension and no merge of ftrace rows by ops
 address (both cases), keyboard notifiers read from a file with more fields (hand-made), IDT rows not last (samples).
+On every kernel.elf (hand-made and samples), with its executable segments as IDA's: the action writes to the database
+exactly what Show patched kernel functions writes (the same comments, function comments, xrefs, names, functions and
+types, in the same order; USAGE item 5 says it does what that action does), with no error in the Output window; two
+mutants of memlens_entry.show_patches must fail this (the entry comments skipped on the Volatility path, and the scan's
+line written there instead, as before the merge of review s200).
 """
-import contextlib, hashlib, io, json, os, runpy, shutil, struct, sys, tempfile
+import contextlib, hashlib, inspect, io, json, os, runpy, shutil, struct, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
 import patchscan as ps
@@ -28,6 +33,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     g = runpy.run_path(os.path.join(HERE, "test_plugin_stub.py"))
     builder = runpy.run_path(os.path.join(HERE, "test_patchscan.py"))
 m, calls, nalt, names, blobs, comments, kw = g["m"], g["calls"], g["nalt"], g["names"], g["blobs"], g["comments"], g["kw"]
+fidc, functions, func_comments, func_rep_comments = g["idc"], g["functions"], g["func_comments"], g["func_rep_comments"]
 elf, call, BASE, TEXT = builder["elf"], builder["call"], builder["BASE"], builder["TEXT"]
 import volfind  # noqa: E402  (memlens_entry put the repository folder on sys.path)
 
@@ -61,6 +67,9 @@ def database(blob, path):
     names.update({s[2]: s[0] for s in ps.Image(blob).symbols if s[2].startswith(ps.TARGET_PREFIX)})
     blobs.clear()
     comments.clear()
+    functions.clear()
+    func_comments.clear()
+    func_rep_comments.clear()
     nalt.get_input_file_path = lambda: path
 
 
@@ -109,6 +118,93 @@ MUTANTS = (("no sign extension", "sign_extend", lambda value: value if isinstanc
            ("no merge of ftrace rows by ops address", "repeats", lambda finding, by_ops: []))
 HANDMADE_MUTANTS = MUTANTS + (("keyboard notifiers read from a file with more fields (tty_check's)", "EXACT", ()),)
 SAMPLE_MUTANTS = MUTANTS + (("IDT rows not after the other Volatility rows", "LAST", ()),)
+
+# --- the two actions write the same to the database --------------------------------------------------------------------
+# Since the merge of review s200, show_patches is the body of both actions: Add Volatility hook findings links the hook
+# chain, makes the chain's functions and writes the entries' comments (owner first) as Show patched kernel functions does.
+WRITES = ("cmt", "funccmt", "cref", "dref", "setname", "addfunc", "settype")  # the fake modules' database writes
+ENTRY_CALL = "        comment_entries(image, findings, links, names)\n"  # in memlens_entry.show_patches
+ENTRY_MUTANTS = (("the entry comments skipped on the Volatility path",
+                  "        if volatility is None:\n    " + ENTRY_CALL),
+                 ("the scan's line at each entry on the Volatility path (volfind197 before the merge)",
+                  "        if volatility is None:\n    " + ENTRY_CALL + "        else:\n"
+                  "            for address, _, what, target, _ in findings:\n"
+                  "                add_comment(address, \"MemLens: %s %s\" % (what, target))\n"))
+
+
+@contextlib.contextmanager
+def entry_mutant(replacement):
+    """memlens_entry.show_patches with ENTRY_CALL replaced (both actions call it by its module name)."""
+    good = m.show_patches
+    source = inspect.getsource(good)
+    assert source.count(ENTRY_CALL) == 1, source
+    exec(compile(source.replace(ENTRY_CALL, replacement), m.__file__, "exec"), vars(m))
+    try:
+        yield
+    finally:
+        m.show_patches = good
+
+
+def executable(image):
+    """A fake idc.get_segm_attr from the ELF's segments: read+exec (5) in an executable one, read (4) in the others,
+    AssertionError where there is no segment (as idc.get_segm_attr raises), so that add_func runs along the chain."""
+    def get_segm_attr(ea, attr):
+        segment = image.segment(ea)
+        if segment is None:
+            raise AssertionError("could not find segment at 0x%x" % ea)
+        return 5 if segment[3] else 4
+    return get_segm_attr
+
+
+def database_writes(blob, path, image, pick=None):
+    """On a fresh database: the database writes of Show patched kernel functions (pick None) or Add Volatility hook
+    findings with pick, the comments and function comments afterwards, and the Output window."""
+    good = fidc.get_segm_attr
+    fidc.get_segm_attr = executable(image)
+    try:
+        database(blob, path)
+        if pick is None:
+            show_plain()
+            out = "".join(c[1] for c in calls if c[0] == "msg")
+        else:
+            result, table, out = add_findings(pick)
+            assert result == 1 and table is not None, (result, out)
+        return [c for c in calls if c[0] in WRITES], dict(comments), dict(func_comments), out
+    finally:
+        fidc.get_segm_attr = good
+
+
+def check_same_writes(blob, path, image, pick):
+    """Errors when Add Volatility hook findings does not write what Show patched kernel functions writes (empty when
+    right)."""
+    plain, theirs = database_writes(blob, path, image), database_writes(blob, path, image, pick)
+    errors = []
+    if not any(c[0] == "addfunc" for c in plain[0]) or not plain[2] or \
+            not any(text.startswith(ps.ENTRY_PREFIX + " by ") for text in plain[1].values()):
+        errors.append("Show patched kernel functions made no function, function comment or owner-first entry comment")
+    for n, what in ((0, "database writes"), (1, "comments"), (2, "function comments")):
+        if theirs[n] != plain[n]:
+            errors.append("%s differ:\n  Show patched: %s\n  Volatility:   %s" % (what, plain[n], theirs[n]))
+    if "stopped by this error" in plain[3] + theirs[3]:
+        errors.append("an error in the Output window:\n%s\n%s" % (plain[3], theirs[3]))
+    return errors
+
+
+def same_writes(blob, path, image, pick, label):
+    """check_same_writes must pass, and fail with each ENTRY_MUTANTS mutant; prints what was compared."""
+    errors = check_same_writes(blob, path, image, pick)
+    assert not errors, "%s:\n  %s" % (label, "\n  ".join(errors))
+    writes, entry_comments, function_comments, _ = database_writes(blob, path, image, pick)
+    kinds = {}
+    for c in writes:
+        kinds[c[0]] = kinds.get(c[0], 0) + 1
+    for name, replacement in ENTRY_MUTANTS:
+        with entry_mutant(replacement):
+            assert check_same_writes(blob, path, image, pick), "mutant %r passed the %s checks" % (name, label)
+    print("%s: Add Volatility hook findings writes what Show patched kernel functions writes: %d database writes (%s), "
+          "%d comments, %d function comments, no error; %d mutants fail" % (
+              label, len(writes), ", ".join("%d %s" % (count, kind) for kind, count in sorted(kinds.items())),
+              len(entry_comments), len(function_comments), len(ENTRY_MUTANTS)))
 
 # --- volfind.py alone -------------------------------------------------------------------------------------------------
 assert volfind.VOLATILITY == "2.28.2"
@@ -271,6 +367,7 @@ with tempfile.TemporaryDirectory() as work:
         with mutant(attribute, replacement):
             database(blob, path)
             assert check_handmade(findings), "mutant %r passed the hand-made checks" % name
+    same_writes(blob, path, ps.Image(blob), os.path.join(findings, "tracepoints.json"), "hand-made")
     # Nothing read at all (every file skipped): a warning, no list.
     empty = os.path.join(work, "nothing")
     os.mkdir(empty)
@@ -398,4 +495,5 @@ for path in sys.argv[1:]:
             database(blob, path)
             assert check_sample(sample, image, plain), "mutant %r passed the %s checks" % (name, sample)
     print("  %d mutants fail the %s checks" % (len(SAMPLE_MUTANTS), sample))
+    same_writes(blob, path, image, os.path.join(FIXTURES, sample, "tracepoints.json"), "  " + sample)
 print("volfind stub tests OK")

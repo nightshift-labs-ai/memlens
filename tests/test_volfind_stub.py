@@ -340,8 +340,8 @@ for path in sys.argv[1:]:
     plain = show_plain()
     errors = check_sample(sample, image, plain)
     assert not errors, "%s:\n  %s" % (sample, "\n  ".join(errors))
-    table = m._open_list
-    out = "".join(c[1] for c in calls if c[0] == "msg")
+    database(blob, path)
+    result, table, out = add_findings(os.path.join(FIXTURES, sample, "tracepoints.json"))  # again, for its Output lines
     print("%s (%s): %d rows: %d MemLens, %s; MemLens rows with Volatility's ftrace_ops merged in: %s" % (
         sample, path, table.OnGetSize(), EXPECT[sample]["memlens"],
         ", ".join("%d %s" % (count, plugin) for plugin, count in EXPECT[sample].items() if plugin.startswith("linux.")),

@@ -362,5 +362,5 @@ with tempfile.TemporaryDirectory() as t:
     odd_dir = tempfile.mkdtemp(); before_odd = m.elf_files(odd_dir); os.mkdir(os.path.join(odd_dir, "kernel.elf"))
     said = m.remove_unusable(odd_dir, "kernel.elf", before_odd)
     assert said.startswith("MemLens could not remove it (") and said.endswith("); do not open it.") and os.path.isdir(os.path.join(odd_dir, "kernel.elf")), said
-    plugin.term(); assert sum(c[0] == "unreg" for c in calls) == 3
+    plugin.term(); assert sum(c[0] == "unreg" for c in calls) == 4
 print("stub test OK (fake IDA modules)")

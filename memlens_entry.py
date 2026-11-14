@@ -1335,6 +1335,13 @@ def show_patches(volatility=None):
                                               lambda address: patchscan.at(image, address) if image.segment(address) else None)
         ida_kernwin.msg("[MemLens] list: %d MemLens rows, %d Volatility rows; %d Volatility ftrace_ops rows merged into the "
                         "MemLens rows whose hook page loads that ops\n" % (len(findings), len(rows) - len(findings), merged))
+        theirs = rows[len(findings):]
+        outside = sum(1 for row in theirs if not image.segment(row[0]))
+        if outside * 2 > len(theirs):  # another capture's JSON: another boot's KASLR offset (review s200); a few rows
+            # outside (a module MemLens did not export) are findings, not a sign of the wrong folder
+            ida_kernwin.msg("[MemLens] warning: %d of the %d Volatility rows point outside this kernel.elf: these findings "
+                            "may come from another memory image than the one this kernel.elf was exported from\n"
+                            % (outside, len(theirs)))
     global _open_list  # a non-modal chooser must outlive this call
     _open_list = PatchList(rows, sources)
     _open_list.Show()

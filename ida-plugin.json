@@ -3,7 +3,7 @@
   "plugin": {
     "name": "memlens",
     "entryPoint": "memlens_entry.py",
-    "version": "0.3.31",
+    "version": "0.3.32",
     "idaVersions": ">=9.1",
     "description": "Reverse engineer a Linux kernel from a memory image: exports kernel and modules as a symbolled ELF at their live addresses, imports every kernel type from a Volatility ISF, and lists hooked kernel functions and who hooked them (ftrace or module callback, BPF program or kprobe). It scans function entries and syscall-table slots, not tracepoints, notifier chains, the IDT or netfilter, but can add Volatility's own findings for these (vol -r json) to its list; a module hidden from the module list is not exported, so the owner of its hooks shows as an address with no name. IDA layer tested with fake IDA modules only, not yet run in a real IDA.",
     "license": "MIT",
